@@ -1,0 +1,11 @@
+MANIFEST
+IRC.pm
+IRC-OperServ.pm
+Makefile.PL
+install
+t/1.t
+t/2.t
+examples/load-test.pl
+examples/test-ircd.pl
+examples/test-oper.pl
+META.yml                                 Module meta-data (added by MakeMaker)
