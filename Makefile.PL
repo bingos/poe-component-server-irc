@@ -5,9 +5,6 @@ use ExtUtils::MakeMaker;
 
 WriteMakefile(
 			  'NAME'	=> 'POE::Component::Server::IRC',
-			  'PM'      => { 'IRC.pm' => '$(INST_LIBDIR)/IRC.pm',
-					 'IRC-OperServ.pm' => '$(INST_LIBDIR)/IRC/OperServ.pm',
-				       },
 			  'PREREQ_PM' => {
 							  'POE'    => 0.06_07,
 							  'Carp'   => 0,
@@ -17,6 +14,6 @@ WriteMakefile(
 							  'POE::Component::Client::Ident' => 0,
 							  'POE::Component::Client::DNS' => 0,
 							 },
-			  'VERSION_FROM' => 'IRC.pm', # finds $VERSION
+			  'VERSION_FROM' => 'lib/POE/Component/Server/IRC.pm', # finds $VERSION
 			  'dist' => { 'COMPRESS' => 'gzip --best' },
 			 );
