@@ -22,6 +22,7 @@ sub spawn {
   my $self = bless \%parms, $package;
 
   $self->{prefix} = 'ircd_backend_';
+  my $options = delete( $self->{options} );
 
   $self->{session_id} = POE::Session->create(
 	object_states => [
@@ -56,7 +57,7 @@ sub spawn {
 sub session_id {
   my ($self) = shift;
 
-  return $self->{SESSION_ID};
+  return $self->{session_id};
 }
 
 sub yield {
@@ -73,6 +74,8 @@ sub call {
 
 sub _start {
   my ($kernel,$self) = @_[KERNEL,OBJECT];
+
+  $self->{session_id} = $_[SESSION]->ID();
 
   if ( $Self->{alias} ) {
 	$kernel->alias_set( $self->{alias} );
@@ -198,7 +201,7 @@ sub add_listener {
 
 sub _add_listener {
   my ($kernel,$self,$sender) = @_[KERNEL,OBJECT,SENDER];
-  croak "add_listener requires an even number of parameters" if @_[ARG0..$#_] & 1;
+  #croak "_add_listener requires an even number of parameters" if scalar @_[ARG0..$#_] & 1;
   my %parms = @_[ARG0..$#_];
 
   foreach ( keys %parms ) {
@@ -218,7 +221,7 @@ sub _add_listener {
 
   if ( $listener ) {
 	my $port = ( unpack_sockaddr_in( $listener->getsockname ) )[0];
-	$kernel->post( $sender => 'ircd_listener_add' => $port => $listener->ID() );
+	$self->_send_event( $self->{prefix} . 'listener_add' => $port => $listener->ID() );
 	$self->{listeners}->{ $listener->ID() } = $listener;
   }
   undef;
@@ -250,7 +253,7 @@ sub _accept_connection {
         my ($ref) = { wheel => $wheel, peeraddr => $peeraddr, peerport => $peerport, 
 		      sockaddr => $sockaddr, sockport => $sockport, idle => time(), antiflood => 1 };
 	$self->{wheels}->{ $wheel_id } = $ref;
-	$self->_send_event( $self->{prefix} . 'connection' => $wheel_id => $peeraddress => $peerport => $sockaddr => $sockport );
+	$self->_send_event( $self->{prefix} . 'connection' => $wheel_id => $peeraddr => $peerport => $sockaddr => $sockport );
 	if ( $self->{will_do_auth} ) {
 		$kernel->yield( '_auth_client' => $wheel_id );
 	}
