@@ -1,16 +1,19 @@
 package POE::Component::Server::IRC::Backend;
 
 use POE qw(Wheel::SocketFactory Wheel::ReadWrite Filter::Stackable Filter::Line Filter::IRCD);
+use POE::Component::Server::IRC::Plugin qw( :ALL );
 use Socket;
 use Carp;
 use vars qw($VERSION);
 
 $VERSION = '0.6';
 
+use constant PRIORITY => 10;
+
 sub spawn {
   my ($package) = shift;
+  croak "$package requires an even number of parameters" if @_ & 1;
   my %parms = @_;
-  #ToDo: croak on uneven parameter list.
 
   foreach ( keys %parms ) {
 	$parms{ lc($_) } = delete $parms{$_};
@@ -18,14 +21,54 @@ sub spawn {
 
   my $self = bless \%parms, $package;
 
+  $self->{prefix} = 'ircd_backend_';
+
   $self->{session_id} = POE::Session->create(
 	object_states => [
-		$self => [ qw(_start add_listener register shutdown unregister) ],
+		$self => { add_connector => '_add_connector',
+			   add_listener  => '_add_listener', 
+			   send_output   => '_send_output', },
+		$self => [ qw(  __send_event
+				_accept_connection 
+				_accept_failed 
+				_auth_client
+				_auth_done
+				_conn_input 
+				_conn_error 
+				_event_dispatcher
+				_got_hostname_response
+				_got_ip_response
+				_sock_failed
+				_sock_up
+				_start 
+				ident_client_error
+				ident_client_reply
+				register 
+				shutdown 
+				unregister) ],
 	],
 	( ref($options) eq 'HASH' ? ( options => $options ) : () ),
   )->ID();
 
   return $self;
+}
+
+sub session_id {
+  my ($self) = shift;
+
+  return $self->{SESSION_ID};
+}
+
+sub yield {
+  my ($self) = shift;
+
+  $poe_kernel->post( $self->session_id() => @_ );
+}
+
+sub call {
+  my ($self) = shift;
+
+  $poe_kernel->call( $self->session_id() => @_ );
 }
 
 sub _start {
@@ -65,9 +108,27 @@ sub _start {
 ###################
 
 sub register {
+  my ($kernel,$self,$session,$sender) = @_[KERNEL,OBJECT,SESSION,SENDER];
+  $session = $session->ID(); $sender = $sender->ID();
+
+  $self->{sessions}->{ $sender }++;
+  if ( $self->{sessions}->{ $sender } == 1 and $sender ne $session ) {
+	$kernel->refcount_increment( $sender => __PACKAGE__ );
+  }
+  $kernel->post( $sender => $self->{prefix} . 'registered' => $self );
+  undef;
 }
 
 sub unregister {
+  my ($kernel,$self,$session,$sender) = @_[KERNEL,OBJECT,SESSION,SENDER];
+  $session = $session->ID(); $sender = $sender->ID();
+
+  delete ( $self->{sessions}->{ $sender } );
+  if ( $sender ne $session ) {
+	$kernel->refcount_decrement( $sender => __PACKAGE__ );
+  }
+  $kernel->post( $sender => $self->{prefix} . 'unregistered' );
+  undef;
 }
 
 sub shutdown {
@@ -79,11 +140,49 @@ sub shutdown {
 	$kernel->refcount_decrement( $self->{session_id} => __PACKAGE__ );
   }
 
-  #ToDo: Terminate listeners
-  #ToDo: Terminate all connections gracefully
+  $self->{terminating} = 1;
+  # Terminate listeners
+  delete( $self->{listeners} );
+  # Terminate any pending connectors
+  delete( $self->{connectors} );
+  #ToDo: Terminate all connections gracefully and send appropriate disconnect messages
+  #      for servers first then for clients.
+  # Dirty hack
+  delete( $self->{wheels} ); # :)
+  # Unregister all registered sessions.
+  foreach my $session_id ( keys %{ $self->{sessions} } ) {
+	$kernel->refcount_decrement( $session_id => __PACKAGE__ );
+  }
+  #ToDo: unload all loaded plugins.
   
   $kernel->call( $self->{ident_client} => 'shutdown' );
   undef;
+}
+
+sub __send_event {
+	my( $self, $event, @args ) = @_[ OBJECT, ARG0, ARG1 .. $#_ ];
+
+	# Actually send the event...
+	$self->_send_event( $event, @args );
+	return 1;
+}
+
+sub _send_event {
+  my ($self) = shift;
+  my ($event, @args) = @_;
+  my $kernel = $POE::Kernel::poe_kernel;
+  my ($session) = $kernel->get_active_session();
+  my %sessions;
+
+  # Let the plugin system process this
+  if ( $self->_plugin_process( 'SERVER', $event, \( @args ) ) == PCSI_EAT_ALL ) {
+  	return 1;
+  }
+
+  foreach my $session_id ( keys % { $self->{sessions} } ) {
+	$kernel->post( $session_id => $event, @args );
+  }
+  return 1;
 }
 
 ############################
@@ -91,10 +190,761 @@ sub shutdown {
 ############################
 
 sub add_listener {
+  my ($self) = shift;
+  croak "add_listener requires an even number of parameters" if @_ & 1;
+
+  $self->yield( 'add_listener' => @_ );
+}
+
+sub _add_listener {
+  my ($kernel,$self,$sender) = @_[KERNEL,OBJECT,SENDER];
+  croak "add_listener requires an even number of parameters" if @_[ARG0..$#_] & 1;
+  my %parms = @_[ARG0..$#_];
+
+  foreach ( keys %parms ) {
+	$parms{ lc($_) } = delete $parms{$_};
+  }
+
+  my $bindport = $parms{port} || 0;
+
+  my ($listener) = POE::Wheel::SocketFactory->new(
+	BindPort => $bindport,
+	( $parms{bindaddr} ? ( BindAddr => $parms{bindaddr} ) : () ),
+	Reuse => 'on',
+	( $parms{listenqueue} ? ( ListenQueue => $parms{listenqueue} ) : () ),
+	SuccessEvent => '_accept_connection',
+	FailureEvent => '_accept_failed',
+  );
+
+  if ( $listener ) {
+	my $port = ( unpack_sockaddr_in( $listener->getsockname ) )[0];
+	$kernel->post( $sender => 'ircd_listener_add' => $port => $listener->ID() );
+	$self->{listeners}->{ $listener->ID() } = $listener;
+  }
+  undef;
 }
 
 sub _accept_failed {
+  my ($kernel,$self,$listener_id) = @_[KERNEL,OBJECT,ARG3];
+
+  delete ( $self->{listeners}->{ $listener_id } );
+  undef;
 }
 
 sub _accept_connection {
+  my ($kernel,$self,$socket,$peeraddr,$peerport,$listener_id) = @_[KERNEL,OBJECT,ARG0..ARG3];
+  $peeraddr = inet_ntoa( $peeraddr );
+
+  my ($wheel) = POE::Wheel::ReadWrite->new(
+	Handle => $socket,
+	Filter => $self->{filter},
+	InputEvent => '_conn_input',
+	ErrorEvent => '_conn_error',
+	FlushedEvent => '_conn_flushed',
+  );
+
+  if ( $wheel ) {
+	my $wheel_id = $wheel->ID();
+	my $sockaddr = inet_ntoa( ( unpack_sockaddr_in ( getsockname $socket ) )[1] );
+	my $sockport = ( unpack_sockaddr_in ( getsockname $socket ) )[0];
+        my ($ref) = { wheel => $wheel, peeraddr => $peeraddr, peerport => $peerport, 
+		      sockaddr => $sockaddr, sockport => $sockport, idle => time(), antiflood => 1 };
+	$self->{wheels}->{ $wheel_id } = $ref;
+	$self->_send_event( $self->{prefix} . 'connection' => $wheel_id => $peeraddress => $peerport => $sockaddr => $sockport );
+	if ( $self->{will_do_auth} ) {
+		$kernel->yield( '_auth_client' => $wheel_id );
+	}
+  }
+  undef;
 }
+
+#############################
+# Connector related methods #
+#############################
+
+sub add_connector {
+  my ($self) = shift;
+  croak "add_connector requires an even number of parameters" if @_ & 1;
+
+  $self->yield( 'add_connector' => @_ );
+}
+
+sub _add_connector {
+  my ($kernel,$self,$sender) = @_[KERNEL,OBJECT,SENDER];
+  croak "add_connector requires an even number of parameters" if @_[ARG0..$#_] & 1;
+  my %parms = @_[ARG0..$#_];
+
+  foreach ( keys %parms ) {
+	$parms{ lc($_) } = delete $parms{$_};
+  }
+  
+  my $remoteaddress = $parms{remoteaddress};
+  my $remoteport = $params{remoteport};
+  
+  unless( $remoteaddress and $remoteport ) {
+	return;
+  }
+
+  my $wheel = POE::Wheel::SocketFactory->new(
+	SocketDomain   => AF_INET,
+	SocketType     => SOCK_STREAM,
+	SocketProtocol => 'tcp',
+	RemoteAddress => $remoteaddress,
+	RemotePort    => $remoteport,
+	SuccessEvent  => '_sock_up',
+	FailureEvent  => '_sock_failed',
+	( $parms{bindaddress} ? ( BindAddress => $parms{bindaddress} ) : () ),
+  );
+
+  if ( $wheel ) {
+	$parms{wheel} = $wheel;
+	$self->{connectors}->{ $wheel->ID() } = \%parms;
+  }
+  undef;
+}
+
+sub _sock_failed {
+  my ($kernel,$self,$op,$errno,$errstr,$connector_id) = @_[KERNEL,OBJECT,ARG0..ARG3];
+
+  my $ref = delete( $self->{connectors}->{ $connector_id } );
+  delete( $ref->{wheel} );
+  $self->_send_event( $self->{prefix} . 'socketerr' => $ref );
+  undef;
+}
+
+sub _sock_up {
+  my ($kernel,$self,$socket,$peeraddr,$peerport,$connector_id) = @_[KERNEL,OBJECT,ARG0..ARG3];
+  $peeraddr = inet_ntoa( $peeraddr );
+
+  delete ( $self->{connectors}->{ $connector_id } );
+
+  my ($wheel) = POE::Wheel::ReadWrite->new(
+	Handle => $socket,
+	Filter => $self->{filter},
+	InputEvent => '_conn_input',
+	ErrorEvent => '_conn_error',
+	FlushedEvent => '_conn_flushed',
+  );
+
+  if ( $wheel ) {
+	my $wheel_id = $wheel->ID();
+	my $sockaddr = inet_ntoa( ( unpack_sockaddr_in ( getsockname $socket ) )[1] );
+	my $sockport = ( unpack_sockaddr_in ( getsockname $socket ) )[0];
+        my ($ref) = { wheel => $wheel, peeraddr => $peeraddr, peerport => $peerport, 
+		      sockaddr => $sockaddr, sockport => $sockport, idle => time(), antiflood => 0 };
+	$self->{wheels}->{ $wheel_id } = $ref;
+	$self->_send_event( $self->{prefix} . 'connected' => $wheel_id => $peeraddress => $peerport => $sockaddr => $sockport );
+  }
+  undef;
+}
+
+##############################
+# Generic Connection Handler #
+##############################
+
+sub _anti_flood {
+  my ($self,$wheel_id,$input) = splice @_, 0, 3;
+  my $current_time = time();
+
+  unless ( $wheel_id and $self->_wheel_exists( $wheel_id ) and $input ) {
+	return undef;
+  }
+  SWITCH: { 
+     if ( $self->{wheels}->{ $wheel_id }->{flooded} ) {
+	last SWITCH;
+     }
+     if ( ( not $self->{wheels}->{ $wheel_id }->{timer} ) or $self->{wheels}->{ $wheel_id }->{timer} < $current_time ) {
+	$self->{wheels}->{ $wheel_id }->{timer} = $current_time;
+    	my $event = $self->{prefix} . lc ( $input->{command} );
+    	$self->_send_event( $event => $wheel_id => $input );
+	last SWITCH;
+     }
+     if ( $self->{wheels}->{ $wheel_id }->{timer} <= ( $current_time + 10 ) ) {
+	$self->{wheels}->{ $wheel_id }->{timer} += 1;
+	push( @{ $self->{wheels}->{ $wheel_id }->{msq} }, $input );
+	push( @{ $self->{wheels}->{ $wheel_id }->{alarm_ids} }, $poe_kernel->alarm_set( '_event_dispatcher' => $self->{wheels}->{ $wheel_id }->{timer} => $wheel_id ) );
+	last SWITCH;
+     }
+     $self->{wheels}->{ $wheel_id }->{flooded} = 1;
+     $self->_send_event( $self->{prefix} . 'connection_flood' => $wheel_id );
+  }
+  return 1;
+}
+
+sub _conn_input {
+  my ($kernel,$self,$input,$wheel_id) = @_[KERNEL,OBJECT,ARG0,ARG1];
+  my $conn = $self->{wheels}->{ $wheel_id };
+
+  $conn->{seen} = time();
+
+  #ToDo: Antiflood code
+  if ( $self->antiflood( $wheel_id ) ) {
+	$self->_anti_flood( $wheel_id => $input );
+  } else {
+    my $event = $self->{prefix} . lc ( $input->{command} );
+    $self->_send_event( $event => $wheel_id => $input );
+  }
+  undef;
+}
+
+sub _conn_error {
+  my ($kernel,$self,$errstr,$wheel_id) = @_[KERNEL,OBJECT,ARG2,ARG3];
+
+  $self->_send_event( $self->{prefix} . 'disconnected' => $wheel_id => $errstr );
+  $self->_disconnected( $wheel_id );
+  undef;
+}
+
+sub _event_dispatcher {
+  my ($kernel,$self,$wheel_id) = @_[KERNEL,OBJECT,ARG0];
+
+  unless ( $self->_wheel_exists( $wheel_id ) and ( not $self->{wheels}->{ $wheel_id }->{flooded} ) ) {
+	return;
+  }
+
+  shift ( @{ $self->{wheels}->{ $wheel_id }->{alarm_ids} } );
+  my $input = shift ( @{ $self->{wheels}->{ $wheel_id }->{msq} } );
+  if ( $input ) {
+    my $event = $self->{prefix} . lc ( $input->{command} );
+    $self->_send_event( $event => $wheel_id => $input );
+  }
+  undef;
+}
+
+sub send_output {
+  my ($self) = shift;
+  $self->call( 'send_output' => @_ );
+}
+
+sub _send_output {
+  my ($kernel,$self,$output) = @_[KERNEL,OBJECT,ARG0];
+  my @wheels = @_[ARG1..$#_];
+
+  foreach my $wheel_id ( @wheels ) {
+	next unless ( $self->_wheel_exists( $wheel_id ) );
+	$self->{wheel}->{ $wheel_id }->{wheel}->put( $output ) if ( $output and ref( $output ) eq 'HASH' );
+  }
+  undef;
+}
+
+##########################
+# Auth subsystem methods #
+##########################
+
+sub _auth_client {
+  my ($kernel,$self,$wheel_id) = @_[KERNEL,OBJECT,ARG0];
+
+  unless ( $self->_wheel_exists( $wheel_id ) ) {
+	return;
+  }
+
+  my ($peeraddr,$peerport,$sockaddr,$sockport) = $self->connection_info( $wheel_id );
+
+  $self->send_output( $wheel_id => { command => 'NOTICE', params => [ 'AUTH', '*** Checking Ident' ] } );
+  $self->send_output( $wheel_id => { command => 'NOTICE', params => [ 'AUTH', '*** Checking Hostname' ] } );
+
+  if ( $peeraddr !~ /^127\./ ) {
+	my ($response) = $self->{resolver}->resolve( event => '_got_hostname_response', host => $peeraddr,
+						     context => { wheel => $wheel_id, peeraddress => $peeraddr },
+						     type => 'PTR' );
+	if ( $response ) {
+		$kernel->yield( '_got_hostname_response' => $response );
+	}
+  } else {
+  	$self->yield( 'send_output' => $wheel_id => { command => 'NOTICE', params => [ 'AUTH', '*** Found your hostname' ] } );
+	$self->{wheels}->{ $wheel_id }->{auth}->{hostname} = 'localhost';
+	$self->yield( '_auth_done' => $wheel_id );
+  }
+  $kernel->post( $self->{ident_client} => query => PeerAddr => $peeraddr, PeerPort => $peerport, SockAddr => $sockaddr,
+				                   SockPort => $sockport, BuggyIdentd => 1, TimeOut => 10,
+						   Reference => $wheel_id );
+  undef;
+}
+
+sub _auth_done {
+  my ($kernel,$self,$wheel_id) = @_[KERNEL,OBJECT,ARG0];
+
+  unless ( $self->_wheel_exists( $wheel_id ) ) {
+	return;
+  }
+  my ($auth) = $self->{wheels}->{ $wheel_id }->{auth};
+
+  if ( $auth ) {
+	if ( defined ( $auth->{ident} ) and defined ( $auth->{hostname} ) ) {
+		$self->_send_event( $self->{prefix} . 'auth_done' => $wheel_id => { ident    => $auth->{ident},
+										    hostname => $auth->{hostname} } )
+			unless ( $self->{wheels}->{ $wheel_id }->{auth}->{done} );
+		$self->{wheels}->{ $wheel_id }->{auth}->{done}++;
+	}
+  }
+  undef;
+}
+
+sub _got_hostname_response {
+    my ($kernel,$self) = @_[KERNEL,OBJECT];
+    my $response = $_[ARG0];
+    my ($wheel_id) = $response->{context}->{wheel};
+
+    SWITCH: {
+    unless ( $self->_wheel_exists( $wheel_id ) ) {
+	last SWITCH;
+    }
+    if ( defined ( $response->{response} ) ) {
+      my @answers = $response->{response}->answer();
+
+      if ( scalar ( @answers ) == 0 ) {
+	# Send NOTICE to client of failure.
+	$self->send_output( $wheel_id, { command => 'NOTICE', params => [ 'AUTH', "*** Couldn\'t look up your hostname" ] } ) unless ( defined ( $self->{wheels}->{ $wheel_id }->{auth}->{hostname} ) );
+	$self->{wheels}->{ $wheel_id }->{auth}->{hostname} = '';
+	$self->yield( '_auth_done' => $wheel_id );
+      }
+
+      foreach my $answer (@answers) {
+	my ($context) = $response->{context};
+	$context->{hostname} = $answer->rdatastr();
+	if ( $context->{hostname} =~ /\.$/ ) {
+	   chop($context->{hostname});
+	}
+	my ($query) = $self->{resolver}->resolve( event => 'got_ip_response', host => $answer->rdatastr(), context => $context, type => 'A' );
+	if ( defined ( $query ) ) {
+	   $self->yield( '_got_ip_response' => $query );
+	}
+      }
+    } else {
+	# Send NOTICE to client of failure.
+	$self->send_output( $wheel_id, { command => 'NOTICE', params => [ 'AUTH', "*** Couldn\'t look up your hostname" ] } ) unless ( defined ( $self->{wheels}->{ $wheel_id }->{auth}->{hostname} ) );
+	$self->{wheels}->{ $wheel_id }->{auth}->{hostname} = '';
+	$self->yield( '_auth_done' => $wheel_id );
+    }
+    }
+}
+
+sub _got_ip_response {
+    my ($kernel,$self) = @_[KERNEL,OBJECT];
+    my $response = $_[ARG0];
+    my ($wheel_id) = $response->{context}->{wheel};
+
+    SWITCH: {
+    unless ( $self->_wheel_exists( $wheel_id ) ) {
+	last SWITCH;
+    }
+    if ( defined ( $response->{response} ) ) {
+      my @answers = $response->{response}->answer();
+      my ($peeraddress) = $response->{context}->{peeraddr};
+      my ($hostname) = $response->{context}->{hostname};
+
+      if ( scalar ( @answers ) == 0 ) {
+	# Send NOTICE to client of failure.
+	$self->send_output( $wheel_id, { command => 'NOTICE', params => [ 'AUTH', "*** Couldn\'t look up your hostname" ] } ) unless ( defined ( $self->{wheels}->{ $wheel_id }->{auth}->{hostname} ) );
+	$self->{wheels}->{ $wheel_id }->{auth}->{hostname} = '';
+	$self->yield( '_auth_done' => $wheel_id );
+      }
+
+      foreach my $answer (@answers) {
+	if ( $answer->rdatastr() eq $peeraddress and ( not defined ( $self->{wheels}->{ $wheel_id }->{auth}->{hostname} ) ) ) {
+	   $self->send_output( $wheel_id, { command => 'NOTICE', params => [ 'AUTH', '*** Found your hostname' ] } ) unless ( $self->{wheels}->{ $wheel_id }->{auth}->{hostname} );
+	   $self->{wheels}->{ $wheel_id }->{auth}->{hostname} = $hostname;
+	   $self->yield( '_auth_done' => $wheel_id );
+	} else {
+	   $self->send_output( $wheel_id, { command => 'NOTICE', params => [ 'AUTH', '*** Your forward and reverse DNS do not match' ] } ) unless ( $self->{wheels}->{ $wheel_id }->{auth}->{hostname} );
+	   $self->{wheels}->{ $wheel_id }->{auth}->{hostname} = '';
+	   $self->yield( '_auth_done' => $wheel_id );
+	}
+      }
+    } else {
+	# Send NOTICE to client of failure.
+	$self->send_output( $wheel_id, { command => 'NOTICE', params => [ 'AUTH', "*** Couldn\'t look up your hostname" ] } ) unless ( $self->{wheels}->{ $wheel_id }->{auth}->{hostname} );
+	$self->{wheels}->{ $wheel_id }->{auth}->{hostname} = '';
+	$self->yield( '_auth_done' => $wheel_id );
+    }
+    }
+}
+
+sub ident_client_reply {
+  my ($kernel,$self,$ref,$opsys,$other) = @_[KERNEL,OBJECT,ARG0,ARG1,ARG2];
+  my ($wheel_id) = $ref->{Reference};
+
+  if ( $self->_wheel_exists( $wheel_id ) ) {
+      my ($ident) = '';
+      if ( uc ( $opsys ) ne 'OTHER' ) {
+	$ident = $other;
+      }
+      $self->send_output( $wheel_id, { command => 'NOTICE', params => [ 'AUTH', "*** Got Ident response" ] } );
+      $self->{wheels}->{ $wheel_id }->{auth}->{ident} = $ident;
+      $self->yield( '_auth_done' => $wheel_id );
+  }
+  undef;
+}
+
+sub ident_client_error {
+  my ($kernel,$self,$ref,$error) = @_[KERNEL,OBJECT,ARG0,ARG1];
+  my ($wheel_id) = $ref->{Reference};
+
+  if ( $self->_wheel_exists( $wheel_id ) ) {
+      $self->send_output( $wheel_id, { command => 'NOTICE', params => [ 'AUTH', "*** No Ident response" ] } );
+      $self->{wheels}->{ $wheel_id }->{auth}->{ident} = '';
+      $self->yield( '_auth_done' => $wheel_id );
+  }
+}
+
+
+
+######################
+# Connection methods #
+######################
+
+sub antiflood {
+  my ($self,$wheel_id,$value) = splice @_, 0, 3;
+  unless ( $self->_wheel_exists( $wheel_id ) ) {
+	return;
+  }
+  unless ( defined ( $value ) ) {
+	return $self->{wheels}->{ $wheel_id }->{antiflood};
+  }
+  $self->{wheels}->{ $wheel_id }->{antiflood} = $value;
+}
+
+sub disconnect {
+  my ($self,$wheel_id) = @_;
+
+  unless ( $wheel_id and $self->_wheel_exists( $wheel_id ) ) {
+	return;
+  }
+  $self->{wheels}->{ $wheel_id }->{disconnecting} = 1;
+}
+
+sub connection_time {
+  my ($self,$wheel_id) = splice @_, 0, 2;
+  unless ( $self->_wheel_exists( $wheel_id ) ) {
+	return;
+  }
+  return $self->{wheels}->{ $wheel_id }->{idle};
+}
+
+sub connection_info {
+  my ($self,$wheel_id) = splice @_, 0, 2;
+  my @result;
+  unless ( $self->_wheel_exists( $wheel_id ) ) {
+	return;
+  }
+  foreach my $key ( qw(peeraddr peerport sockaddr sockport) ) {
+	push( @result, $self->{wheels}->{ $wheel_id }->{ $key } );
+  }
+  return @result;
+}
+
+sub _disconnected {
+  my ($self,$wheel_id) = @_;
+
+  unless ( $wheel_id ) {
+	return 0;
+  }
+  delete ( $self->{wheels}->{ $wheel_id } );
+  return 1;
+}
+
+sub _wheel_exists {
+  my ($self,$wheel_id) = @_;
+
+  unless ( $wheel_id and defined ( $self->{wheels}->{ $wheel_id } ) ) {
+	return 0;
+  }
+  return 1;
+}
+
+##################
+# Plugin methods #
+##################
+
+# Adds a new plugin object
+sub plugin_add {
+	my( $self, $name, $plugin ) = @_;
+
+	# Sanity check
+	if ( ! defined $name or ! defined $plugin ) {
+		warn 'Please supply a name and the plugin object to be added!';
+		return undef;
+	}
+
+	# Tell the plugin to register itself
+	my ($return);
+
+	eval {
+	   $return = $plugin->PCSI_register( $self );
+	};
+
+	if ( $return ) {
+		$self->{PLUGINS}->{OBJECTS}->{ $name } = $plugin;
+
+		# Okay, send an event to let others know this plugin is loaded
+		$self->yield( '__send_event', $self->{prefix} . 'plugin_add', $name, $plugin );
+
+		return 1;
+	} else {
+		return undef;
+	}
+}
+
+# Removes a plugin object
+sub plugin_del {
+	my( $self, $name ) = @_;
+
+	# Sanity check
+	if ( ! defined $name ) {
+		warn 'Please supply a name/object for the plugin to be removed!';
+		return undef;
+	}
+
+	# Is it an object or a name?
+	my $plugin = undef;
+	if ( ! ref( $name ) ) {
+		# Check if it is loaded
+		if ( exists $self->{PLUGINS}->{OBJECTS}->{ $name } ) {
+			$plugin = delete $self->{PLUGINS}->{OBJECTS}->{ $name };
+		} else {
+			return undef;
+		}
+	} else {
+		# It's an object...
+		foreach my $key ( keys %{ $self->{PLUGINS}->{OBJECTS} } ) {
+			# Check if it's the same object
+			if ( ref( $self->{PLUGINS}->{OBJECTS}->{ $key } ) eq ref( $name ) ) {
+				$plugin = $name;
+				$name = $key;
+			}
+		}
+	}
+
+	# Did we get it?
+	if ( defined $plugin ) {
+		# Automatically remove all registrations for this plugin
+		foreach my $type ( qw( SERVER USER ) ) {
+			foreach my $event ( keys %{ $self->{PLUGINS}->{ $type } } ) {
+				$self->_plugin_unregister_do( $type, $event, $plugin );
+			}
+		}
+
+		# Tell the plugin to unregister
+		eval {
+			$plugin->PCI_unregister( $self );
+		};
+
+		# Okay, send an event to let others know this plugin is deleted
+		$self->yield( '__send_event', $self->{prefix} . 'plugin_del', $name, $plugin );
+
+		# Success!
+		return $plugin;
+	} else {
+		return undef;
+	}
+}
+
+# Gets the plugin object
+sub plugin_get {
+	my( $self, $name ) = @_;
+
+	# Sanity check
+	if ( ! defined $name ) {
+		warn 'Please supply a name for the plugin object to be retrieved!';
+		return undef;
+	}
+
+	# Check if it is loaded
+	if ( exists $self->{PLUGINS}->{OBJECTS}->{ $name } ) {
+		return $self->{PLUGINS}->{OBJECTS}->{ $name };
+	} else {
+		return undef;
+	}
+}
+
+# Lists loaded plugins
+sub plugin_list {
+	my ($self) = shift;
+	my $return = { };
+
+	foreach my $name ( keys %{ $self->{PLUGINS}->{OBJECTS} } ) {
+		$return->{ $name } = $self->{PLUGINS}->{OBJECTS}->{ $name };
+	}
+	return $return;
+}
+
+# Lets a plugin register for certain events
+sub plugin_register {
+	my( $self, $plugin, $type, @events ) = @_;
+
+	# Sanity checks
+	if ( ! defined $type or ! ( $type eq 'SERVER' or $type eq 'USER' ) ) {
+		warn 'Type should be SERVER or USER!';
+		return undef;
+	}
+	if ( ! defined $plugin ) {
+		warn 'Please supply the plugin object to register!';
+		return undef;
+	}
+	if ( ! @events ) {
+		warn 'Please supply at least one event name to register!';
+		return undef;
+	}
+
+	# Okay, do the actual work here!
+	foreach my $ev ( @events ) {
+		# Is it an arrayref?
+		if ( ref( $ev ) and ref( $ev ) eq 'ARRAY' ) {
+			# Loop over it!
+			foreach my $evnt ( @$ev ) {
+				# Make sure it is lowercased
+				$evnt = lc( $evnt );
+
+				# Push it to the end of the queue
+				push( @{ $self->{PLUGINS}->{ $type }->{ $evnt } }, $plugin );
+			}
+		} else {
+			# Make sure it is lowercased
+			$ev = lc( $ev );
+
+			# Push it to the end of the queue
+			push( @{ $self->{PLUGINS}->{ $type }->{ $ev } }, $plugin );
+		}
+	}
+
+	# All done!
+	return 1;
+}
+
+# Lets a plugin unregister events
+sub plugin_unregister {
+	my( $self, $plugin, $type, @events ) = @_;
+
+	# Sanity checks
+	if ( ! defined $type or ! ( $type eq 'SERVER' or $type eq 'USER' ) ) {
+		warn 'Type should be SERVER or USER!';
+		return undef;
+	}
+	if ( ! defined $plugin ) {
+		warn 'Please supply the plugin object to register!';
+		return undef;
+	}
+	if ( ! @events ) {
+		warn 'Please supply at least one event name to unregister!';
+		return undef;
+	}
+
+	# Okay, do the actual work here!
+	foreach my $ev ( @events ) {
+		# Is it an arrayref?
+		if ( ref( $ev ) and ref( $ev ) eq 'ARRAY' ) {
+			# Loop over it!
+			foreach my $evnt ( @$ev ) {
+				# Make sure it is lowercased
+				$evnt = lc( $evnt );
+
+				# Check if the event even exists
+				if ( ! exists $self->{PLUGINS}->{ $type }->{ $evnt } ) {
+					warn "The event '$evnt' does not exist!";
+					next;
+				}
+
+				$self->_plugin_unregister_do( $type, $evnt, $plugin );
+			}
+		} else {
+			# Make sure it is lowercased
+			$ev = lc( $ev );
+
+			# Check if the event even exists
+			if ( ! exists $self->{PLUGINS}->{ $type }->{ $ev } ) {
+				warn "The event '$ev' does not exist!";
+				next;
+			}
+
+			$self->_plugin_unregister_do( $type, $ev, $plugin );
+		}
+	}
+
+	# All done!
+	return 1;
+}
+
+# Helper routine to remove plugins
+sub _plugin_unregister_do {
+	my( $self, $type, $event, $plugin ) = @_;
+
+	# Check if the plugin is there
+	# Yes, this sucks but it doesn't happen often...
+	my $counter = 0;
+
+	# Loop over the array
+	while ( $counter < scalar( @{ $self->{PLUGINS}->{ $type }->{ $event } } ) ) {
+		# See if it is a match
+		if ( ref( $self->{PLUGINS}->{ $type }->{ $event }->[$counter] ) eq ref( $plugin ) ) {
+			# Splice it!
+			splice( @{ $self->{PLUGINS}->{ $type }->{ $event } }, $counter, 1 );
+			last;
+		}
+
+		# Increment the counter
+		$counter++;
+	}
+
+	# All done!
+	return 1;
+}
+
+# Process an input event for plugins
+sub _plugin_process {
+	my( $self, $type, $event, @args ) = @_;
+
+	# Make sure event is lowercased
+	$event = lc( $event );
+
+	# And remove the irc_ prefix
+	my ($prefix) = $self->{prefix};
+	if ( $event =~ /^\Q$prefix\E(.*)$/ ) {
+		$event = $1;
+	}
+
+	# Check if any plugins are interested in this event
+	if ( not ( exists $self->{PLUGINS}->{ $type }->{ $event } or exists $self->{PLUGINS}->{ $type }->{ 'all' } ) ) {
+		return PCI_EAT_NONE;
+	}
+
+	# Determine the return value
+	my $return = PCI_EAT_NONE;
+
+	# Which type are we doing?
+	my $sub;
+	if ( $type eq 'SERVER' ) {
+		$sub = 'S_' . $event;
+	} else {
+		$sub = 'U_' . $event;
+	}
+
+	# Okay, have the plugins process this event!
+	foreach my $plugin ( @{ $self->{PLUGINS}->{ $type }->{ $event } }, @{ $self->{PLUGINS}->{ $type }->{ 'all' } } ) {
+		# What does the plugin return?
+		my ($ret) = PCSI_EAT_NONE;
+		# Added eval cos we can't trust plugin authors to play by the rules *sigh*
+		eval {
+			$ret = $plugin->$sub( $self, @args );
+		};
+
+		if ( $@ ) {
+		   # Okay, no method of that name fallback on _default() method.
+		   eval {
+			$ret = $plugin->_default( $self, $sub, @args );
+		   };
+		}
+
+		if ( $ret == PCSI_EAT_PLUGIN ) {
+			return $return;
+		} elsif ( $ret == PCSI_EAT_CLIENT ) {
+			$return = PCSI_EAT_ALL;
+		} elsif ( $ret == PCSI_EAT_ALL ) {
+			return PCSI_EAT_ALL;
+		}
+	}
+
+	# All done!
+	return $return;
+}
+
+1;

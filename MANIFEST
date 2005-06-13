@@ -5,6 +5,7 @@ t/1.t
 t/2.t
 lib/POE/Component/Server/IRC.pm
 lib/POE/Component/Server/IRC/OperServ.pm
+lib/POE/Component/Server/IRC/Backend.pm
 examples/load-test.pl
 examples/test-ircd.pl
 examples/test-oper.pl
