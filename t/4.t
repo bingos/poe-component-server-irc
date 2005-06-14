@@ -16,7 +16,7 @@ BEGIN { use_ok('POE::Component::Server::IRC::Test::Plugin') };
 
 use POE;
 
-my ($self) = POE::Component::Server::IRC::Backend->spawn( );
+my ($self) = POE::Component::Server::IRC::Backend->create( );
 
 isa_ok ( $self, 'POE::Component::Server::IRC::Backend' );
 

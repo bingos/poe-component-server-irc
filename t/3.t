@@ -5,7 +5,7 @@
 
 # change 'tests => 1' to 'tests => last_test_to_print';
 
-use Test::More tests => 9;
+use Test::More tests => 10;
 BEGIN { use_ok('POE::Component::Server::IRC::Backend') };
 BEGIN { use_ok('POE::Component::IRC') };
 BEGIN { use_ok('POE') };
@@ -15,7 +15,7 @@ BEGIN { use_ok('POE') };
 # Insert your test code below, the Test::More module is use()ed here so read
 # its man page ( perldoc Test::More ) for help writing this test script.
 
-my $pocosi = POE::Component::Server::IRC::Backend->spawn( options => { trace => 0 } );
+my $pocosi = POE::Component::Server::IRC::Backend->create( options => { trace => 0 } );
 my $pocoirc = POE::Component::IRC->spawn();
 
 if ( $pocosi and $pocoirc ) {
@@ -28,7 +28,8 @@ if ( $pocosi and $pocoirc ) {
 					ircd_backend_nick 
 					ircd_backend_user 
 					ircd_backend_registered
-					ircd_backend_listener_add) ],
+					ircd_backend_listener_add
+					ircd_backend_listener_del) ],
 		],
 		options => { trace => 0 },
 		heap => { irc => $pocoirc, ircd => $pocosi },
@@ -68,7 +69,15 @@ sub ircd_backend_listener_add {
   my ($heap,$port) = @_[HEAP,ARG0];
 
   ok( "Started a listener on $port" );
+  $heap->{port} = $port;
   $heap->{irc}->yield( connect => { server => 'localhost', port => $port, nick => __PACKAGE__ } );
+}
+
+sub ircd_backend_listener_del {
+  my ($heap,$port) = @_[HEAP,ARG0];
+
+  ok( "Stopped listener on $port" );
+  $_[KERNEL]->yield( '_shutdown' );
 }
 
 sub ircd_backend_connection {
@@ -79,7 +88,8 @@ sub ircd_backend_nick {
   ok( 'ircd_backend_nick' );
   $_[HEAP]->{result}++;
   if ( $_[HEAP]->{result} >= 2 ) {
-	$_[KERNEL]->yield( '_shutdown' );
+	#$_[KERNEL]->yield( '_shutdown' );
+	$_[HEAP]->{ircd}->del_listener( port => $_[HEAP]->{port} );
   }
 }
 
@@ -87,7 +97,8 @@ sub ircd_backend_user {
   ok( 'ircd_backend_user' );
   $_[HEAP]->{result}++;
   if ( $_[HEAP]->{result} >= 2 ) {
-	$_[KERNEL]->yield( '_shutdown' );
+	#$_[KERNEL]->yield( '_shutdown' );
+	$_[HEAP]->{ircd}->del_listener( port => $_[HEAP]->{port} );
   }
 }
 

@@ -6,7 +6,6 @@ t/2.t
 t/3.t
 t/4.t
 lib/POE/Component/Server/IRC.pm
-lib/POE/Component/Server/IRC/OperServ.pm
 lib/POE/Component/Server/IRC/Backend.pm
 lib/POE/Component/Server/IRC/Plugin.pm
 lib/POE/Component/Server/IRC/Test/Plugin.pm

@@ -24,103 +24,37 @@ sub PCSI_EAT_ALL	() { 4 }
 __END__
 =head1 NAME
 
-POE::Component::IRC::Plugin - Provides plugin documentation for PoCo-IRC
+POE::Component::Server::IRC::Plugin - Provides plugin documentation for POE::Component::Server::IRC.
 
 =head1 ABSTRACT
 
-	Provides plugin documentation for PoCo-IRC
-
-=head1 CHANGES
-
-=head2 0.06
-
-	Updated _plugin_process so that it runs plugin method calls in an 'eval'. Rogue plugins shouldn't be
-	able to crash the component now.
-
-	If a plugin doesn't have a event handler method defined now, the component will try to call a 
-	_default() handler instead.
-
-=head2 0.05
-
-	Realized that there would be collision between USER/SERVER methods, so made it distinct by using S_* and U_*
-	Clarified the documentation to stress that 'irc_' is not required for event names
-	Changed the description of the 2 new events to stress that they are sent *after* the action is done
-
-=head2 0.04
-
-	Changed _plugin_register/unregister to non-private methods
-
-=head2 0.03
-
-	As per perigrin's suggestion, added 2 new event types to monitor plugin add/del
-	Updated the name from PoCo-IRC-Plugins to PoCo-IRC-Plugin
-	Updated return value ( PCI_EAT_PLUGINS to PCI_EAT_PLUGIN )
-	Updated plugin_del to also accept the plugin object instead of a name
-
-=head2 0.02
-
-	Modified plugin_del() so it returns the plugin object
-
-=head2 0.01
-
-	Initial release
-
-=head1 Why do we need this?
-
-Certain individuals in #PoE on MAGNet said we didn't need to bloat the PoCo-IRC code...
-
-Me and BinGOs, the current maintainer of the module, have heartily agreed that this is a wise choice.
-
-One example:
-
-	Look at the magnificent new feature in 3.4 -> irc_whois replies! Yes, that is a feature I bet
-	most of us have been coveting for a while, as it definitely makes our life easier. It was
-	implemented in 30 minutes or so after a request, the maintainer said. I replied by saying that
-	it's a wonderful idea, but what would happen if somebody else asked for a new feature? Maybe that
-	feature is something we all would love to have, so should it be put in the core? Plugins allow the
-	core to stay lean and mean, while delegating additional functionality to outside modules. BinGOs' work
-	with making PoCo-IRC inheritable is wonderful, but what if there were 2 modules which have features
-	that you would love to have in your bot? Inherit from both? Imagine the mess...
-
-	Here comes plugins to the rescue :)
-
-You could say Bot::Pluggable does the job, and so on, but if this feature were put into the core, it would
-allow PoCo-IRC to be extended beyond our wildest dreams, and allow the code to be shared amongst us all, giving
-us superior bug smashing abilities.
-
-Yes, there are changes that most of us will moan when we go update our bots to use the new $irc object system,
-but what if we also used this opportunity to improve PoCo-IRC even more and give it a lifespan until Perl8 or
-whatever comes along? :)
+	Provides plugin documentation for POE::Component::Server::IRC
 
 =head1 DESCRIPTION
 
 This is the document coders/users should refer to when using/developing plugins for
-POE::Component::IRC.
+POE::Component::Server::IRC.
 
-The plugin system works by letting coders hook into the two aspects of PoCo-IRC:
+The plugin system works by letting coders hook into the two aspects of POE::Component::Server::IRC::Backend:
 
 	Data received from the server
-	User commands about to be sent to the server
-
-The goal of this system is to make PoCo-IRC so easy to extend, enabling it to Take Over
-The World! *Just Kidding*
 
 The general architecture of using the plugins should be:
 
 	# Import the stuff...
 	use POE;
-	use POE::Component::IRC;
-	use POE::Component::IRC::Plugin::ExamplePlugin;
+	use POE::Component::Server::IRC::Backend;
+	use POE::Component::Server::IRC::Plugin::ExamplePlugin;
 
 	# Create our session here
 	POE::Session->create( ... );
 
 	# Create the IRC session here
-	my $irc = POE::Component::IRC->spawn() or die 'Nooo!';
+	my $irc = POE::Component::Server::IRC::Backend->spawn() or die 'Nooo!';
 
 	# Create the plugin
 	# Of course it could be something like $plugin = MyPlugin->new();
-	my $plugin = POE::Component::IRC::Plugin::ExamplePlugin->new( ... );
+	my $plugin = POE::Component::Server::IRC::Plugin::ExamplePlugin->new( ... );
 
 	# Hook it up!
 	$irc->plugin_add( 'ExamplePlugin', $plugin );
@@ -141,15 +75,15 @@ The plugins themselves will conform to the standard API described here. What the
 limited only by imagination and the IRC RFC's ;)
 
 	# Import the constants
-	use POE::Component::Plugin qw( :ALL );
+	use POE::Component::Server::IRC::Plugin qw( :ALL );
 
 	# Our constructor
 	sub new {
 		...
 	}
 
-	# Required entry point for PoCo-IRC
-	sub PCI_register {
+	# Required entry point for POE::Component::Server::IRC::Backend
+	sub PCSI_register {
 		my( $self, $irc ) = @_;
 
 		# Register events we are interested in
@@ -160,10 +94,10 @@ limited only by imagination and the IRC RFC's ;)
 	}
 
 	# Required exit point for PoCo-IRC
-	sub PCI_unregister {
+	sub PCSI_unregister {
 		my( $self, $irc ) = @_;
 
-		# PCI will automatically unregister events for the plugin
+		# PCSIB will automatically unregister events for the plugin
 
 		# Do some cleanup...
 

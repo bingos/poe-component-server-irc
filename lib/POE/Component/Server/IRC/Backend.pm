@@ -10,7 +10,7 @@ $VERSION = '0.6';
 
 use constant PRIORITY => 10;
 
-sub spawn {
+sub create {
   my ($package) = shift;
   croak "$package requires an even number of parameters" if @_ & 1;
   my %parms = @_;
@@ -28,6 +28,7 @@ sub spawn {
 	object_states => [
 		$self => { add_connector => '_add_connector',
 			   add_listener  => '_add_listener', 
+			   del_listener  => '_del_listener', 
 			   send_output   => '_send_output', },
 		$self => [ qw(  __send_event
 				_accept_connection 
@@ -192,41 +193,6 @@ sub _send_event {
 # Listener related methods #
 ############################
 
-sub add_listener {
-  my ($self) = shift;
-  croak "add_listener requires an even number of parameters" if @_ & 1;
-
-  $self->yield( 'add_listener' => @_ );
-}
-
-sub _add_listener {
-  my ($kernel,$self,$sender) = @_[KERNEL,OBJECT,SENDER];
-  #croak "_add_listener requires an even number of parameters" if scalar @_[ARG0..$#_] & 1;
-  my %parms = @_[ARG0..$#_];
-
-  foreach ( keys %parms ) {
-	$parms{ lc($_) } = delete $parms{$_};
-  }
-
-  my $bindport = $parms{port} || 0;
-
-  my ($listener) = POE::Wheel::SocketFactory->new(
-	BindPort => $bindport,
-	( $parms{bindaddr} ? ( BindAddr => $parms{bindaddr} ) : () ),
-	Reuse => 'on',
-	( $parms{listenqueue} ? ( ListenQueue => $parms{listenqueue} ) : () ),
-	SuccessEvent => '_accept_connection',
-	FailureEvent => '_accept_failed',
-  );
-
-  if ( $listener ) {
-	my $port = ( unpack_sockaddr_in( $listener->getsockname ) )[0];
-	$self->_send_event( $self->{prefix} . 'listener_add' => $port => $listener->ID() );
-	$self->{listeners}->{ $listener->ID() } = $listener;
-  }
-  undef;
-}
-
 sub _accept_failed {
   my ($kernel,$self,$listener_id) = @_[KERNEL,OBJECT,ARG3];
 
@@ -259,6 +225,98 @@ sub _accept_connection {
 	}
   }
   undef;
+}
+
+sub add_listener {
+  my ($self) = shift;
+  croak "add_listener requires an even number of parameters" if @_ & 1;
+
+  $self->yield( 'add_listener' => @_ );
+}
+
+sub _add_listener {
+  my ($kernel,$self) = @_[KERNEL,OBJECT];
+  #croak "_add_listener requires an even number of parameters" if scalar @_[ARG0..$#_] & 1;
+  my %parms = @_[ARG0..$#_];
+
+  foreach ( keys %parms ) {
+	$parms{ lc($_) } = delete $parms{$_};
+  }
+
+  my $bindport = $parms{port} || 0;
+
+  my ($listener) = POE::Wheel::SocketFactory->new(
+	BindPort => $bindport,
+	( $parms{bindaddr} ? ( BindAddr => $parms{bindaddr} ) : () ),
+	Reuse => 'on',
+	( $parms{listenqueue} ? ( ListenQueue => $parms{listenqueue} ) : () ),
+	SuccessEvent => '_accept_connection',
+	FailureEvent => '_accept_failed',
+  );
+
+  if ( $listener ) {
+	my $port = ( unpack_sockaddr_in( $listener->getsockname ) )[0];
+	my $listener_id = $listener->ID();
+	$self->_send_event( $self->{prefix} . 'listener_add' => $port => $listener_id );
+	$self->{listening_ports}->{ $port } = $listener_id;
+	$self->{listeners}->{ $listener_id }->{wheel} = $listener;
+	$self->{listeners}->{ $listener_id }->{port} = $port;
+  }
+  undef;
+}
+
+sub del_listener {
+  my ($self) = shift;
+  croak "add_listener requires an even number of parameters" if @_ & 1;
+
+  $self->yield( 'del_listener' => @_ );
+}
+
+sub _del_listener {
+  my ($kernel,$self) = @_[KERNEL,OBJECT];
+  my %parms = @_[ARG0..$#_];
+
+  foreach ( keys %parms ) {
+	$parms{ lc($_) } = delete $parms{$_};
+  }
+
+  my ($listener_id) = delete( $parms{listener} );
+  my ($port) = delete( $parms{port} );
+
+  if ( $self->_listener_exists( $listener_id ) ) {
+	$port = delete ( $self->{listeners}->{ $listener_id }->{port} );
+	delete ( $self->{listening_ports}->{ $port } );
+	delete ( $self->{listeners}->{ $listener_id } );
+	$self->_send_event( $self->{prefix} . 'listener_del' => $port => $listener_id );
+  }
+
+  if ( $self->_port_exists( $port ) ) {
+	$listener_id = delete ( $self->{listening_ports}->{ $port } );
+	delete ( $self->{listeners}->{ $listener_id } );
+	$self->_send_event( $self->{prefix} . 'listener_del' => $port => $listener_id );
+  }
+
+  undef;
+}
+
+sub _listener_exists {
+  my ($self) = shift;
+  my ($listener_id) = shift || return 0;
+
+  if ( defined ( $self->{listeners}->{ $listener_id } ) ) {
+	return 1;
+  }
+  return 0;
+}
+
+sub _port_exists {
+  my ($self) = shift;
+  my ($port) = shift || return 0;
+
+  if ( defined ( $self->{listening_ports}->{ $port } ) ) {
+	return 1;
+  }
+  return 0;
 }
 
 #############################
@@ -616,12 +674,14 @@ sub disconnect {
   $self->{wheels}->{ $wheel_id }->{disconnecting} = 1;
 }
 
-sub connection_time {
-  my ($self,$wheel_id) = splice @_, 0, 2;
-  unless ( $self->_wheel_exists( $wheel_id ) ) {
-	return;
+sub _disconnected {
+  my ($self,$wheel_id) = @_;
+
+  unless ( $wheel_id ) {
+	return 0;
   }
-  return $self->{wheels}->{ $wheel_id }->{idle};
+  delete ( $self->{wheels}->{ $wheel_id } );
+  return 1;
 }
 
 sub connection_info {
@@ -634,16 +694,6 @@ sub connection_info {
 	push( @result, $self->{wheels}->{ $wheel_id }->{ $key } );
   }
   return @result;
-}
-
-sub _disconnected {
-  my ($self,$wheel_id) = @_;
-
-  unless ( $wheel_id ) {
-	return 0;
-  }
-  delete ( $self->{wheels}->{ $wheel_id } );
-  return 1;
 }
 
 sub _wheel_exists {
@@ -916,7 +966,7 @@ sub _plugin_process {
 	# Which type are we doing?
 	my $sub;
 	if ( $type eq 'SERVER' ) {
-		$sub = 'S_' . $event;
+		$sub = 'IRCD_' . $event;
 	} else {
 		$sub = 'U_' . $event;
 	}
