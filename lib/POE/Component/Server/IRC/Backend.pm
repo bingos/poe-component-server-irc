@@ -161,9 +161,14 @@ sub shutdown {
 	$kernel->refcount_decrement( $session_id => __PACKAGE__ );
   }
   #ToDo: unload all loaded plugins.
+  $self->_unload_our_plugins();
   
   $kernel->call( $self->{ident_client} => 'shutdown' );
   undef;
+}
+
+sub _unload_our_plugins {
+  return 1;
 }
 
 sub __send_event {

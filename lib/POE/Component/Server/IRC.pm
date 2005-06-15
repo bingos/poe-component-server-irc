@@ -21,6 +21,14 @@ sub _load_our_plugins {
   return 1;
 }
 
+sub _unload_our_plugins {
+  my ($self) = shift;
+
+  my ($daemon) = delete ( $self->{daemon} );
+  $self->plugin_del( $daemon );
+  return 1;
+}
+
 sub daemon {
   return $_[0]->{daemon};
 }

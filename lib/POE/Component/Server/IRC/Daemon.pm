@@ -32,6 +32,9 @@ sub PCSI_register {
 }
 
 sub PCSI_unregister {
+  my ($self) = shift;
+
+  delete ( $self->{state} );
   return 1;
 }
 
