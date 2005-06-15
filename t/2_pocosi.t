@@ -5,8 +5,8 @@
 
 # change 'tests => 1' to 'tests => last_test_to_print';
 
-use Test::More tests => 10;
-BEGIN { use_ok('POE::Component::Server::IRC::Backend') };
+use Test::More tests => 11;
+BEGIN { use_ok('POE::Component::Server::IRC') };
 BEGIN { use_ok('POE::Component::IRC') };
 BEGIN { use_ok('POE') };
 
@@ -15,15 +15,16 @@ BEGIN { use_ok('POE') };
 # Insert your test code below, the Test::More module is use()ed here so read
 # its man page ( perldoc Test::More ) for help writing this test script.
 
-my $pocosi = POE::Component::Server::IRC::Backend->create( options => { trace => 0 } );
+my $pocosi = POE::Component::Server::IRC->create( auth => 0, options => { trace => 0 } );
 my $pocoirc = POE::Component::IRC->spawn();
 
 if ( $pocosi and $pocoirc ) {
-	isa_ok( $pocosi, "POE::Component::Server::IRC::Backend" );
+	isa_ok( $pocosi, "POE::Component::Server::IRC" );
 	POE::Session->create(
 		package_states => [ 
 			'main' => [ qw( _start 
 					_shutdown
+					ircd_backend_auth_done
 					ircd_backend_connection
 					ircd_backend_cmd_nick 
 					ircd_backend_cmd_user 
@@ -61,14 +62,14 @@ sub _shutdown {
 sub ircd_backend_registered {
   my ($heap,$object) = @_[HEAP,ARG0];
 
-  isa_ok( $object, "POE::Component::Server::IRC::Backend" );
+  isa_ok( $object, "POE::Component::Server::IRC" );
   undef;
 }
 
 sub ircd_backend_listener_add {
   my ($heap,$port) = @_[HEAP,ARG0];
 
-  ok( "Started a listener on $port" );
+  ok( 1, "Started a listener on $port" );
   $heap->{port} = $port;
   $heap->{irc}->yield( connect => { server => 'localhost', port => $port, nick => __PACKAGE__ } );
 }
@@ -76,28 +77,30 @@ sub ircd_backend_listener_add {
 sub ircd_backend_listener_del {
   my ($heap,$port) = @_[HEAP,ARG0];
 
-  ok( "Stopped listener on $port" );
+  ok( 1, "Stopped listener on $port" );
   $_[KERNEL]->yield( '_shutdown' );
 }
 
 sub ircd_backend_connection {
-  ok( 'ircd_backend_connection' );
+  ok( 1, 'ircd_backend_connection' );
+}
+
+sub ircd_backend_auth_done {
+  ok( 1, 'ircd_backend_auth_done' );
 }
 
 sub ircd_backend_cmd_nick {
-  ok( 'ircd_backend_nick' );
+  ok( 1, 'ircd_backend_cmd_nick' );
   $_[HEAP]->{result}++;
   if ( $_[HEAP]->{result} >= 2 ) {
-	#$_[KERNEL]->yield( '_shutdown' );
 	$_[HEAP]->{ircd}->del_listener( port => $_[HEAP]->{port} );
   }
 }
 
 sub ircd_backend_cmd_user {
-  ok( 'ircd_backend_user' );
+  ok( 1, 'ircd_backend_cmd_user' );
   $_[HEAP]->{result}++;
   if ( $_[HEAP]->{result} >= 2 ) {
-	#$_[KERNEL]->yield( '_shutdown' );
 	$_[HEAP]->{ircd}->del_listener( port => $_[HEAP]->{port} );
   }
 }

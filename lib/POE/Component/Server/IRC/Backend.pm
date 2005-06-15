@@ -225,6 +225,9 @@ sub _accept_connection {
 	$self->_send_event( $self->{prefix} . 'connection' => $wheel_id => $peeraddr => $peerport => $sockaddr => $sockport );
 	if ( $self->{will_do_auth} ) {
 		$kernel->yield( '_auth_client' => $wheel_id );
+	} else {
+		$self->_send_event( $self->{prefix} . 'auth_done' => $wheel_id => { ident    => '',
+										    hostname => '' } )
 	}
   }
   undef;
@@ -531,6 +534,7 @@ sub _auth_done {
   unless ( $self->_wheel_exists( $wheel_id ) ) {
 	return;
   }
+
   my ($auth) = $self->{wheels}->{ $wheel_id }->{auth};
 
   if ( $auth ) {

@@ -15,8 +15,14 @@ $VERSION = '0.31';
 sub _load_our_plugins {
   my ($self) = shift;
 
-  $self->plugin_add( 'Daemon', POE::Component::Server::IRC::Daemon->new() );
+  $self->{daemon} = POE::Component::Server::IRC::Daemon->new();
+
+  $self->plugin_add( 'Daemon', $self->{daemon} );
   return 1;
+}
+
+sub daemon {
+  return $_[0]->{daemon};
 }
 
 1;
