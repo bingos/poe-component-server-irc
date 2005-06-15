@@ -35,7 +35,7 @@ POE::Component::Server::IRC::Plugin - Provides plugin documentation for POE::Com
 This is the document coders/users should refer to when using/developing plugins for
 POE::Component::Server::IRC.
 
-The plugin system works by letting coders hook into the two aspects of POE::Component::Server::IRC::Backend:
+The plugin system works by letting coders hook into aspects of POE::Component::Server::IRC::Backend:
 
 	Data received from the server
 
@@ -87,7 +87,7 @@ limited only by imagination and the IRC RFC's ;)
 		my( $self, $irc ) = @_;
 
 		# Register events we are interested in
-		$irc->plugin_register( $self, 'SERVER', qw( 355 kick whatever) );
+		$irc->plugin_register( $self, 'SERVER', qw(connection) );
 
 		# Return success
 		return 1;
@@ -107,14 +107,14 @@ limited only by imagination and the IRC RFC's ;)
 
 	# Registered events will be sent to methods starting with IRC_
 	# If the plugin registered for SERVER - irc_355
-	sub S_355 {
+	sub IRCD_connection {
 		my( $self, $irc, $line ) = @_;
 
 		# Remember, we receive pointers to scalars, so we can modify them
 		$$line = 'frobnicate!';
 
 		# Return an exit code
-		return PCI_EAT_NONE;
+		return PCSI_EAT_NONE;
 	}
 
 	# Default handler for events that do not have a corresponding plugin method defined.
@@ -124,7 +124,7 @@ limited only by imagination and the IRC RFC's ;)
 		print "Default called for $event\n";
 
 		# Return an exit code
-		return PCI_EAT_NONE;
+		return PCSI_EAT_NONE;
 	}
 
 =head1 Available methods to use on the $irc object
@@ -138,7 +138,7 @@ limited only by imagination and the IRC RFC's ;)
 	The alias is there for the user to refer to it, as it is possible to have multiple
 	plugins of the same kind active in one PoCo-IRC object.
 
-	This method will call $plugin->PCI_register( $irc )
+	This method will call $plugin->PCSI_register( $irc )
 
 	Returns 1 if plugin was initialized, undef if not.
 
@@ -154,7 +154,7 @@ limited only by imagination and the IRC RFC's ;)
 	Accepts one argument:
 		The alias for the plugin or the plugin object itself
 
-	This method will call $plugin->PCI_unregister( $irc )
+	This method will call $plugin->PCSI_unregister( $irc )
 
 	Returns the plugin object if the plugin was removed, undef if not.
 
@@ -169,13 +169,14 @@ limited only by imagination and the IRC RFC's ;)
 
 	Accepts the following arguments:
 		The plugin object
-		The type of the hook ( 'SERVER' or 'USER' )
+		The type of the hook ( 'SERVER' )
 		The event name(s) to watch
 
 	The event names can be as many as possible, or an arrayref. They correspond
-	to the irc_* events listed in PoCo-IRC, and naturally, arbitrary events too.
+	to the ircd_backend_* events listed in POE::Component::Server::IRC::Backend, 
+	and naturally, arbitrary events too.
 
-	You do not need to supply events with irc_ in front of them, just the names.
+	You do not need to supply events with ircd_backend_ in front of them, just the names.
 
 	It is possible to register for all events by specifying 'all' as an event.
 
@@ -185,24 +186,25 @@ limited only by imagination and the IRC RFC's ;)
 
 	Accepts the following arguments:
 		The plugin object
-		The type of the hook ( 'SERVER' or 'USER' )
+		The type of the hook ( 'SERVER' )
 		The event name(s) to unwatch
 
 	The event names can be as many as possible, or an arrayref. They correspond
-	to the irc_* events listed in PoCo-IRC, and naturally, arbitrary events too.
+	to the ircd_backend_* events listed in POE::Component::Server::IRC::Backend, and naturally, 
+	arbitrary events too.
 
-	You do not need to supply events with irc_ in front of them, just the names.
+	You do not need to supply events with ircd_backend_ in front of them, just the names.
 
 	Returns 1 if all the event name(s) was unregistered, undef if some was not found
 
-=head1 New SERVER events available to PoCo-IRC
+=head1 New SERVER events available to POE::Component::Server::IRC::Backend
 
-=head2 irc_plugin_add
+=head2 ircd_backend_plugin_add
 
 This event will be triggered after a plugin is added. It receives two arguments, the first being
 the plugin name, and the second being the plugin object.
 
-=head2 irc_plugin_del
+=head2 ircd_backend_plugin_del
 
 This event will be triggered after a plugin is deleted. It receives two arguments, the first being
 the plugin name, and the second being the plugin object.
@@ -212,65 +214,27 @@ the plugin name, and the second being the plugin object.
 =head2 SERVER hooks
 
 Hooks that are targeted toward data received from the server will get the exact same
-arguments as if it was a normal event, look at the PoCo-IRC docs for more information.
+arguments as if it was a normal event, look at the POE::Component::Server::IRC::Backend
+docs for more information.
 
 	NOTE: Server methods are identified in the plugin namespace by the subroutine prefix
-	of S_*. I.e. an irc_kick event handler would be:
+	of IRCD_*. I.e. an ircd_backend_cmd_kick event handler would be:
 
-	sub S_kick {}
+	sub IRCD_cmd_kick {}
 
 The only difference is instead of getting scalars, the hook will get a reference to
 the scalar, to allow it to mangle the data. This allows the plugin to modify data *before*
 they are sent out to registered sessions.
 
-They are required to return one of the exit codes so PoCo-IRC will know what to do.
+They are required to return one of the exit codes so POE::Component::Server::IRC::Backend will know what to do.
 
 =head3 Names of potential hooks
 
-	001
 	socketerr
 	connected
 	plugin_del
 
-Keep in mind that they are always lowercased, check out the POE::Component::IRC manpage and look at
-the Important Events section for the complete list of names.
-
-=head2 USER hooks
-
-These type of hooks have two different argument formats. They are split between data sent to
-the server, and data sent through DCC connections.
-
-	NOTE: User methods are identified in the plugin namespace by the subroutine prefix
-	of U_*. I.e. an irc_kick event handler would be:
-
-	sub U_kick {}
-
-Hooks that are targeted to user data have it a little harder. They will receive a reference
-to the raw line about to be sent out. That means they will have to parse it in order to
-extract data out of it.
-
-The reasoning behind this is that it is not possible to insert hooks in every method in the
-$irc object, as it will become unwieldy and not allow inheritance to work.
-
-The DCC hooks have it easier, as they do not interact with the server, and will receive references
-to the arguments specified in the PoCo-IRC pod regarding dcc commands.
-
-=head3 Names of potential hooks
-
-	kick
-	dcc_chat
-	ison
-	privmsg
-
-Keep in mind that they are always lowercased, and are extracted from the raw line about to be sent to the
-irc server. To be able to parse the raw line, some RFC reading is in order. These are the DCC events that
-are not given a raw line, they are:
-
-	dcc		-	$nick, $type, $file, $blocksize
-	dcc_accept	-	$cookie, $myfile
-	dcc_resume	-	$cookie
-	dcc_chat	-	$cookie, @lines
-	dcc_close	-	$cookie
+Keep in mind that they are always lowercased, check out the POE::Component::IRC manpage.
 
 =head2 _default
 
@@ -280,34 +244,31 @@ a plugin's _default() method. The first parameter after the plugin and irc objec
 	sub _default {
 	  my ($self,$irc,$event) = splice @_, 0, 3;
 
-	  # $event will be something like S_public or U_dcc, etc.
-	  return PCI_EAT_NONE;
+	  return PCSI_EAT_NONE;
 	}
 
-The _default() handler is expected to return one of the exit codes so PoCo-IRC will know what to do.
+The _default() handler is expected to return one of the exit codes so POE::Component::Server::IRC::Backend will know what to do.
 
 =head1 Exit Codes
 
-=head2 PCI_EAT_NONE
+=head2 PCSI_EAT_NONE
 
 	This means the event will continue to be processed by remaining plugins and
 	finally, sent to interested sessions that registered for it.
 
-=head2 PCI_EAT_CLIENT
+=head2 PCSI_EAT_CLIENT
 
 	This means the event will continue to be processed by remaining plugins but
-	it will not be sent to any sessions that registered for it. This means nothing
-	will be sent out on the wire if it was an USER event, beware!
+	it will not be sent to any sessions that registered for it.
 
-=head2 PCI_EAT_PLUGIN
+=head2 PCSI_EAT_PLUGIN
 
 	This means the event will not be processed by remaining plugins, it will go
 	straight to interested sessions.
 
-=head2 PCI_EAT_ALL
+=head2 PCSI_EAT_ALL
 
-	This means the event will be completely discarded, no plugin or session will see it. This
-	means nothing will be sent out on the wire if it was an USER event, beware!
+	This means the event will be completely discarded, no plugin or session will see it.
 
 =head1 Plugin ordering system
 
@@ -327,6 +288,8 @@ L<POE::Component::IRC>
 =head1 AUTHOR
 
 Apocalypse E<lt>apocal@cpan.orgE<gt>
+
+Ported to POE::Component::Server::IRC by Chris 'BinGOs' Williams E<lt>chris@bingosnet.co.ukE<gt>
 
 =head1 PROPS
 
