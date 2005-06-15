@@ -8,8 +8,6 @@ use vars qw($VERSION);
 
 $VERSION = '0.6';
 
-use constant PRIORITY => 10;
-
 sub create {
   my ($package) = shift;
   croak "$package requires an even number of parameters" if @_ & 1;

@@ -18,7 +18,7 @@ SKIP: {
 
   skip "No POE::Component::IRC skipping tests", 1 if $@;
 
-  my ($obj) = POE::Component::Server::IRC->spawn();
+  my ($obj) = POE::Component::Server::IRC->create();
   isa_ok( $obj, 'POE::Component::Server::IRC' );
 
 }
