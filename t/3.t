@@ -25,8 +25,8 @@ if ( $pocosi and $pocoirc ) {
 			'main' => [ qw( _start 
 					_shutdown
 					ircd_backend_connection
-					ircd_backend_nick 
-					ircd_backend_user 
+					ircd_backend_cmd_nick 
+					ircd_backend_cmd_user 
 					ircd_backend_registered
 					ircd_backend_listener_add
 					ircd_backend_listener_del) ],
@@ -84,7 +84,7 @@ sub ircd_backend_connection {
   ok( 'ircd_backend_connection' );
 }
 
-sub ircd_backend_nick {
+sub ircd_backend_cmd_nick {
   ok( 'ircd_backend_nick' );
   $_[HEAP]->{result}++;
   if ( $_[HEAP]->{result} >= 2 ) {
@@ -93,7 +93,7 @@ sub ircd_backend_nick {
   }
 }
 
-sub ircd_backend_user {
+sub ircd_backend_cmd_user {
   ok( 'ircd_backend_user' );
   $_[HEAP]->{result}++;
   if ( $_[HEAP]->{result} >= 2 ) {

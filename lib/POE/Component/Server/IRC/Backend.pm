@@ -102,7 +102,12 @@ sub _start {
   if ( $self->{auth} and $self->{can_do_auth} ) {
 	$self->{will_do_auth} = 1;
   }
+  $self->_load_our_plugins();
   undef;
+}
+
+sub _load_our_plugins {
+  return 1;
 }
 
 ###################
@@ -414,7 +419,7 @@ sub _anti_flood {
      }
      if ( ( not $self->{wheels}->{ $wheel_id }->{timer} ) or $self->{wheels}->{ $wheel_id }->{timer} < $current_time ) {
 	$self->{wheels}->{ $wheel_id }->{timer} = $current_time;
-    	my $event = $self->{prefix} . lc ( $input->{command} );
+    	my $event = $self->{prefix} . 'cmd_' . lc ( $input->{command} );
     	$self->_send_event( $event => $wheel_id => $input );
 	last SWITCH;
      }
@@ -440,7 +445,7 @@ sub _conn_input {
   if ( $self->antiflood( $wheel_id ) ) {
 	$self->_anti_flood( $wheel_id => $input );
   } else {
-    my $event = $self->{prefix} . lc ( $input->{command} );
+    my $event = $self->{prefix} . 'cmd_' . lc ( $input->{command} );
     $self->_send_event( $event => $wheel_id => $input );
   }
   undef;
@@ -464,7 +469,7 @@ sub _event_dispatcher {
   shift ( @{ $self->{wheels}->{ $wheel_id }->{alarm_ids} } );
   my $input = shift ( @{ $self->{wheels}->{ $wheel_id }->{msq} } );
   if ( $input ) {
-    my $event = $self->{prefix} . lc ( $input->{command} );
+    my $event = $self->{prefix} . 'cmd_' . lc ( $input->{command} );
     $self->_send_event( $event => $wheel_id => $input );
   }
   undef;
