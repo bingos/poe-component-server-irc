@@ -13,4 +13,5 @@ lib/POE/Component/Server/IRC/Test/Plugin.pm
 examples/load-test.pl
 examples/test-ircd.pl
 examples/test-oper.pl
+examples/test-harness.pl
 META.yml                                 Module meta-data (added by MakeMaker)

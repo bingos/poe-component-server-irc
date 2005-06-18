@@ -35,6 +35,7 @@ sub create {
 				_auth_done
 				_conn_input 
 				_conn_error 
+				_conn_flushed
 				_event_dispatcher
 				_got_hostname_response
 				_got_ip_response
@@ -443,6 +444,26 @@ sub _anti_flood {
   return 1;
 }
 
+sub _conn_error {
+  my ($kernel,$self,$errstr,$wheel_id) = @_[KERNEL,OBJECT,ARG2,ARG3];
+
+  $self->_send_event( $self->{prefix} . 'disconnected' => $wheel_id => $errstr );
+  $self->_disconnected( $wheel_id );
+  undef;
+}
+
+sub _conn_flushed {
+  my ($kernel,$self,$wheel_id) = @_[KERNEL,OBJECT,ARG0];
+
+  unless ( $self->_wheel_exists( $wheel_id ) ) {
+	return;
+  }
+  if ( $self->{wheels}->{ $wheel_id }->{disconnecting} ) {
+	$self->_disconnected( $wheel_id );
+  }
+  undef;
+}
+
 sub _conn_input {
   my ($kernel,$self,$input,$wheel_id) = @_[KERNEL,OBJECT,ARG0,ARG1];
   my $conn = $self->{wheels}->{ $wheel_id };
@@ -456,14 +477,6 @@ sub _conn_input {
     my $event = $self->{prefix} . 'cmd_' . lc ( $input->{command} );
     $self->_send_event( $event => $wheel_id => $input );
   }
-  undef;
-}
-
-sub _conn_error {
-  my ($kernel,$self,$errstr,$wheel_id) = @_[KERNEL,OBJECT,ARG2,ARG3];
-
-  $self->_send_event( $self->{prefix} . 'disconnected' => $wheel_id => $errstr );
-  $self->_disconnected( $wheel_id );
   undef;
 }
 
@@ -490,11 +503,10 @@ sub send_output {
 
 sub _send_output {
   my ($kernel,$self,$output) = @_[KERNEL,OBJECT,ARG0];
-  my @wheels = @_[ARG1..$#_];
 
-  foreach my $wheel_id ( @wheels ) {
+  foreach my $wheel_id ( @_[ARG1..$#_] ) {
 	next unless ( $self->_wheel_exists( $wheel_id ) );
-	$self->{wheel}->{ $wheel_id }->{wheel}->put( $output ) if ( $output and ref( $output ) eq 'HASH' );
+	$self->{wheels}->{ $wheel_id }->{wheel}->put( $output ) if ( $output and ref( $output ) eq 'HASH' );
   }
   undef;
 }
@@ -678,7 +690,7 @@ sub antiflood {
 }
 
 sub disconnect {
-  my ($self,$wheel_id) = @_;
+  my ($self,$wheel_id) = splice @_, 0, 2;
 
   unless ( $wheel_id and $self->_wheel_exists( $wheel_id ) ) {
 	return;
@@ -687,7 +699,7 @@ sub disconnect {
 }
 
 sub _disconnected {
-  my ($self,$wheel_id) = @_;
+  my ($self,$wheel_id) = splice @_, 0, 2;
 
   unless ( $wheel_id ) {
 	return 0;
