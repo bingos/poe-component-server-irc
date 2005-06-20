@@ -14,8 +14,8 @@ WriteMakefile(
 							  'Socket' => 0,
 							  'Date::Format' => 0,
 							  'POE::Filter::IRCD' => 0,
-							  'POE::Component::Client::Ident' => 0,
-							  'POE::Component::Client::DNS' => 0,
+							  'POE::Component::Client::Ident' => 0.7,
+							  'POE::Component::Client::DNS' => 0.98,
 							 },
 			  'VERSION_FROM' => 'IRC.pm', # finds $VERSION
 			  'dist' => { 'COMPRESS' => 'gzip --best' },

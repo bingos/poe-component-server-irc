@@ -1,0 +1,6 @@
+POE::Component::Server::IRC
+===========================
+
+A POE component that implements a standalone RFC-compliant IRC server.
+
+The examples/ directory contains some example scripts.

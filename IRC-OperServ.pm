@@ -207,3 +207,87 @@ sub ircd_client_message {
 }
 
 1;
+
+__END__
+
+=head1 NAME
+
+POE::Component::Server::IRC::OperServ - a fully event-driven standalone IRC server daemon module with simple operator services.
+
+=head1 SYNOPSIS
+
+  use POE;
+  use POE::Component::Server::IRC;
+
+  my ($pocosi) = POE::Component::Server::IRC::OperServ->spawn( Alias => 'ircd' );
+
+  POE::Session->create (
+        inline_states => { _start => \&test_start,
+                           _stop  => \&test_stop, },
+
+        heap => { Obj  => $pocosi },
+  );
+
+  $poe_kernel->run();
+  exit 0;
+
+  sub test_start {
+    my ($kernel,$heap) = @_[KERNEL,HEAP];
+
+    $kernel->post ( 'ircd' => 'register' );
+    $kernel->post ( 'ircd' => 'configure' => { Auth => 1, AntiFlood => 1 } );
+    $kernel->post ( 'ircd' => 'add_i_line' => { IPMask => '*', Port => 6667 } );
+    $kernel->post ( 'ircd' => 'add_operator' => { UserName => 'Flibble', Password => 'letmein' } );
+    $kernel->post ( 'ircd' => 'add_listener' => { Port => 6667 } );
+    $kernel->post ( 'ircd' => 'set_motd' => [ 'This is an experimental server', 'Testing POE::Component::Server::IRC', 'Enjoy!' ] );
+  }
+
+  sub test_stop {
+	print "Server stopped\n";
+  }
+
+=head1 DESCRIPTION
+
+POE::Component::Server::IRC::OperServ is subclass of L<POE::Component::Server::IRC|POE::Component::Server::IRC> 
+which provides simple operator services.
+
+The documentation is the same as for L<POE::Component::Server::IRC|POE::Component::Server::IRC>, consult that for
+usage.
+
+=head1 OperServ
+
+This subclass provides a server user called OperServ. OperServ accepts PRIVMSG commands from operators.
+
+  /msg OperServ <command> <parameters>
+
+The following commands are accepted:
+
+=over
+
+=item OP <#channelname>
+
+The OperServ will give you channel operator status on the indicated channel. You must already be on the indicated channel.
+
+=item CLEARCHAN <#channelname>
+
+The OperServ will remove all channel modes on the indicated channel, including all users' +ov flags.
+
+=item KICK <#channelname> <nickname>
+
+The OperServ will kick the indicated user from the indicated channel.
+
+=back
+
+=head1 OUTPUT
+
+The OperServ responds with NOTICES.
+
+=head1 AUTHOR
+
+Chris Williams, E<lt>chris@bingosnet.co.ukE<gt>
+
+=head1 SEE ALSO
+
+L<POE::Component::Server::IRC|POE::Component::Server::IRC>
+
+=cut
