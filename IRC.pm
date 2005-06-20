@@ -468,7 +468,12 @@ sub connection_input {
 	  } else {
 		$kernel->alarm_adjust ( $self->{Clients}->{ $wheel_id }->{PING} => $self->lowest_ping_frequency() );
 	  }
-	  if ( ( not defined ( $self->{Clients}->{ $wheel_id }->{Timer} ) ) or $self->{Clients}->{ $wheel_id }->{Timer} < $current_time or $self->is_operator($self->client_nickname($wheel_id)) ) {
+	  # AntiFlood off ? or an IRCop
+	  if ( $self->is_operator($self->client_nickname($wheel_id)) or ( not $self->{Config}->{AntiFlood} ) ) {
+		$kernel->post ( $self->{Alias} => 'ircd_client_' . lc ( $input->{command} ) => $input => $wheel_id );
+		last SWITCH2;
+	  }
+	  if ( ( not defined ( $self->{Clients}->{ $wheel_id }->{Timer} ) ) or $self->{Clients}->{ $wheel_id }->{Timer} < $current_time ) {
 		$self->{Clients}->{ $wheel_id }->{Timer} = $current_time;
 		$kernel->post ( $self->{Alias} => 'ircd_client_' . lc ( $input->{command} ) => $input => $wheel_id );
 		last SWITCH2;
@@ -3606,10 +3611,11 @@ sub list_ports_used {
 }
 
 1;
+__END__
 
 =head1 NAME
 
-POE::Component::Server::IRC - a fully event-driven IRC server daemon module.
+POE::Component::Server::IRC - a fully event-driven standalone IRC server daemon module.
 
 =head1 SYNOPSIS
 
@@ -3632,6 +3638,7 @@ POE::Component::Server::IRC - a fully event-driven IRC server daemon module.
     my ($kernel,$heap) = @_[KERNEL,HEAP];
 
     $kernel->post ( 'ircd' => 'register' );
+    $kernel->post ( 'ircd' => 'configure' => { Auth => 1, AntiFlood => 1 } );
     $kernel->post ( 'ircd' => 'add_i_line' => { IPMask => '*', Port => 6667 } );
     $kernel->post ( 'ircd' => 'add_operator' => { UserName => 'Flibble', Password => 'letmein' } );
     $kernel->post ( 'ircd' => 'add_listener' => { Port => 6667 } );
@@ -3644,20 +3651,96 @@ POE::Component::Server::IRC - a fully event-driven IRC server daemon module.
 
 =head1 DESCRIPTION
 
-POE::Component::Server::IRC is a POE component which implements an RFC compliant Internet Relay Chat
+POE::Component::Server::IRC is a POE component which implements an RFC compliant standalone Internet Relay Chat
 server ( IRCd ).
+
+Features include an auth subsystem, that performs hostname and ident lookups on each connecting client and antiflood code that disconnects clients that attempt to flood the server.
+
+The SYNOPSIS demonstrates how to create a simple ircd, which listens for connections on port 6667.
 
 =head1 METHODS
 
+Object methods that we will accept.
+
+=item spawn
+
+Creates a new POE::Component::Server::IRC component. Returns an object. Takes the following arguments: 'Alias': mandatory argument, the POE::Kernel alias that you want to bless the component with; 'Debug': optional, set 1 to enable trace information, default 0.
+
+Spawn will also accept any of the arguments accepted by 'configure', see below.
+
 =head1 INPUT
+
+Events that the component will accept.
+
+=over
+
+=item configure
+
+Accepts either a hashref as the first argument or a list of key/values. 'Auth': setting this to 0 or 1, disables or enables, respectively, the ircd auth subsystem; 'AntiFlood': setting this to 0 or 1, disables or enables the antiflood code for *all* connecting clients ( IRC operators are exempt from flood protection anyways ); 'ServerName': the name for your server; 'ServerDesc': the description for your server; 'Network': the name of your network.
+
+  $kernel->post ( 'ircd' => configure =>
+	{ Auth => 1,
+	  AntiFlood => 1,
+	  ServerName => 'poco.server.irc',
+	  ServerDesc => 'Poco? POCO? POCO!',
+	  Network => 'poconet',
+	}
+  ); # Defaults shown
+
+=item add_i_line
+
+An 'I' line defines who can connect to your IRCd. Accepts either a hashref as the first argument or a list of key/values. 'TargetAddr': is a mask to match connecting clients against; 'Port': the listening port this I line will apply to;
+'Password': the password that clients will have to use to gain entry to this server.
+
+The default for any parameter not supplied is to use a mask of '*' for that entry, so:
+
+  $kernel->post( 'ircd' => 'add_i_line' );
+
+would allow anyone to connect to any listening port without a password being required.
+
+The * and ? chars can be used in any of the fields, except Password ( that would be silly ).
+
+=item add_listener
+
+Creates a listening port, so that clients can connect to your IRCd. Accepts either a hashref as the first argument
+or a list of key/values. 'Port': mandatory argument, the socket port one wishes to listen on.
+
+=item add_operator
+
+Adds an 'O' line to the IRCd. Accepts either a hashref as the first argument or a list of key/values. Mandatory values :
+'UserName': the operator username; 'Password': the password for that username; Optionally, 'IPMask': a mask to
+match the user's IP address against.
+
+UserName and Password are required in all cases. Without an IPMask, the default behaviour is to only all connections from the loopback interface, ie. local operators.
+
+Once a user becomes an operator they are not subject to the antiflood mechanism. This is a feature.
+
+=item set_motd
+
+Sets the server Message of the Day, which is sent to all clients when they successfully connect to the server.
+Accepts an arrayref as first argument. Each entry in that arrayref becomes a separate line of MOTD output.
+
+=back
 
 =head1 OUTPUT
 
-=head1 BUGS
+There is currently no output from the component.
 
-Probably a few.
+=head1 CAVEATS
 
-Please use L<http://rt.cpan.org/> for reporting bugs with this component.
+The component creates a standalone server. This means that it is not currently possible to link servers together
+to form IRC networks.
+
+This is alpha grade code. Development is ongoing to implement the server-to-server protocols to enable IRC
+networks to be created and to make the component more modular in design.
+
+=head1 DEVELOPMENT ROADMAP
+
+Watch CPAN for further releases.
+
+=item modular design
+=item port existing code to new framework
+=item server to server protocols
 
 =head1 AUTHOR
 
