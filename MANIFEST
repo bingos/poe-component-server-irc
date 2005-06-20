@@ -1,4 +1,6 @@
 MANIFEST
+MANIFEST.SKIP
+README
 IRC.pm
 IRC-OperServ.pm
 Makefile.PL
