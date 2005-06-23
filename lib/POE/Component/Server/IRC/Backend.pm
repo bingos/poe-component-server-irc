@@ -44,8 +44,8 @@ sub create {
 				_sock_failed
 				_sock_up
 				_start 
-				ident_client_error
-				ident_client_reply
+				ident_agent_error
+				ident_agent_reply
 				register 
 				shutdown 
 				unregister) ],
@@ -91,12 +91,12 @@ sub _start {
   $self->{filter}->push( $self->{line_filter}, $self->{ircd_filter} );
   $self->{can_do_auth} = 0;
   eval {
-	require POE::Component::Client::Ident;
+	require POE::Component::Client::Ident::Agent;
 	require POE::Component::Client::DNS;
   };
   unless ( $@ ) {
-	$self->{ident_client} = 'poco_ident_' . $self->{session_id};
-	POE::Component::Client::Ident->spawn( $self->{ident_client} );
+	#$self->{ident_client} = 'poco_ident_' . $self->{session_id};
+	#POE::Component::Client::Ident->spawn( $self->{ident_client} );
 	$self->{resolver} = POE::Component::Client::DNS->spawn( Alias => 'poco_dns_' . $self->{session_id}, Timeout => 10 );
 	$self->{can_do_auth} = 1;
   }
@@ -165,7 +165,7 @@ sub shutdown {
   #ToDo: unload all loaded plugins.
   $self->_unload_our_plugins();
   
-  $kernel->call( $self->{ident_client} => 'shutdown' );
+  #$kernel->call( $self->{ident_client} => 'shutdown' );
   undef;
 }
 
@@ -579,8 +579,8 @@ sub _auth_client {
 
   my ($peeraddr,$peerport,$sockaddr,$sockport) = $self->connection_info( $wheel_id );
 
-  $self->send_output( $wheel_id => { command => 'NOTICE', params => [ 'AUTH', '*** Checking Ident' ] } );
-  $self->send_output( $wheel_id => { command => 'NOTICE', params => [ 'AUTH', '*** Checking Hostname' ] } );
+  $self->send_output( { command => 'NOTICE', params => [ 'AUTH', '*** Checking Ident' ] }, $wheel_id );
+  $self->send_output( { command => 'NOTICE', params => [ 'AUTH', '*** Checking Hostname' ] }, $wheel_id );
 
   if ( $peeraddr !~ /^127\./ ) {
 	my ($response) = $self->{resolver}->resolve( event => '_got_hostname_response', host => $peeraddr,
@@ -590,13 +590,16 @@ sub _auth_client {
 		$kernel->yield( '_got_hostname_response' => $response );
 	}
   } else {
-  	$self->yield( 'send_output' => $wheel_id => { command => 'NOTICE', params => [ 'AUTH', '*** Found your hostname' ] } );
+  	$self->send_output( { command => 'NOTICE', params => [ 'AUTH', '*** Found your hostname' ] }, $wheel_id );
 	$self->{wheels}->{ $wheel_id }->{auth}->{hostname} = 'localhost';
 	$self->yield( '_auth_done' => $wheel_id );
   }
-  $kernel->post( $self->{ident_client} => query => PeerAddr => $peeraddr, PeerPort => $peerport, SockAddr => $sockaddr,
-				                   SockPort => $sockport, BuggyIdentd => 1, TimeOut => 10,
-						   Reference => $wheel_id );
+  #$kernel->post( $self->{ident_client} => query => PeerAddr => $peeraddr, PeerPort => $peerport, SockAddr => $sockaddr,
+#				                   SockPort => $sockport, BuggyIdentd => 1, TimeOut => 10,
+#						   Reference => $wheel_id );
+  POE::Component::Client::Ident::Agent->spawn( PeerAddr => $peeraddr, PeerPort => $peerport, SockAddr => $sockaddr,
+				               SockPort => $sockport, BuggyIdentd => 1, TimeOut => 10,
+					       Reference => $wheel_id );
   undef;
 }
 
@@ -607,15 +610,12 @@ sub _auth_done {
 	return;
   }
 
-  my ($auth) = $self->{wheels}->{ $wheel_id }->{auth};
-
-  if ( $auth ) {
-	if ( defined ( $auth->{ident} ) and defined ( $auth->{hostname} ) ) {
-		$self->_send_event( $self->{prefix} . 'auth_done' => $wheel_id => { ident    => $auth->{ident},
-										    hostname => $auth->{hostname} } )
-			unless ( $self->{wheels}->{ $wheel_id }->{auth}->{done} );
-		$self->{wheels}->{ $wheel_id }->{auth}->{done}++;
-	}
+  if ( defined ( $self->{wheels}->{ $wheel_id }->{auth}->{ident} ) and defined ( $self->{wheels}->{ $wheel_id }->{auth}->{hostname} ) ) {
+	$self->_send_event( $self->{prefix} . 'auth_done' => $wheel_id => { 
+		ident    => $self->{wheels}->{ $wheel_id }->{auth}->{ident},
+   	        hostname => $self->{wheels}->{ $wheel_id }->{auth}->{hostname} } )
+		unless ( $self->{wheels}->{ $wheel_id }->{auth}->{done} );
+	$self->{wheels}->{ $wheel_id }->{auth}->{done}++;
   }
   undef;
 }
@@ -634,7 +634,7 @@ sub _got_hostname_response {
 
       if ( scalar ( @answers ) == 0 ) {
 	# Send NOTICE to client of failure.
-	$self->send_output( $wheel_id, { command => 'NOTICE', params => [ 'AUTH', "*** Couldn\'t look up your hostname" ] } ) unless ( defined ( $self->{wheels}->{ $wheel_id }->{auth}->{hostname} ) );
+	$self->send_output( { command => 'NOTICE', params => [ 'AUTH', "*** Couldn\'t look up your hostname" ] }, $wheel_id ) unless ( defined ( $self->{wheels}->{ $wheel_id }->{auth}->{hostname} ) );
 	$self->{wheels}->{ $wheel_id }->{auth}->{hostname} = '';
 	$self->yield( '_auth_done' => $wheel_id );
       }
@@ -652,7 +652,7 @@ sub _got_hostname_response {
       }
     } else {
 	# Send NOTICE to client of failure.
-	$self->send_output( $wheel_id, { command => 'NOTICE', params => [ 'AUTH', "*** Couldn\'t look up your hostname" ] } ) unless ( defined ( $self->{wheels}->{ $wheel_id }->{auth}->{hostname} ) );
+	$self->send_output( { command => 'NOTICE', params => [ 'AUTH', "*** Couldn\'t look up your hostname" ] }, $wheel_id ) unless ( defined ( $self->{wheels}->{ $wheel_id }->{auth}->{hostname} ) );
 	$self->{wheels}->{ $wheel_id }->{auth}->{hostname} = '';
 	$self->yield( '_auth_done' => $wheel_id );
     }
@@ -675,32 +675,32 @@ sub _got_ip_response {
 
       if ( scalar ( @answers ) == 0 ) {
 	# Send NOTICE to client of failure.
-	$self->send_output( $wheel_id, { command => 'NOTICE', params => [ 'AUTH', "*** Couldn\'t look up your hostname" ] } ) unless ( defined ( $self->{wheels}->{ $wheel_id }->{auth}->{hostname} ) );
+	$self->send_output( { command => 'NOTICE', params => [ 'AUTH', "*** Couldn\'t look up your hostname" ] }, $wheel_id ) unless ( defined ( $self->{wheels}->{ $wheel_id }->{auth}->{hostname} ) );
 	$self->{wheels}->{ $wheel_id }->{auth}->{hostname} = '';
 	$self->yield( '_auth_done' => $wheel_id );
       }
 
       foreach my $answer (@answers) {
 	if ( $answer->rdatastr() eq $peeraddress and ( not defined ( $self->{wheels}->{ $wheel_id }->{auth}->{hostname} ) ) ) {
-	   $self->send_output( $wheel_id, { command => 'NOTICE', params => [ 'AUTH', '*** Found your hostname' ] } ) unless ( $self->{wheels}->{ $wheel_id }->{auth}->{hostname} );
+	   $self->send_output( { command => 'NOTICE', params => [ 'AUTH', '*** Found your hostname' ] }, $wheel_id ) unless ( $self->{wheels}->{ $wheel_id }->{auth}->{hostname} );
 	   $self->{wheels}->{ $wheel_id }->{auth}->{hostname} = $hostname;
 	   $self->yield( '_auth_done' => $wheel_id );
 	} else {
-	   $self->send_output( $wheel_id, { command => 'NOTICE', params => [ 'AUTH', '*** Your forward and reverse DNS do not match' ] } ) unless ( $self->{wheels}->{ $wheel_id }->{auth}->{hostname} );
+	   $self->send_output( { command => 'NOTICE', params => [ 'AUTH', '*** Your forward and reverse DNS do not match' ] }, $wheel_id ) unless ( $self->{wheels}->{ $wheel_id }->{auth}->{hostname} );
 	   $self->{wheels}->{ $wheel_id }->{auth}->{hostname} = '';
 	   $self->yield( '_auth_done' => $wheel_id );
 	}
       }
     } else {
 	# Send NOTICE to client of failure.
-	$self->send_output( $wheel_id, { command => 'NOTICE', params => [ 'AUTH', "*** Couldn\'t look up your hostname" ] } ) unless ( $self->{wheels}->{ $wheel_id }->{auth}->{hostname} );
+	$self->send_output( { command => 'NOTICE', params => [ 'AUTH', "*** Couldn\'t look up your hostname" ] }, $wheel_id ) unless ( $self->{wheels}->{ $wheel_id }->{auth}->{hostname} );
 	$self->{wheels}->{ $wheel_id }->{auth}->{hostname} = '';
 	$self->yield( '_auth_done' => $wheel_id );
     }
     }
 }
 
-sub ident_client_reply {
+sub ident_agent_reply {
   my ($kernel,$self,$ref,$opsys,$other) = @_[KERNEL,OBJECT,ARG0,ARG1,ARG2];
   my ($wheel_id) = $ref->{Reference};
 
@@ -709,19 +709,19 @@ sub ident_client_reply {
       if ( uc ( $opsys ) ne 'OTHER' ) {
 	$ident = $other;
       }
-      $self->send_output( $wheel_id, { command => 'NOTICE', params => [ 'AUTH', "*** Got Ident response" ] } );
+      $self->send_output( { command => 'NOTICE', params => [ 'AUTH', "*** Got Ident response" ] }, $wheel_id );
       $self->{wheels}->{ $wheel_id }->{auth}->{ident} = $ident;
       $self->yield( '_auth_done' => $wheel_id );
   }
   undef;
 }
 
-sub ident_client_error {
+sub ident_agent_error {
   my ($kernel,$self,$ref,$error) = @_[KERNEL,OBJECT,ARG0,ARG1];
   my ($wheel_id) = $ref->{Reference};
 
   if ( $self->_wheel_exists( $wheel_id ) ) {
-      $self->send_output( $wheel_id, { command => 'NOTICE', params => [ 'AUTH', "*** No Ident response" ] } );
+      $self->send_output( { command => 'NOTICE', params => [ 'AUTH', "*** No Ident response" ] }, $wheel_id );
       $self->{wheels}->{ $wheel_id }->{auth}->{ident} = '';
       $self->yield( '_auth_done' => $wheel_id );
   }
