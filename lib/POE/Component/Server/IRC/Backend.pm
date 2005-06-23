@@ -19,13 +19,15 @@ sub create {
 
   my $self = bless \%parms, $package;
 
-  $self->{prefix} = 'ircd_backend_';
+  $self->{prefix} = 'ircd_backend_' unless ( $self->{prefix} );
   my $options = delete( $self->{options} );
 
   $self->{session_id} = POE::Session->create(
 	object_states => [
 		$self => { add_connector => '_add_connector',
+			   add_filter    => '_add_filter',
 			   add_listener  => '_add_listener', 
+			   del_filter    => '_del_filter',
 			   del_listener  => '_del_listener', 
 			   send_output   => '_send_output', },
 		$self => [ qw(  __send_event
@@ -85,9 +87,8 @@ sub _start {
 
   $self->{filter} = POE::Filter::Stackable->new();
   $self->{ircd_filter} = POE::Filter::IRCD->new( DEBUG => $self->{debug} );
-  $self->{filter}->push( POE::Filter::Line->new( InputRegexp => '\015?\012', OutputLiteral => "\015\012" ), 
-			 $self->{ircd_filter} );
-
+  $self->{line_filter} = POE::Filter::Line->new( InputRegexp => '\015?\012', OutputLiteral => "\015\012" );
+  $self->{filter}->push( $self->{line_filter}, $self->{ircd_filter} );
   $self->{can_do_auth} = 0;
   eval {
 	require POE::Component::Client::Ident;
@@ -226,10 +227,10 @@ sub _accept_connection {
 	my $sockaddr = inet_ntoa( ( unpack_sockaddr_in ( getsockname $socket ) )[1] );
 	my $sockport = ( unpack_sockaddr_in ( getsockname $socket ) )[0];
         my ($ref) = { wheel => $wheel, peeraddr => $peeraddr, peerport => $peerport, 
-		      sockaddr => $sockaddr, sockport => $sockport, idle => time(), antiflood => 1 };
+		      sockaddr => $sockaddr, sockport => $sockport, idle => time(), antiflood => 1, compress => 0 };
 	$self->{wheels}->{ $wheel_id } = $ref;
 	$self->_send_event( $self->{prefix} . 'connection' => $wheel_id => $peeraddr => $peerport => $sockaddr => $sockport );
-	if ( $self->{will_do_auth} ) {
+	if ( $self->{will_do_auth} and $self->{listeners}->{ $listener_id }->{do_auth} ) {
 		$kernel->yield( '_auth_client' => $wheel_id );
 	} else {
 		$self->_send_event( $self->{prefix} . 'auth_done' => $wheel_id => { ident    => '',
@@ -256,6 +257,7 @@ sub _add_listener {
   }
 
   my $bindport = $parms{port} || 0;
+  my $auth = $parms{auth} || 1;
 
   my ($listener) = POE::Wheel::SocketFactory->new(
 	BindPort => $bindport,
@@ -273,6 +275,7 @@ sub _add_listener {
 	$self->{listening_ports}->{ $port } = $listener_id;
 	$self->{listeners}->{ $listener_id }->{wheel} = $listener;
 	$self->{listeners}->{ $listener_id }->{port} = $port;
+	$self->{listeners}->{ $listener_id }->{do_auth} = $auth;
   }
   undef;
 }
@@ -344,7 +347,7 @@ sub add_connector {
 
 sub _add_connector {
   my ($kernel,$self,$sender) = @_[KERNEL,OBJECT,SENDER];
-  croak "add_connector requires an even number of parameters" if @_[ARG0..$#_] & 1;
+  #croak "add_connector requires an even number of parameters" if @_[ARG0..$#_] & 1;
   my %parms = @_[ARG0..$#_];
 
   foreach ( keys %parms ) {
@@ -404,7 +407,7 @@ sub _sock_up {
 	my $sockaddr = inet_ntoa( ( unpack_sockaddr_in ( getsockname $socket ) )[1] );
 	my $sockport = ( unpack_sockaddr_in ( getsockname $socket ) )[0];
         my ($ref) = { wheel => $wheel, peeraddr => $peeraddr, peerport => $peerport, 
-		      sockaddr => $sockaddr, sockport => $sockport, idle => time(), antiflood => 0 };
+		      sockaddr => $sockaddr, sockport => $sockport, idle => time(), antiflood => 0, compress => 0 };
 	$self->{wheels}->{ $wheel_id } = $ref;
 	$self->_send_event( $self->{prefix} . 'connected' => $wheel_id => $peeraddress => $peerport => $sockaddr => $sockport );
   }
@@ -414,6 +417,37 @@ sub _sock_up {
 ##############################
 # Generic Connection Handler #
 ##############################
+
+sub add_filter {
+  my ($self) = shift;
+  croak "add_filter requires an even number of parameters" if @_ & 1;
+
+  $self->call( 'add_filter' => @_ );
+}
+
+sub _add_filter {
+  my ($kernel,$self,$sender) = @_[KERNEL,OBJECT,SENDER];
+  my ($wheel_id) = $_[ARG0] || croak "You must supply a connection id\n";
+  my ($filter) = $_[ARG1] || croak "You must supply a filter object\n";
+
+  unless ( $self->_wheel_exists( $wheel_id ) ) {
+	return;
+  }
+
+  my $stackable = POE::Filter::Stackable->new();
+
+  $stackable->push( $self->{line_filter}, $self->{ircd_filter}, $filter );
+
+  if ( $self->compressed_link( $conn_id ) ) {
+	$stackable->unshift( POE::Filter::Zlib->new() );
+  }
+
+  $self->{wheels}->{ $conn_id }->{wheel}->set_filter( $stackable );
+
+  $self->_send_event( $self->{prefix} . 'filter_add' => $wheel_id => $filter );
+
+  undef;
+}
 
 sub _anti_flood {
   my ($self,$wheel_id,$input) = splice @_, 0, 3;
@@ -477,6 +511,27 @@ sub _conn_input {
     my $event = $self->{prefix} . 'cmd_' . lc ( $input->{command} );
     $self->_send_event( $event => $wheel_id => $input );
   }
+  undef;
+}
+
+sub del_filter {
+  my ($self) = shift;
+
+  $self->call( 'del_filter' => @_ );
+}
+
+sub _del_filter {
+  my ($kernel,$self,$sender) = @_[KERNEL,OBJECT,SENDER];
+  my ($wheel_id) = $_[ARG0] || croak "You must supply a connection id\n";
+
+  unless ( $self->_wheel_exists( $wheel_id ) ) {
+	return;
+  }
+
+  $self->{wheels}->{ $conn_id }->{wheel}->set_filter( $self->{filter} );
+
+  $self->_send_event( $self->{prefix} . 'filter_del' => $wheel_id );
+
   undef;
 }
 
@@ -687,6 +742,20 @@ sub antiflood {
 	return $self->{wheels}->{ $wheel_id }->{antiflood};
   }
   $self->{wheels}->{ $wheel_id }->{antiflood} = $value;
+}
+
+sub compressed_link {
+  my ($self,$wheel_id,$value) = splice @_, 0, 3;
+  unless ( $self->_wheel_exists( $wheel_id ) ) {
+	return;
+  }
+  unless ( defined ( $value ) ) {
+	return $self->{wheels}->{ $wheel_id }->{compress};
+  }
+  if ( $value ) {
+	$self->{wheels}->{ $wheel_id }->{wheel}->set_filter( POE::Filter::Stackable->new( Filters => [ POE::Filter::Zlib->new(), $self->{line_filter}, $self->{ircd_filter} ] ) );
+  }
+  $self->{wheels}->{ $wheel_id }->{compress} = $value;
 }
 
 sub disconnect {
@@ -1025,3 +1094,77 @@ sub _plugin_process {
 }
 
 1;
+__END__
+
+=head1 NAME
+
+POE::Component::Server::IRC::Backend - A POE component class that provides network connection abstraction for
+L<POE::Component::Server::IRC|POE::Component::Server::IRC>.
+
+=head1 SYNOPSIS
+
+  use POE qw(Component::Server::IRC::Backend);
+
+  my $object = POE::Component::Server::IRC::Backend->create();
+
+  POE::Session->create(
+	package_states => [
+		'main' => [ qw(_start) ],
+	],
+	heap => { ircd => $object },
+  );
+
+  $poe_kernel->run();
+  exit 0;
+
+  sub _start {
+  }
+
+=head1 DESCRIPTION
+
+=head1 CONSTRUCTOR
+
+=item create
+
+Returns an object. Accepts the following parameters, all are optional: 'alias', a L<POE::Kernel|POE::Kernel> alias to set;
+'auth', set to 0 to globally disable IRC authentication, default is auth is enabled; 'antiflood', set to 0 to globally disable flood protection.
+
+  my $object = POE::Component::Server::IRC::Backend->create( 
+	alias => 'ircd', # Set an alias, default, no alias set.
+	auth  => 0, # Disable auth globally, default enabled.
+	antiflood => 0, # Disable flood protection globally, default enabled.
+  );
+
+=head1 METHODS
+
+session_id
+yield
+call
+register
+unregister
+shutdown
+add_listener
+del_listener
+add_connector
+add_filter
+del_filter
+send_output
+ident_client_reply
+ident_client_error
+antiflood
+disconnect
+connection_info
+plugin_add
+plugin_del
+plugin_get
+plugin_list
+plugin_register
+plugin_unregister
+
+=head1 INPUT
+
+=head1 OUTPUT
+
+=head1 AUTHOR
+
+=head1 SEE ALSO

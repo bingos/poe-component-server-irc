@@ -6,7 +6,6 @@ use ExtUtils::MakeMaker;
 WriteMakefile(
 			  'NAME'	=> 'POE::Component::Server::IRC',
 			  'PREREQ_PM' => {
-							  'AnyData' => 0.10,
 							  'POE'    => 0.06_07,
 							  'Carp'   => 0,
 							  'Socket' => 0,

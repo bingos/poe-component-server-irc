@@ -1,6 +1,6 @@
 use POE qw(Component::Server::IRC);
 
-my $pocosi = POE::Component::Server::IRC->create( auth => 0, options => { trace => 1 } );
+my $pocosi = POE::Component::Server::IRC->create( auth => 1, options => { trace => 1 } );
 
 POE::Session->create(
 		package_states => [ 
