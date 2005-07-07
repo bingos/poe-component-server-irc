@@ -18,7 +18,6 @@ sub new {
   my %parms = @_;
 
   foreach my $key ( keys %parms ) {
-	next if ( $key eq 'Config' );
 	$parms{ lc $key } = delete $parms{ $key };
   }
 
@@ -60,6 +59,7 @@ sub IRCD_connection {
   	delete ( $self->{state}->{connections}->{ $conn_id } );
   }
   $self->{state}->{connections}->{ $conn_id }->{registered} = 0;
+  $self->{state}->{connections}->{ $conn_id }->{type} = 'u';
   $self->{state}->{connections}->{ $conn_id }->{socket} = [ $peeraddr, $peerport, $sockaddr, $sockport ];
   return PCSI_EAT_NONE;
 }
@@ -80,7 +80,50 @@ sub IRCD_auth_done {
 sub _default {
   my ($self,$ircd,$event) = splice @_, 0, 3;
   return PCSI_EAT_NONE unless ( $event =~ /^IRCD_cmd_/ );
+  my ($conn_id,$input) = map { ${ $_ } } @_;
 
+  return PCSI_EAT_NONE unless ( $self->_connection_exists( $conn_id ) );
+
+  SWITCH: {
+	# Registered ?
+	  # no. okay is a valid command for an unreg'ed conn ?
+		# No, tell them so.
+		# Yes, process.
+	# valid command for a reg'ed connection ?
+		# No, bitch at connection.
+	# Okay, start of our routing:
+	 # Must be either a server or client connection by this point. Let's find out which.
+	# Is connection type == 'server' ?
+		# Yes, process as server.
+	# Okay, must be a client by this point.
+	 # Wipe out prefix, not should be ignored.
+	# Process as client.
+	unless ( $self->_connection_registered( $conn_id ) ) {
+		$self->_cmd_from_unknown( $conn_id, $input );
+		last SWITCH;
+	}
+	if ( $self->_connection_is_peer( $conn_id ) ) {
+		$self->_cmd_from_peer( $conn_id, $input );
+		last SWITCH;
+	}
+	if ( $self->_connection_is_client( $conn_id ) ) {
+		delete ( $input->{prefix} );
+		$self->_cmd_from_client( $conn_id, $input );
+		last SWITCH;
+	}
+  };
+
+  return PCSI_EAT_NONE;
+}
+
+sub _auth_done {
+  my ($self) = shift;
+  my ($conn_id) = shift || return undef;
+
+  unless ( $self->_connection_exists( $conn_id ) ) {
+	return undef;
+  }
+  return $self->{state}->{connections}->{ $conn_id }->{auth};
 }
 
 sub _connection_exists {
@@ -91,6 +134,21 @@ sub _connection_exists {
 	return 0;
   }
   return 1;
+}
+
+sub _connection_register {
+  my ($self) = shift;
+  my ($conn_id) = shift || return undef;
+
+  unless ( $self->_connection_exists( $conn_id ) ) {
+	return undef;
+  }
+
+  if ( my $auth = $self->_auth_done( $conn_id ) ) {
+	if ( my $reg = $self->_reg_done( $conn_id ) ) {
+	}
+  }
+  #$self->{state}->{connections}->{ $conn_id }->{registered};
 }
 
 sub _connection_registered {
@@ -128,7 +186,7 @@ sub _state_delete {
 }
 
 sub server_name {
-  return $_[0]->{Config}->{ServerName};
+  return $_[0]->{config}->{ServerName};
 }
 
 sub client_nickname {
@@ -150,45 +208,45 @@ sub configure {
   }
 
   foreach my $option ( keys %{ $options } ) {
-     $self->{Config}->{ $option }  = $options->{ $option };
+     $self->{config}->{ $option }  = $options->{ $option };
   }
 
-  $self->{Config}->{ServerName} = 'poco.server.irc' unless ( $self->{Config}->{ServerName} );
-  $self->{Config}->{ServerDesc} = 'Poco? POCO? POCO!' unless ( $self->{Config}->{ServerDesc} );
-  $self->{Config}->{Version} = ref ( $self ) . '-' . $VERSION unless ( $self->{Config}->{Version} );
-  $self->{Config}->{Network} = 'poconet' unless ( $self->{Config}->{Network} );
-  $self->{Config}->{HOSTLEN} = 63 unless ( defined ( $self->{Config}->{HOSTLEN} ) and $self->{Config}->{HOSTLEN} > 63 );
-  $self->{Config}->{NICKLEN} = 9 unless ( defined ( $self->{Config}->{NICKLEN} ) and $self->{Config}->{NICKLEN} > 9 );
-  $self->{Config}->{USERLEN} = 10 unless ( defined ( $self->{Config}->{USERLEN} ) and $self->{Config}->{USERLEN} > 10 );
-  $self->{Config}->{REALLEN} = 50 unless ( defined ( $self->{Config}->{REALLEN} ) and $self->{Config}->{REALLEN} > 50 );
-  $self->{Config}->{TOPICLEN} = 80 unless ( defined ( $self->{Config}->{TOPICLEN} ) and $self->{Config}->{TOPICLEN} > 80 );
-  $self->{Config}->{CHANNELLEN} = 50 unless ( defined ( $self->{Config}->{CHANNELLEN} ) and $self->{Config}->{CHANNELLEN} > 50 );
-  $self->{Config}->{PASSWDLEN} = 20 unless ( defined ( $self->{Config}->{PASSWDLEN} ) and $self->{Config}->{PASSWDLEN} > 20 );
-  $self->{Config}->{KEYLEN} = 23 unless ( defined ( $self->{Config}->{KEYLEN} ) and $self->{Config}->{KEYLEN} > 23 );
-  $self->{Config}->{MAXRECIPIENTS} = 20 unless ( defined ( $self->{Config}->{MAXRECIPIENTS} ) and $self->{Config}->{MAXRECIPIENTS} > 20 );
-  $self->{Config}->{MAXBANS} = 30 unless ( defined ( $self->{Config}->{MAXBANS} ) and $self->{Config}->{MAXBANS} > 30 );
-  $self->{Config}->{MAXBANLENGTH} = 1024 unless ( defined ( $self->{Config}->{MAXBANLENGTH} ) and $self->{Config}->{MAXBANLENGTH} < 1024 );
-  $self->{Config}->{BANLEN} = $self->{Config}->{USERLEN} + $self->{Config}->{NICKLEN} + $self->{Config}->{HOSTLEN} + 3;
-  $self->{Config}->{USERHOST_REPLYLEN} = $self->{Config}->{USERLEN} + $self->{Config}->{NICKLEN} + $self->{Config}->{HOSTLEN} + 5;
+  $self->{config}->{ServerName} = 'poco.server.irc' unless ( $self->{config}->{ServerName} );
+  $self->{config}->{ServerDesc} = 'Poco? POCO? POCO!' unless ( $self->{config}->{ServerDesc} );
+  $self->{config}->{Version} = ref ( $self ) . '-' . $VERSION unless ( $self->{config}->{Version} );
+  $self->{config}->{Network} = 'poconet' unless ( $self->{config}->{Network} );
+  $self->{config}->{HOSTLEN} = 63 unless ( defined ( $self->{config}->{HOSTLEN} ) and $self->{config}->{HOSTLEN} > 63 );
+  $self->{config}->{NICKLEN} = 9 unless ( defined ( $self->{config}->{NICKLEN} ) and $self->{config}->{NICKLEN} > 9 );
+  $self->{config}->{USERLEN} = 10 unless ( defined ( $self->{config}->{USERLEN} ) and $self->{config}->{USERLEN} > 10 );
+  $self->{config}->{REALLEN} = 50 unless ( defined ( $self->{config}->{REALLEN} ) and $self->{config}->{REALLEN} > 50 );
+  $self->{config}->{TOPICLEN} = 80 unless ( defined ( $self->{config}->{TOPICLEN} ) and $self->{config}->{TOPICLEN} > 80 );
+  $self->{config}->{CHANNELLEN} = 50 unless ( defined ( $self->{config}->{CHANNELLEN} ) and $self->{config}->{CHANNELLEN} > 50 );
+  $self->{config}->{PASSWDLEN} = 20 unless ( defined ( $self->{config}->{PASSWDLEN} ) and $self->{config}->{PASSWDLEN} > 20 );
+  $self->{config}->{KEYLEN} = 23 unless ( defined ( $self->{config}->{KEYLEN} ) and $self->{config}->{KEYLEN} > 23 );
+  $self->{config}->{MAXRECIPIENTS} = 20 unless ( defined ( $self->{config}->{MAXRECIPIENTS} ) and $self->{config}->{MAXRECIPIENTS} > 20 );
+  $self->{config}->{MAXBANS} = 30 unless ( defined ( $self->{config}->{MAXBANS} ) and $self->{config}->{MAXBANS} > 30 );
+  $self->{config}->{MAXBANLENGTH} = 1024 unless ( defined ( $self->{config}->{MAXBANLENGTH} ) and $self->{config}->{MAXBANLENGTH} < 1024 );
+  $self->{config}->{BANLEN} = $self->{config}->{USERLEN} + $self->{config}->{NICKLEN} + $self->{config}->{HOSTLEN} + 3;
+  $self->{config}->{USERHOST_REPLYLEN} = $self->{config}->{USERLEN} + $self->{config}->{NICKLEN} + $self->{config}->{HOSTLEN} + 5;
   # TODO: Find some way to disable requirement for PoCo-Client-DNS and PoCo-Client-Ident
-  $self->{Config}->{Auth} = 1 unless ( defined ( $self->{Config}->{Auth} ) and $self->{Config}->{Auth} eq '0' );
-  $self->{Config}->{AntiFlood} = 1 unless ( defined ( $self->{Config}->{AntiFlood} ) and $self->{Config}->{AntiFlood} eq '0' );
-  if ( ( not defined ( $self->{Config}->{Admin} ) ) or ( ref $self->{Config}->{Admin} ne 'ARRAY' ) or ( scalar ( @{ $self->{Config}->{Admin} } ) != 3 ) ) {
-    $self->{Config}->{Admin}->[0] = 'Somewhere, Somewhere, Somewhere';
-    $self->{Config}->{Admin}->[1] = 'Some Institution';
-    $self->{Config}->{Admin}->[2] = 'someone@somewhere';
+  $self->{config}->{Auth} = 1 unless ( defined ( $self->{config}->{Auth} ) and $self->{config}->{Auth} eq '0' );
+  $self->{config}->{AntiFlood} = 1 unless ( defined ( $self->{config}->{AntiFlood} ) and $self->{config}->{AntiFlood} eq '0' );
+  if ( ( not defined ( $self->{config}->{Admin} ) ) or ( ref $self->{config}->{Admin} ne 'ARRAY' ) or ( scalar ( @{ $self->{config}->{Admin} } ) != 3 ) ) {
+    $self->{config}->{Admin}->[0] = 'Somewhere, Somewhere, Somewhere';
+    $self->{config}->{Admin}->[1] = 'Some Institution';
+    $self->{config}->{Admin}->[2] = 'someone@somewhere';
   }
-  if ( ( not defined ( $self->{Config}->{Info} ) ) or ( ref $self->{Config}->{Info} eq 'ARRAY' ) or ( scalar ( @{ $self->{Config}->{Info} } ) >= 1 ) ) {
-    $self->{Config}->{Info}->[0] = '# POE::Component::Server::IRC';
-    $self->{Config}->{Info}->[1] = '#';
-    $self->{Config}->{Info}->[2] = '# Author: Chris "BinGOs" Williams';
-    $self->{Config}->{Info}->[3] = '#';
-    $self->{Config}->{Info}->[4] = '# Filter-IRCD Written by Hachi';
-    $self->{Config}->{Info}->[5] = '#';
-    $self->{Config}->{Info}->[6] = '# This module may be used, modified, and distributed under the same';
-    $self->{Config}->{Info}->[7] = '# terms as Perl itself. Please see the license that came with your Perl';
-    $self->{Config}->{Info}->[8] = '# distribution for details.';
-    $self->{Config}->{Info}->[9] = '#';
+  if ( ( not defined ( $self->{config}->{Info} ) ) or ( ref $self->{config}->{Info} eq 'ARRAY' ) or ( scalar ( @{ $self->{config}->{Info} } ) >= 1 ) ) {
+    $self->{config}->{Info}->[0] = '# POE::Component::Server::IRC';
+    $self->{config}->{Info}->[1] = '#';
+    $self->{config}->{Info}->[2] = '# Author: Chris "BinGOs" Williams';
+    $self->{config}->{Info}->[3] = '#';
+    $self->{config}->{Info}->[4] = '# Filter-IRCD Written by Hachi';
+    $self->{config}->{Info}->[5] = '#';
+    $self->{config}->{Info}->[6] = '# This module may be used, modified, and distributed under the same';
+    $self->{config}->{Info}->[7] = '# terms as Perl itself. Please see the license that came with your Perl';
+    $self->{config}->{Info}->[8] = '# distribution for details.';
+    $self->{config}->{Info}->[9] = '#';
   }
 
   $self->{Error_Codes} = {

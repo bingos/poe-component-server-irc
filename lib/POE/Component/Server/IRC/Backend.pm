@@ -1137,9 +1137,80 @@ Returns an object. Accepts the following parameters, all are optional: 'alias', 
 
 =head1 METHODS
 
-session_id
-yield
-call
+These are the methods that may be invoked on our object.
+
+=over
+
+=item session_id
+
+Takes no arguments. Returns the ID of the component's session. Ideal for posting events to the component.
+
+=item yield
+
+This method provides an alternative object based means of posting events to the component. First argument is the event to post, following arguments are sent as arguments to the resultant post.
+
+=item call
+
+This method provides an alternative object based means of calling events to the component. First argument is the event to call, following arguments are sent as arguments to the resultant call.
+
+=item antiflood
+
+Takes two arguments, a connection id and true/false value. If value is specified antiflood protection is enabled or disabled accordingly for the specified connection. If a value is not specified the current status of antiflood protection is returned. Returns undef on error.
+
+=item compressed_link
+
+Takes two arguments, a connection id and true/false value. If value is specified compression is enabled or disabled accordingly for the specified connection. If a value is not specified the current status of compression is returned. Returns undef on error.
+
+=item disconnect
+
+Requires on argument, the connection id you wish to disconnect. The component will terminate the connection the next time that the wheel input is flushed, so you may send some sort of error message to the client on that connection. Returns true on success, undef on error.
+
+=item connection_info
+
+Takes one argument, a connection_id. Returns a list consisting of: the IP address of the peer; the port on the peer; 
+our socket address; our socket port. Returns undef on error.
+
+   my($peeraddr,$peerport,$sockaddr,$sockport) = $object->connection_info( $conn_id );
+
+=item plugin_add 
+
+Accepts two arguments:
+
+  The alias for the plugin
+  The actual plugin object
+
+The alias is there for the user to refer to it, as it is possible to have multiple
+plugins of the same kind active in one PoCo-Server-IRC-Backend object.
+
+Returns 1 if plugin was initialized, undef if not.
+
+=item plugin_del
+
+Accepts one argument:
+
+  The alias for the plugin or the plugin object itself
+
+Returns the plugin object if the plugin was removed, undef if not.
+
+=item plugin_get
+
+Accepts one argument:
+
+  The alias for the plugin
+
+Returns the plugin object if it was found, undef if not.
+
+=item plugin_list
+
+Has no arguments.
+
+Returns a hashref of plugin objects, keyed on alias, or an empty list if there are no
+plugins loaded.
+
+=back
+
+=head1 INPUT EVENTS
+
 register
 unregister
 shutdown
@@ -1149,21 +1220,8 @@ add_connector
 add_filter
 del_filter
 send_output
-ident_client_reply
-ident_client_error
-antiflood
-disconnect
-connection_info
-plugin_add
-plugin_del
-plugin_get
-plugin_list
-plugin_register
-plugin_unregister
 
-=head1 INPUT
-
-=head1 OUTPUT
+=head1 OUTPUT EVENTS
 
 =head1 AUTHOR
 
