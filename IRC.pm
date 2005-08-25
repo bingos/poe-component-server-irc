@@ -6,6 +6,7 @@
 #
 package POE::Component::Server::IRC;
 
+use strict;
 use Date::Format;
 use Socket;
 use Carp;
@@ -15,7 +16,7 @@ use POE::Component::Client::Ident;
 
 use vars qw($VERSION);
 
-$VERSION = '0.2';
+$VERSION = '0.3';
 
 use constant PCSI_REFCOUNT_TAG => "P::C::S::I registered";
 
@@ -1115,7 +1116,7 @@ sub ircd_client_names {
 	    $stuff = '@' if ( $self->is_channel_mode_set($channel,'s') );
 	    $stuff = '*' if ( $self->is_channel_mode_set($channel,'p') );
 	    # Need to make sure that the reply is not longer than 510 chars
-	    $self->send_output_to_client( $wheel_id, { command => '353', prefix => $self->server_name(), params => [ $nickname, $stuff, $channel, $user ] } );
+	    $self->send_output_to_client( $wheel_id, { command => '353', prefix => $self->server_name(), params => [ $nickname, $stuff, $channel, join(' ',$self->channel_members($channel)) ] } );
 	  }
 	}
 	foreach my $user ( $self->users_not_on_channels() ) {
@@ -2153,7 +2154,7 @@ sub cmd_server_mode {
 		   }
 		}
 		$arg = $ban[0] . '!' . $ban[1] . '@' . $ban[2];
-		$self->{State}->{Channels}->{ u_irc ( $input->{params}->[0] ) }->{Bans}->{ $arg } = $self->nick_long_form($self->{Clients}->{ $wheel_id }->{NickName});
+		$self->{State}->{Channels}->{ u_irc ( $input->{params}->[0] ) }->{Bans}->{ $arg } = $self->server_name();
 		$reply .= $mode;
 		push ( @reply_args, $arg );
 		last SWITCH33;
@@ -2217,9 +2218,6 @@ sub cmd_server_kill {
     if ( ( not defined ( $input->{params}->[0] ) or $input->{params}->[0] eq "" ) or ( not defined ( $input->{params}->[1] ) or $input->{params}->[1] eq "" ) ) {
 	last SWITCH;
     }
-    if ( $self->is_server_me($input->{params}->[0],$wheel_id) or $self->server_exists($input->{params}->[0]) ) {
-	last SWITCH;
-    }
     if ( not $self->nick_exists($input->{params}->[0]) ) {
 	last SWITCH;
     }
@@ -2246,8 +2244,8 @@ sub cmd_server_kick {
     if ( not defined ( $input->{params}->[0] ) or $input->{params}->[0] eq "" ) {
 	last SWITCH;
     }
-    @channels = split (/,/,$input->{params}->[0]) if ( defined ( $input->{params}->[0] ) );
-    @nicknames = split (/,/,$input->{params}->[1]) if ( defined ( $input->{params}->[1] ) );
+    my @channels = split (/,/,$input->{params}->[0]) if ( defined ( $input->{params}->[0] ) );
+    my @nicknames = split (/,/,$input->{params}->[1]) if ( defined ( $input->{params}->[1] ) );
     if ( scalar ( @channels ) != scalar ( @nicknames ) and scalar ( @channels ) != 1 ) {
 	last SWITCH;
     }

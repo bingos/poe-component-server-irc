@@ -1,5 +1,6 @@
 package POE::Component::Server::IRC::OperServ;
 
+use strict;
 use POE;
 use Carp;
 use base qw(POE::Component::Server::IRC);
