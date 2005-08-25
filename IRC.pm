@@ -3737,7 +3737,9 @@ networks to be created and to make the component more modular in design.
 Watch CPAN for further releases.
 
 =item modular design
+
 =item port existing code to new framework
+
 =item server to server protocols
 
 =head1 AUTHOR
@@ -3747,9 +3749,14 @@ Chris Williams, E<lt>chris@bingosnet.co.ukE<gt>
 =head1 SEE ALSO
 
 RFC 2810 L<http://www.faqs.org/rfcs/rfc2810.html>
+
 RFC 2811 L<http://www.faqs.org/rfcs/rfc2811.html>
+
 RFC 2812 L<http://www.faqs.org/rfcs/rfc2812.html>
+
 RFC 2813 L<http://www.faqs.org/rfcs/rfc2813.html>
+
+ThreatNet L<http://ali.as/threatnet/>
 
 =cut
 
