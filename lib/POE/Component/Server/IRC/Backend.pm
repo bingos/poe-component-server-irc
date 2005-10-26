@@ -1,5 +1,7 @@
 package POE::Component::Server::IRC::Backend;
 
+use strict;
+use warnings;
 use POE qw(Wheel::SocketFactory Wheel::ReadWrite Filter::Stackable Filter::Line Filter::IRCD);
 use POE::Component::Server::IRC::Plugin qw( :ALL );
 use Socket;
@@ -24,7 +26,8 @@ sub create {
 
   $self->{session_id} = POE::Session->create(
 	object_states => [
-		$self => { add_connector => '_add_connector',
+		$self => { _start	 => '_start',
+			   add_connector => '_add_connector',
 			   add_filter    => '_add_filter',
 			   add_listener  => '_add_listener', 
 			   del_filter    => '_del_filter',
@@ -79,7 +82,7 @@ sub _start {
 
   $self->{session_id} = $_[SESSION]->ID();
 
-  if ( $Self->{alias} ) {
+  if ( $self->{alias} ) {
 	$kernel->alias_set( $self->{alias} );
   } else {
 	$kernel->refcount_increment( $self->{session_id} => __PACKAGE__ );
@@ -105,7 +108,7 @@ sub _start {
 	$self->{will_do_auth} = 1;
   }
   $self->_load_our_plugins();
-  undef;
+  1;
 }
 
 sub _load_our_plugins {
@@ -355,7 +358,7 @@ sub _add_connector {
   }
   
   my $remoteaddress = $parms{remoteaddress};
-  my $remoteport = $params{remoteport};
+  my $remoteport = $parms{remoteport};
   
   unless( $remoteaddress and $remoteport ) {
 	return;
@@ -409,7 +412,7 @@ sub _sock_up {
         my ($ref) = { wheel => $wheel, peeraddr => $peeraddr, peerport => $peerport, 
 		      sockaddr => $sockaddr, sockport => $sockport, idle => time(), antiflood => 0, compress => 0 };
 	$self->{wheels}->{ $wheel_id } = $ref;
-	$self->_send_event( $self->{prefix} . 'connected' => $wheel_id => $peeraddress => $peerport => $sockaddr => $sockport );
+	$self->_send_event( $self->{prefix} . 'connected' => $wheel_id => $peeraddr => $peerport => $sockaddr => $sockport );
   }
   undef;
 }
@@ -438,11 +441,11 @@ sub _add_filter {
 
   $stackable->push( $self->{line_filter}, $self->{ircd_filter}, $filter );
 
-  if ( $self->compressed_link( $conn_id ) ) {
+  if ( $self->compressed_link( $wheel_id ) ) {
 	$stackable->unshift( POE::Filter::Zlib->new() );
   }
 
-  $self->{wheels}->{ $conn_id }->{wheel}->set_filter( $stackable );
+  $self->{wheels}->{ $wheel_id }->{wheel}->set_filter( $stackable );
 
   $self->_send_event( $self->{prefix} . 'filter_add' => $wheel_id => $filter );
 
@@ -528,7 +531,7 @@ sub _del_filter {
 	return;
   }
 
-  $self->{wheels}->{ $conn_id }->{wheel}->set_filter( $self->{filter} );
+  $self->{wheels}->{ $wheel_id }->{wheel}->set_filter( $self->{filter} );
 
   $self->_send_event( $self->{prefix} . 'filter_del' => $wheel_id );
 
@@ -754,6 +757,8 @@ sub compressed_link {
   }
   if ( $value ) {
 	$self->{wheels}->{ $wheel_id }->{wheel}->set_filter( POE::Filter::Stackable->new( Filters => [ POE::Filter::Zlib->new(), $self->{line_filter}, $self->{ircd_filter} ] ) );
+  } else {
+	$self->{wheels}->{ $wheel_id }->{wheel}->set_filter( $self->{filter} );
   }
   $self->{wheels}->{ $wheel_id }->{compress} = $value;
 }
@@ -872,7 +877,7 @@ sub plugin_del {
 
 		# Tell the plugin to unregister
 		eval {
-			$plugin->PCI_unregister( $self );
+			$plugin->PCSI_unregister( $self );
 		};
 
 		# Okay, send an event to let others know this plugin is deleted
@@ -1050,11 +1055,11 @@ sub _plugin_process {
 
 	# Check if any plugins are interested in this event
 	if ( not ( exists $self->{PLUGINS}->{ $type }->{ $event } or exists $self->{PLUGINS}->{ $type }->{ 'all' } ) ) {
-		return PCI_EAT_NONE;
+		return PCSI_EAT_NONE;
 	}
 
 	# Determine the return value
-	my $return = PCI_EAT_NONE;
+	my $return = PCSI_EAT_NONE;
 
 	# Which type are we doing?
 	my $sub;

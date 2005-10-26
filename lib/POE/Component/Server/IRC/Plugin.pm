@@ -15,10 +15,10 @@ our %EXPORT_TAGS = ( 'ALL' => [ qw( PCSI_EAT_NONE PCSI_EAT_CLIENT PCSI_EAT_PLUGI
 Exporter::export_ok_tags( 'ALL' );
 
 # Our constants
-sub PCSI_EAT_NONE	() { 1 }
-sub PCSI_EAT_CLIENT	() { 2 }
-sub PCSI_EAT_PLUGIN	() { 3 }
-sub PCSI_EAT_ALL	() { 4 }
+use constant PCSI_EAT_NONE   => 1;
+use constant PCSI_EAT_CLIENT => 2;
+use constant PCSI_EAT_PLUGIN => 3;
+use constant PCSI_EAT_ALL    => 4;
 
 1;
 __END__

@@ -6,6 +6,8 @@
 #
 package POE::Component::Server::IRC::Daemon;
 
+use strict;
+use warnings;
 use POE::Component::Server::IRC::Plugin qw ( :ALL );
 use Carp;
 use vars qw($VERSION);
@@ -159,6 +161,58 @@ sub _connection_registered {
 	return undef;
   }
   return $self->{state}->{connections}->{ $conn_id }->{registered};
+}
+
+sub _connection_is_peer {
+  my ($self) = shift;
+  my ($conn_id) = shift || return undef;
+
+  unless ( $self->_connection_exists( $conn_id ) ) {
+	return undef;
+  }
+}
+
+sub _connection_is_client {
+  my ($self) = shift;
+  my ($conn_id) = shift || return undef;
+
+  unless ( $self->_connection_exists( $conn_id ) ) {
+	return undef;
+  }
+}
+
+sub _cmd_from_unknown {
+  my ($self,$conn_id,$input) = splice @_, 0, 3;
+
+  my $cmd = $input->{command};
+  my $params = $input->{params};
+  SWITCH: {
+	last SWITCH;
+  }
+  return 1;
+}
+
+sub _cmd_from_peer {
+  my ($self,$conn_id,$input) = splice @_, 0, 3;
+
+  my $cmd = $input->{command};
+  my $params = $input->{params};
+  my $prefix = $input->{prefix};
+  SWITCH: {
+	last SWITCH;
+  }
+  return 1;
+}
+
+sub _cmd_from_client {
+  my ($self,$conn_id,$input) = splice @_, 0, 3;
+
+  my $cmd = $input->{command};
+  my $params = $input->{params};
+  SWITCH: {
+	last SWITCH;
+  }
+  return 1;
 }
 
 #################
