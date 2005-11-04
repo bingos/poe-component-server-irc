@@ -32,7 +32,8 @@ sub create {
 			   add_listener  => '_add_listener', 
 			   del_filter    => '_del_filter',
 			   del_listener  => '_del_listener', 
-			   send_output   => '_send_output', },
+			   send_output   => '_send_output',
+			   shutdown 	 => '_shutdown', },
 		$self => [ qw(  __send_event
 				_accept_connection 
 				_accept_failed 
@@ -50,7 +51,6 @@ sub create {
 				ident_agent_error
 				ident_agent_reply
 				register 
-				shutdown 
 				unregister) ],
 	],
 	( ref($options) eq 'HASH' ? ( options => $options ) : () ),
@@ -144,6 +144,12 @@ sub unregister {
 }
 
 sub shutdown {
+  my ($self) = shift;
+
+  $self->yield( 'shutdown' => @_ );
+}
+
+sub _shutdown {
   my ($kernel,$self) = @_[KERNEL,OBJECT];
 
   if ( $self->{alias} ) {
@@ -597,9 +603,6 @@ sub _auth_client {
 	$self->{wheels}->{ $wheel_id }->{auth}->{hostname} = 'localhost';
 	$self->yield( '_auth_done' => $wheel_id );
   }
-  #$kernel->post( $self->{ident_client} => query => PeerAddr => $peeraddr, PeerPort => $peerport, SockAddr => $sockaddr,
-#				                   SockPort => $sockport, BuggyIdentd => 1, TimeOut => 10,
-#						   Reference => $wheel_id );
   POE::Component::Client::Ident::Agent->spawn( PeerAddr => $peeraddr, PeerPort => $peerport, SockAddr => $sockaddr,
 				               SockPort => $sockport, BuggyIdentd => 1, TimeOut => 10,
 					       Reference => $wheel_id );
@@ -729,8 +732,6 @@ sub ident_agent_error {
       $self->yield( '_auth_done' => $wheel_id );
   }
 }
-
-
 
 ######################
 # Connection methods #
@@ -1132,7 +1133,7 @@ L<POE::Component::Server::IRC|POE::Component::Server::IRC>.
 =item create
 
 Returns an object. Accepts the following parameters, all are optional: 'alias', a L<POE::Kernel|POE::Kernel> alias to set;
-'auth', set to 0 to globally disable IRC authentication, default is auth is enabled; 'antiflood', set to 0 to globally disable flood protection.
+'auth', set to 0 to globally disable IRC authentication, default is auth is enabled; 'antiflood', set to 0 to globally disable flood protection; 'prefix', this is the prefix that is used to generate event names that the component produces, the default is 'ircd_backend'.
 
   my $object = POE::Component::Server::IRC::Backend->create( 
 	alias => 'ircd', # Set an alias, default, no alias set.
@@ -1145,6 +1146,10 @@ Returns an object. Accepts the following parameters, all are optional: 'alias', 
 These are the methods that may be invoked on our object.
 
 =over
+
+=item shutdown
+
+Takes no arguments. Terminates the component. Removes all listeners and connectors. Disconnects all current client and server connections.
 
 =item session_id
 
@@ -1216,15 +1221,52 @@ plugins loaded.
 
 =head1 INPUT EVENTS
 
-register
-unregister
-shutdown
-add_listener
-del_listener
-add_connector
-add_filter
-del_filter
-send_output
+These are POE events that the component will accept:
+
+=over
+
+=item register
+
+Takes no arguments. Registers a session to receive events from the component.
+
+=item unregister
+
+Takes no arguments. Unregisters a previously registered session.
+
+=item add_listener
+
+Takes a number of arguments. Adds a new listener.
+
+	'port', the TCP port to listen on. Default is a random port;
+	'auth', enable or disable auth sub-system for this listener. Default enabled;
+	'bindaddr', specify a local address to bind the listener to;
+	'listenqueue', change the SocketFactory's ListenQueue;
+
+=item del_listener
+
+Takes either 'port' or 'listener'. 'listener' is a previously returned listener ID; 'port', a
+listening TCP port. The listener will be deleted. Note: any connected clients on that port will not
+be disconnected.
+
+=item add_connector
+
+Takes two mandatory arguments, 'remoteaddress' and 'remoteport'. Opens a TCP connection to specified address and port.
+
+	'remoteaddress', hostname or IP address to connect to;
+	'remoteport', the TCP port on the remote host;
+	'bindaddress', a local address to bind from ( optional );
+
+=item send_output
+
+Takes a hashref and one or more connection IDs.
+
+  $poe_kernel->post( $object->session_id() => send_output => 
+	{ prefix => 'blah!~blah@blah.blah.blah',
+	  command => 'PRIVMSG',
+	  params  => [ '#moo', 'cows go moo, not fish :D' ] },
+	@list_of_connection_ids );
+
+=back
 
 =head1 OUTPUT EVENTS
 
