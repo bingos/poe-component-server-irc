@@ -98,8 +98,6 @@ sub _start {
 	require POE::Component::Client::DNS;
   };
   unless ( $@ ) {
-	#$self->{ident_client} = 'poco_ident_' . $self->{session_id};
-	#POE::Component::Client::Ident->spawn( $self->{ident_client} );
 	$self->{resolver} = POE::Component::Client::DNS->spawn( Alias => 'poco_dns_' . $self->{session_id}, Timeout => 10 );
 	$self->{can_do_auth} = 1;
   }
@@ -438,10 +436,7 @@ sub _add_filter {
   my ($kernel,$self,$sender) = @_[KERNEL,OBJECT,SENDER];
   my ($wheel_id) = $_[ARG0] || croak "You must supply a connection id\n";
   my ($filter) = $_[ARG1] || croak "You must supply a filter object\n";
-
-  unless ( $self->_wheel_exists( $wheel_id ) ) {
-	return;
-  }
+  return unless $self->_wheel_exists( $wheel_id );
 
   my $stackable = POE::Filter::Stackable->new();
 
@@ -462,9 +457,7 @@ sub _anti_flood {
   my ($self,$wheel_id,$input) = splice @_, 0, 3;
   my $current_time = time();
 
-  unless ( $wheel_id and $self->_wheel_exists( $wheel_id ) and $input ) {
-	return undef;
-  }
+  return unless $wheel_id and $self->_wheel_exists( $wheel_id ) and $input; 
   SWITCH: { 
      if ( $self->{wheels}->{ $wheel_id }->{flooded} ) {
 	last SWITCH;
@@ -488,21 +481,16 @@ sub _anti_flood {
 }
 
 sub _conn_error {
-  my ($kernel,$self,$errstr,$wheel_id) = @_[KERNEL,OBJECT,ARG2,ARG3];
-
-  $self->_send_event( $self->{prefix} . 'disconnected' => $wheel_id => $errstr );
-  $self->_disconnected( $wheel_id );
+  my ($self,$errstr,$wheel_id) = @_[OBJECT,ARG2,ARG3];
+  $self->_disconnected( $wheel_id, $errstr );
   undef;
 }
 
 sub _conn_flushed {
   my ($kernel,$self,$wheel_id) = @_[KERNEL,OBJECT,ARG0];
-
-  unless ( $self->_wheel_exists( $wheel_id ) ) {
-	return;
-  }
+  return unless $self->_wheel_exists( $wheel_id );
   if ( $self->{wheels}->{ $wheel_id }->{disconnecting} ) {
-	$self->_disconnected( $wheel_id );
+	$self->_disconnected( $wheel_id, $self->{wheels}->{ $wheel_id}->{disconnecting} );
   }
   undef;
 }
@@ -532,25 +520,16 @@ sub del_filter {
 sub _del_filter {
   my ($kernel,$self,$sender) = @_[KERNEL,OBJECT,SENDER];
   my ($wheel_id) = $_[ARG0] || croak "You must supply a connection id\n";
-
-  unless ( $self->_wheel_exists( $wheel_id ) ) {
-	return;
-  }
-
+  return unless $self->_wheel_exists( $wheel_id );
   $self->{wheels}->{ $wheel_id }->{wheel}->set_filter( $self->{filter} );
-
   $self->_send_event( $self->{prefix} . 'filter_del' => $wheel_id );
-
   undef;
 }
 
 sub _event_dispatcher {
   my ($kernel,$self,$wheel_id) = @_[KERNEL,OBJECT,ARG0];
 
-  unless ( $self->_wheel_exists( $wheel_id ) and ( not $self->{wheels}->{ $wheel_id }->{flooded} ) ) {
-	return;
-  }
-
+  return unless $self->_wheel_exists( $wheel_id ) and !$self->{wheels}->{ $wheel_id }->{flooded};
   shift ( @{ $self->{wheels}->{ $wheel_id }->{alarm_ids} } );
   my $input = shift ( @{ $self->{wheels}->{ $wheel_id }->{msq} } );
   if ( $input ) {
@@ -569,7 +548,7 @@ sub _send_output {
   my ($kernel,$self,$output) = @_[KERNEL,OBJECT,ARG0];
 
   foreach my $wheel_id ( @_[ARG1..$#_] ) {
-	next unless ( $self->_wheel_exists( $wheel_id ) );
+	next unless $self->_wheel_exists( $wheel_id );
 	$self->{wheels}->{ $wheel_id }->{wheel}->put( $output ) if ( $output and ref( $output ) eq 'HASH' );
   }
   undef;
@@ -581,10 +560,7 @@ sub _send_output {
 
 sub _auth_client {
   my ($kernel,$self,$wheel_id) = @_[KERNEL,OBJECT,ARG0];
-
-  unless ( $self->_wheel_exists( $wheel_id ) ) {
-	return;
-  }
+  return unless $self->_wheel_exists( $wheel_id );
 
   my ($peeraddr,$peerport,$sockaddr,$sockport) = $self->connection_info( $wheel_id );
 
@@ -612,10 +588,7 @@ sub _auth_client {
 sub _auth_done {
   my ($kernel,$self,$wheel_id) = @_[KERNEL,OBJECT,ARG0];
 
-  unless ( $self->_wheel_exists( $wheel_id ) ) {
-	return;
-  }
-
+  return unless $self->_wheel_exists( $wheel_id );
   if ( defined ( $self->{wheels}->{ $wheel_id }->{auth}->{ident} ) and defined ( $self->{wheels}->{ $wheel_id }->{auth}->{hostname} ) ) {
 	$self->_send_event( $self->{prefix} . 'auth_done' => $wheel_id => { 
 		ident    => $self->{wheels}->{ $wheel_id }->{auth}->{ident},
@@ -631,10 +604,7 @@ sub _got_hostname_response {
     my $response = $_[ARG0];
     my ($wheel_id) = $response->{context}->{wheel};
 
-    SWITCH: {
-    unless ( $self->_wheel_exists( $wheel_id ) ) {
-	last SWITCH;
-    }
+    return unless $self->_wheel_exists( $wheel_id );
     if ( defined ( $response->{response} ) ) {
       my @answers = $response->{response}->answer();
 
@@ -662,7 +632,7 @@ sub _got_hostname_response {
 	$self->{wheels}->{ $wheel_id }->{auth}->{hostname} = '';
 	$self->yield( '_auth_done' => $wheel_id );
     }
-    }
+    undef;
 }
 
 sub _got_ip_response {
@@ -670,10 +640,7 @@ sub _got_ip_response {
     my $response = $_[ARG0];
     my ($wheel_id) = $response->{context}->{wheel};
 
-    SWITCH: {
-    unless ( $self->_wheel_exists( $wheel_id ) ) {
-	last SWITCH;
-    }
+    return unless $self->_wheel_exists( $wheel_id );
     if ( defined ( $response->{response} ) ) {
       my @answers = $response->{response}->answer();
       my ($peeraddress) = $response->{context}->{peeraddr};
@@ -703,7 +670,7 @@ sub _got_ip_response {
 	$self->{wheels}->{ $wheel_id }->{auth}->{hostname} = '';
 	$self->yield( '_auth_done' => $wheel_id );
     }
-    }
+    undef;
 }
 
 sub ident_agent_reply {
@@ -731,6 +698,7 @@ sub ident_agent_error {
       $self->{wheels}->{ $wheel_id }->{auth}->{ident} = '';
       $self->yield( '_auth_done' => $wheel_id );
   }
+  undef;
 }
 
 ######################
@@ -739,23 +707,15 @@ sub ident_agent_error {
 
 sub antiflood {
   my ($self,$wheel_id,$value) = splice @_, 0, 3;
-  unless ( $self->_wheel_exists( $wheel_id ) ) {
-	return;
-  }
-  unless ( defined ( $value ) ) {
-	return $self->{wheels}->{ $wheel_id }->{antiflood};
-  }
+  return unless $self->_wheel_exists( $wheel_id );
+  return $self->{wheels}->{ $wheel_id }->{antiflood} unless defined $value;
   $self->{wheels}->{ $wheel_id }->{antiflood} = $value;
 }
 
 sub compressed_link {
   my ($self,$wheel_id,$value) = splice @_, 0, 3;
-  unless ( $self->_wheel_exists( $wheel_id ) ) {
-	return;
-  }
-  unless ( defined ( $value ) ) {
-	return $self->{wheels}->{ $wheel_id }->{compress};
-  }
+  return unless $self->_wheel_exists( $wheel_id );
+  return $self->{wheels}->{ $wheel_id }->{compress} unless defined $value;
   if ( $value ) {
 	$self->{wheels}->{ $wheel_id }->{wheel}->set_filter( POE::Filter::Stackable->new( Filters => [ POE::Filter::Zlib->new(), $self->{line_filter}, $self->{ircd_filter} ] ) );
   } else {
@@ -766,41 +726,27 @@ sub compressed_link {
 
 sub disconnect {
   my ($self,$wheel_id) = splice @_, 0, 2;
-
-  unless ( $wheel_id and $self->_wheel_exists( $wheel_id ) ) {
-	return;
-  }
-  $self->{wheels}->{ $wheel_id }->{disconnecting} = 1;
+  return unless $wheel_id and $self->_wheel_exists( $wheel_id );
+  $self->{wheels}->{ $wheel_id }->{disconnecting} = shift || 1;
 }
 
 sub _disconnected {
   my ($self,$wheel_id) = splice @_, 0, 2;
-
-  unless ( $wheel_id ) {
-	return 0;
-  }
+  return unless $wheel_id and $self->_wheel_exists( $wheel_id );
   delete ( $self->{wheels}->{ $wheel_id } );
+  $self->_send_event( $self->{prefix} . 'disconnected' => $wheel_id => shift || '' );
   return 1;
 }
 
 sub connection_info {
   my ($self,$wheel_id) = splice @_, 0, 2;
-  my @result;
-  unless ( $self->_wheel_exists( $wheel_id ) ) {
-	return;
-  }
-  foreach my $key ( qw(peeraddr peerport sockaddr sockport) ) {
-	push( @result, $self->{wheels}->{ $wheel_id }->{ $key } );
-  }
-  return @result;
+  return unless $self->_wheel_exists( $wheel_id );
+  return map { $self->{wheels}->{ $wheel_id }->{$_} } qw(peeraddr peerport sockaddr sockport);
 }
 
 sub _wheel_exists {
   my ($self,$wheel_id) = @_;
-
-  unless ( $wheel_id and defined ( $self->{wheels}->{ $wheel_id } ) ) {
-	return 0;
-  }
+  return 0 unless $wheel_id and defined ( $self->{wheels}->{ $wheel_id } );
   return 1;
 }
 
@@ -1130,16 +1076,25 @@ L<POE::Component::Server::IRC|POE::Component::Server::IRC>.
 
 =head1 CONSTRUCTOR
 
+=over
+
 =item create
 
-Returns an object. Accepts the following parameters, all are optional: 'alias', a L<POE::Kernel|POE::Kernel> alias to set;
-'auth', set to 0 to globally disable IRC authentication, default is auth is enabled; 'antiflood', set to 0 to globally disable flood protection; 'prefix', this is the prefix that is used to generate event names that the component produces, the default is 'ircd_backend'.
+Returns an object. Accepts the following parameters, all are optional: 
+
+  'alias', a POE::Kernel alias to set;
+  'auth', set to 0 to globally disable IRC authentication, default is auth is enabled;
+  'antiflood', set to 0 to globally disable flood protection;
+  'prefix', this is the prefix that is used to generate event names that the component produces, 
+	    the default is 'ircd_backend_'.
 
   my $object = POE::Component::Server::IRC::Backend->create( 
 	alias => 'ircd', # Set an alias, default, no alias set.
 	auth  => 0, # Disable auth globally, default enabled.
 	antiflood => 0, # Disable flood protection globally, default enabled.
   );
+
+=back
 
 =head1 METHODS
 
@@ -1182,6 +1137,166 @@ our socket address; our socket port. Returns undef on error.
 
    my($peeraddr,$peerport,$sockaddr,$sockport) = $object->connection_info( $conn_id );
 
+=back
+
+=head1 INPUT EVENTS
+
+These are POE events that the component will accept:
+
+=over
+
+=item register
+
+Takes no arguments. Registers a session to receive events from the component.
+
+=item unregister
+
+Takes no arguments. Unregisters a previously registered session.
+
+=item add_listener
+
+Takes a number of arguments. Adds a new listener.
+
+	'port', the TCP port to listen on. Default is a random port;
+	'auth', enable or disable auth sub-system for this listener. Default enabled;
+	'bindaddr', specify a local address to bind the listener to;
+	'listenqueue', change the SocketFactory's ListenQueue;
+
+=item del_listener
+
+Takes either 'port' or 'listener': 
+
+	'listener' is a previously returned listener ID;
+	'port', listening TCP port; 
+
+The listener will be deleted. Note: any connected clients on that port will not be disconnected.
+
+=item add_connector
+
+Takes two mandatory arguments, 'remoteaddress' and 'remoteport'. Opens a TCP connection to specified address and port.
+
+	'remoteaddress', hostname or IP address to connect to;
+	'remoteport', the TCP port on the remote host;
+	'bindaddress', a local address to bind from ( optional );
+
+=item send_output
+
+Takes a hashref and one or more connection IDs.
+
+  $poe_kernel->post( $object->session_id() => send_output => 
+	{ prefix => 'blah!~blah@blah.blah.blah',
+	  command => 'PRIVMSG',
+	  params  => [ '#moo', 'cows go moo, not fish :D' ] },
+	@list_of_connection_ids );
+
+=back
+
+=head1 OUTPUT EVENTS
+
+Once registered your session will receive these states, which will have the applicable prefix as specified to create() or the default which is 'ircd_backend_':
+
+=over
+
+=item registered
+
+Emitted: when a session registers with the component;
+Target:	the registering session;
+Args: 
+	ARG0, the component's object;
+
+=item unregistered
+
+Emitted: when a session unregisters with the component;
+Target: the unregistering session;
+Args: none
+
+=item connection
+
+Emitted: when a client connects to one of the component's listeners;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the conn id;
+	ARG1, their ip address;
+	ARG2, their tcp port;
+	ARG3, our ip address;
+	ARG4, our socket port;
+
+=item auth_done
+
+Emitted: after a client has connected and the component has validated hostname and ident;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the conn id;
+	ARG1, a HASHREF with the following keys: 'ident' and 'hostname';
+
+=item listener_add
+
+Emitted: on a successful add_listener() call;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the listening port;
+	ARG1, the listener id;
+
+=item listener_del
+
+Emitted: on a successful del_listener() call;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the listening port;
+	ARG1, the listener id;
+
+=item socketerr
+
+Emitted: on the failure of an add_connector()
+Target: all plugins and registered sessions;
+Args:
+	ARG0, a HASHREF containing the params that add_connector() was called with;
+
+=item connected
+
+Emitted: when the component establishes a connection with a peer;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the conn id;
+	ARG1, their ip address;
+	ARG2, their tcp port;
+	ARG3, our ip address;
+	ARG4, our socket port;
+
+=item connection_flood
+
+Emitted: when a client connection is flooded;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the conn id;
+
+=item disconnected
+
+Emitted: when a client disconnects;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the conn id;
+	ARG1, the error or reason for disconnection;
+
+=item cmd_*
+
+Emitted: when a client or peer sends a valid IRC line to us;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the conn id;
+	ARG1, a HASHREF containing the output record from POE::Filter::IRCD:
+	{ prefix => 'blah!~blah@blah.blah.blah',
+	  command => 'PRIVMSG',
+	  params  => [ '#moo', 'cows go moo, not fish :D' ],
+	  raw_line => ':blah!~blah@blah.blah.blah.blah PRIVMSG #moo :cows go moo, not fish :D' };
+=back
+
+=head1 PLUGIN SYSTEM
+
+POE::Component::Server::IRC sports a plugin system remarkably similar to L<POE::Component::IRC>'s.
+
+=over
+
 =item plugin_add 
 
 Accepts two arguments:
@@ -1216,60 +1331,8 @@ Has no arguments.
 
 Returns a hashref of plugin objects, keyed on alias, or an empty list if there are no
 plugins loaded.
-
-=back
-
-=head1 INPUT EVENTS
-
-These are POE events that the component will accept:
-
-=over
-
-=item register
-
-Takes no arguments. Registers a session to receive events from the component.
-
-=item unregister
-
-Takes no arguments. Unregisters a previously registered session.
-
-=item add_listener
-
-Takes a number of arguments. Adds a new listener.
-
-	'port', the TCP port to listen on. Default is a random port;
-	'auth', enable or disable auth sub-system for this listener. Default enabled;
-	'bindaddr', specify a local address to bind the listener to;
-	'listenqueue', change the SocketFactory's ListenQueue;
-
-=item del_listener
-
-Takes either 'port' or 'listener'. 'listener' is a previously returned listener ID; 'port', a
-listening TCP port. The listener will be deleted. Note: any connected clients on that port will not
-be disconnected.
-
-=item add_connector
-
-Takes two mandatory arguments, 'remoteaddress' and 'remoteport'. Opens a TCP connection to specified address and port.
-
-	'remoteaddress', hostname or IP address to connect to;
-	'remoteport', the TCP port on the remote host;
-	'bindaddress', a local address to bind from ( optional );
-
-=item send_output
-
-Takes a hashref and one or more connection IDs.
-
-  $poe_kernel->post( $object->session_id() => send_output => 
-	{ prefix => 'blah!~blah@blah.blah.blah',
-	  command => 'PRIVMSG',
-	  params  => [ '#moo', 'cows go moo, not fish :D' ] },
-	@list_of_connection_ids );
-
-=back
-
-=head1 OUTPUT EVENTS
-
 =head1 AUTHOR
+
+Chris 'BinGOs' Williams
 
 =head1 SEE ALSO

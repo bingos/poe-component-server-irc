@@ -57,6 +57,7 @@ sub _shutdown {
   $heap->{irc}->yield( 'unregister' => 'all' );
   $heap->{irc}->yield( 'shutdown' );
   $heap->{ircd}->yield( 'shutdown' );
+  undef;
 }
 
 sub ircd_backend_registered {
@@ -72,21 +73,25 @@ sub ircd_backend_listener_add {
   ok( 1, "Started a listener on $port" );
   $heap->{port} = $port;
   $heap->{irc}->yield( connect => { server => 'localhost', port => $port, nick => __PACKAGE__ } );
+  undef;
 }
 
 sub ircd_backend_listener_del {
   my ($heap,$port) = @_[HEAP,ARG0];
 
-  ok( 1, "Stopped listener on $port" );
+  ok( $port eq $heap->{port}, "Stopped listener on $port" );
   $_[KERNEL]->yield( '_shutdown' );
+  undef;
 }
 
 sub ircd_backend_connection {
   ok( 1, 'ircd_backend_connection' );
+  undef;
 }
 
 sub ircd_backend_auth_done {
   ok( 1, 'ircd_backend_auth_done' );
+  undef;
 }
 
 sub ircd_backend_cmd_nick {
@@ -95,6 +100,7 @@ sub ircd_backend_cmd_nick {
   if ( $_[HEAP]->{result} >= 2 ) {
 	$_[HEAP]->{ircd}->del_listener( port => $_[HEAP]->{port} );
   }
+  undef;
 }
 
 sub ircd_backend_cmd_user {
@@ -103,6 +109,7 @@ sub ircd_backend_cmd_user {
   if ( $_[HEAP]->{result} >= 2 ) {
 	$_[HEAP]->{ircd}->del_listener( port => $_[HEAP]->{port} );
   }
+  undef;
 }
 
 
