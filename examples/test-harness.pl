@@ -1,3 +1,6 @@
+use lib '../blib/lib';
+use strict;
+use warnings;
 use POE qw(Component::Server::IRC);
 
 my $pocosi = POE::Component::Server::IRC->create( auth => 1, options => { trace => 1 } );

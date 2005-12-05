@@ -1051,7 +1051,7 @@ __END__
 =head1 NAME
 
 POE::Component::Server::IRC::Backend - A POE component class that provides network connection abstraction for
-L<POE::Component::Server::IRC|POE::Component::Server::IRC>.
+L<POE::Component::Server::IRC>.
 
 =head1 SYNOPSIS
 
@@ -1073,6 +1073,9 @@ L<POE::Component::Server::IRC|POE::Component::Server::IRC>.
   }
 
 =head1 DESCRIPTION
+
+POE::Component::Server::IRC::Backend - A POE component class that provides network connection abstraction for
+L<POE::Component::Server::IRC>.
 
 =head1 CONSTRUCTOR
 
@@ -1295,6 +1298,8 @@ Args:
 
 POE::Component::Server::IRC sports a plugin system remarkably similar to L<POE::Component::IRC>'s.
 
+These are plugin related methods:
+
 =over
 
 =item plugin_add 
@@ -1331,6 +1336,31 @@ Has no arguments.
 
 Returns a hashref of plugin objects, keyed on alias, or an empty list if there are no
 plugins loaded.
+
+=back
+
+And plugin related states, prefixed with the appropriate prefix or the default, 'ircd_backend_':
+
+=over
+
+=item plugin_add
+
+Emitted: when the component successfully adds a new plugin;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, plugin alias;
+	ARG1, plugin object;
+
+=item plugin_del
+
+Emitted: when the component successfully removes a plugin;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, plugin alias;
+	ARG1, plugin object;
+
+=back
+
 =head1 AUTHOR
 
 Chris 'BinGOs' Williams

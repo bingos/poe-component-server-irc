@@ -10,6 +10,7 @@ use strict;
 use warnings;
 use POE::Component::Server::IRC::Plugin qw ( :ALL );
 use Carp;
+use Data::Dumper;
 use vars qw($VERSION);
 
 $VERSION = '0.31';
@@ -69,13 +70,9 @@ sub IRCD_connection {
 sub IRCD_auth_done {
   my ($self,$ircd) = splice @_,0 ,2;
   my ($conn_id,$ref) = map { ${ $_ } } @_;
-
-  unless ( $self->_connection_exists( $conn_id ) ) {
-	return PCSI_EAT_NONE;
-  }
-
+  return PCSI_EAT_NONE unless $self->_connection_exists( $conn_id );
   $self->{state}->{connections}->{ $conn_id }->{auth} = $ref;
-  $self->_connection_register();
+  $self->_client_register( $conn_id );
   return PCSI_EAT_NONE;
 }
 
@@ -84,7 +81,7 @@ sub _default {
   return PCSI_EAT_NONE unless ( $event =~ /^IRCD_cmd_/ );
   my ($conn_id,$input) = map { ${ $_ } } @_;
 
-  return PCSI_EAT_NONE unless ( $self->_connection_exists( $conn_id ) );
+  return PCSI_EAT_NONE unless $self->_connection_exists( $conn_id );
 
   SWITCH: {
 	# Registered ?
@@ -121,45 +118,37 @@ sub _default {
 sub _auth_done {
   my ($self) = shift;
   my ($conn_id) = shift || return undef;
-
-  unless ( $self->_connection_exists( $conn_id ) ) {
-	return undef;
-  }
+  return unless $self->_connection_exists( $conn_id );
   return $self->{state}->{connections}->{ $conn_id }->{auth};
 }
 
 sub _connection_exists {
   my ($self) = shift;
   my ($conn_id) = shift || return 0;
-
-  unless ( defined ( $self->{state}->{connections}->{ $conn_id } ) ) {
-	return 0;
-  }
+  return 0 unless defined $self->{state}->{connections}->{ $conn_id };
   return 1;
 }
 
-sub _connection_register {
+sub _client_register {
   my ($self) = shift;
   my ($conn_id) = shift || return undef;
-
-  unless ( $self->_connection_exists( $conn_id ) ) {
-	return undef;
-  }
-
-  if ( my $auth = $self->_auth_done( $conn_id ) ) {
-	if ( my $reg = $self->_reg_done( $conn_id ) ) {
-	}
-  }
-  #$self->{state}->{connections}->{ $conn_id }->{registered};
+  return unless $self->_connection_exists( $conn_id );
+  return unless $self->{state}->{connections}->{ $conn_id }->{nick};
+  return unless $self->{state}->{connections}->{ $conn_id }->{user};
+  my $auth = $self->_auth_done( $conn_id );
+  return unless $auth;
+  # pass required for link
+  # Add new nick
+  $self->_send_output_to_client( $conn_id => { prefix => $self->server_name(), command => '001', params => [ $self->client_nickname( $conn_id ), 'Welcome to the Internet Relay Chat network ' . $self->client_nickname( $conn_id ) ] } );
+  $self->{state}->{connections}->{ $conn_id }->{registered} = 1;
+  $self->{state}->{connections}->{ $conn_id }->{type} = 'c';
 }
 
 sub _connection_registered {
   my ($self) = shift;
   my ($conn_id) = shift || return undef;
 
-  unless ( $self->_connection_exists( $conn_id ) ) {
-	return undef;
-  }
+  return unless $self->_connection_exists( $conn_id );
   return $self->{state}->{connections}->{ $conn_id }->{registered};
 }
 
@@ -167,27 +156,61 @@ sub _connection_is_peer {
   my ($self) = shift;
   my ($conn_id) = shift || return undef;
 
-  unless ( $self->_connection_exists( $conn_id ) ) {
-	return undef;
-  }
+  return unless $self->_connection_exists( $conn_id );
+  return unless $self->{state}->{connections}->{ $conn_id }->{registered};
+  return 1 if $self->{state}->{connections}->{ $conn_id }->{type} eq 'p';
+  return 0;
 }
 
 sub _connection_is_client {
   my ($self) = shift;
   my ($conn_id) = shift || return undef;
 
-  unless ( $self->_connection_exists( $conn_id ) ) {
-	return undef;
-  }
+  return unless $self->_connection_exists( $conn_id );
+  return unless $self->{state}->{connections}->{ $conn_id }->{registered};
+  return 1 if $self->{state}->{connections}->{ $conn_id }->{type} eq 'c';
+  return 0;
 }
 
 sub _cmd_from_unknown {
-  my ($self,$conn_id,$input) = splice @_, 0, 3;
+  my ($self,$wheel_id,$input) = splice @_, 0, 3;
 
   my $cmd = $input->{command};
-  my $params = $input->{params};
+  my $params = $input->{params} || [ ];
+  my $pcount = scalar @{ $params };
+  print STDERR Dumper( $self->{state}->{connections}->{ $wheel_id } );
   SWITCH: {
+    if ( $cmd eq 'QUIT' ) {
+	$self->{ircd}->disconnect( $wheel_id );
+	$self->_send_output_to_client( $wheel_id => { command => 'ERROR', params => [ 'Closing Link: ' . $self->client_ip( $wheel_id ) . ' (Client Quit)' ] } );
 	last SWITCH;
+    }
+    # PASS or NICK cmd but no parameters.
+    if ( $cmd =~ /^(PASS|NICK)$/ and not $pcount ) {
+	$self->_send_output_to_client( $wheel_id => '461' => $cmd );
+	last SWITCH;
+    }
+    if ( $cmd =~ /^(PASS|NICK)$/ and not $pcount ) {
+	$self->_send_output_to_client( $wheel_id => '461' => $cmd );
+	last SWITCH;
+    }
+    # PASS or NICK cmd with one parameter, connection from client
+    if ( $cmd =~ /^(PASS|NICK)$/ and $pcount == 1 ) {
+	$self->{state}->{connections}->{ $wheel_id }->{ lc $1 } = $params->[0];
+	$self->_client_register( $wheel_id ) if $cmd eq 'NICK';
+	last SWITCH;
+    }
+    if ( $cmd eq 'USER' and $pcount < 4 ) {
+	$self->_send_output_to_client( $wheel_id => '461' => $cmd );
+	last SWITCH;
+    }
+    if ( $cmd eq 'USER' ) {
+	$self->{state}->{connections}->{ $wheel_id }->{user} = $params->[0];
+	$self->{state}->{connections}->{ $wheel_id }->{ircname} = $params->[3] || '';
+	$self->_client_register( $wheel_id );
+	last SWITCH;
+    }
+    $self->_send_output_to_client( $wheel_id => '451' );
   }
   return 1;
 }
@@ -205,12 +228,18 @@ sub _cmd_from_peer {
 }
 
 sub _cmd_from_client {
-  my ($self,$conn_id,$input) = splice @_, 0, 3;
+  my ($self,$wheel_id,$input) = splice @_, 0, 3;
 
   my $cmd = $input->{command};
-  my $params = $input->{params};
+  my $params = $input->{params} || [ ];
+  my $pcount = scalar @{ $params };
+  print STDERR Dumper( $self->{state}->{connections}->{ $wheel_id } );
   SWITCH: {
+    if ( $cmd eq 'QUIT' ) {
+	$self->{ircd}->disconnect( $wheel_id );
+	$self->_send_output_to_client( $wheel_id => { command => 'ERROR', params => [ 'Closing Link: ' . $self->client_ip( $wheel_id ) . ' (Client Quit)' ] } );
 	last SWITCH;
+    }
   }
   return 1;
 }
@@ -246,9 +275,15 @@ sub server_name {
 sub client_nickname {
   my ($self) = shift;
   my ($wheel_id) = $_[0] || return undef;
+  return '*' unless $self->{state}->{connections}->{ $wheel_id }->{nick};
+  return $self->{state}->{connections}->{ $wheel_id }->{nick};
+}
 
-  if ( $self->_connection_registered( $wheel_id ) ) {
-  }
+
+sub client_ip {
+  my ($self) = shift;
+  my ($wheel_id) = shift || return '';
+  return $self->{state}->{connections}->{ $wheel_id }->{socket}->[0];
 }
 
 sub configure {
@@ -365,11 +400,8 @@ sub _send_output_to_client {
   my ($self) = shift;
   my ($wheel_id) = shift || return 0;
   my ($err) = shift || return 0;
-
+  return unless $self->_connection_exists( $wheel_id );
   SWITCH: {
-    if ( not $self->_connection_exists( $wheel_id ) ) {
-	last SWITCH;
-    }
     if ( ref $err eq 'HASH' ) {
 	$self->{ircd}->send_output( $err, $wheel_id );
 	last SWITCH;
