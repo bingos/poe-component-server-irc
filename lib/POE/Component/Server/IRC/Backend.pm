@@ -180,6 +180,17 @@ sub _unload_our_plugins {
   return 1;
 }
 
+sub send_event {
+  my $self = shift;
+  my $event = shift;
+
+  return 0 unless $event;
+  my $prefix = $self->{prefix};
+  $event = $prefix . $event unless $event =~ /^\Q$prefix\E/;
+  $self->yield( '__send_event' => $event => @_ );
+  return 1;
+}
+
 sub __send_event {
 	my( $self, $event, @args ) = @_[ OBJECT, ARG0, ARG1 .. $#_ ];
 
@@ -482,7 +493,7 @@ sub _anti_flood {
 
 sub _conn_error {
   my ($self,$errstr,$wheel_id) = @_[OBJECT,ARG2,ARG3];
-  $self->_disconnected( $wheel_id, $errstr );
+  $self->_disconnected( $wheel_id, $errstr || $self->{wheels}->{ $wheel_id }->{disconnecting} );
   undef;
 }
 
@@ -490,7 +501,7 @@ sub _conn_flushed {
   my ($kernel,$self,$wheel_id) = @_[KERNEL,OBJECT,ARG0];
   return unless $self->_wheel_exists( $wheel_id );
   if ( $self->{wheels}->{ $wheel_id }->{disconnecting} ) {
-	$self->_disconnected( $wheel_id, $self->{wheels}->{ $wheel_id}->{disconnecting} );
+	$self->_disconnected( $wheel_id, $self->{wheels}->{ $wheel_id }->{disconnecting} );
   }
   undef;
 }
@@ -725,16 +736,16 @@ sub compressed_link {
 }
 
 sub disconnect {
-  my ($self,$wheel_id) = splice @_, 0, 2;
+  my ($self,$wheel_id,$string) = splice @_, 0, 3;
   return unless $wheel_id and $self->_wheel_exists( $wheel_id );
-  $self->{wheels}->{ $wheel_id }->{disconnecting} = shift || 1;
+  $self->{wheels}->{ $wheel_id }->{disconnecting} = $string || 'Client Quit';
 }
 
 sub _disconnected {
-  my ($self,$wheel_id) = splice @_, 0, 2;
+  my ($self,$wheel_id,$errstr) = splice @_, 0, 3;
   return unless $wheel_id and $self->_wheel_exists( $wheel_id );
-  delete ( $self->{wheels}->{ $wheel_id } );
-  $self->_send_event( $self->{prefix} . 'disconnected' => $wheel_id => shift || '' );
+  delete $self->{wheels}->{ $wheel_id };
+  $self->_send_event( $self->{prefix} . 'disconnected' => $wheel_id => $errstr || 'Client Quit' );
   return 1;
 }
 
@@ -1120,6 +1131,10 @@ This method provides an alternative object based means of posting events to the 
 =item call
 
 This method provides an alternative object based means of calling events to the component. First argument is the event to call, following arguments are sent as arguments to the resultant call.
+
+=item send_event
+
+Seen an event through the component's event handling system. First argument is the event name, subsequent arguments are the event's parameters.
 
 =item antiflood
 
