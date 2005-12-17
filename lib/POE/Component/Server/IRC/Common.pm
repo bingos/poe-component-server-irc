@@ -50,7 +50,7 @@ sub parse_mode_line {
 sub parse_ban_mask {
   my ($arg) = shift || return undef;
 
-  $arg =~ s/\x2a{2,}/\x2a/g;
+  $arg =~ s/\x2a+/\x2a/g;
   my (@ban); my ($remainder);
   if ( $arg !~ /\x21/ and $arg =~ /\x40/ ) {
      $remainder = $arg;
@@ -73,7 +73,7 @@ sub unparse_mode_line {
 
   my ($action); my ($return);
   foreach my $mode ( split(//,$line) ) {
-	if ( $mode =~ /^(\+|-)$/ and ( ( not defined ( $action ) ) or $mode ne $action ) ) {
+	if ( $mode =~ /^(\+|-)$/ and ( !$action or $mode ne $action ) ) {
 	  $return .= $mode;
 	  $action = $mode;
 	  next;

@@ -3,7 +3,7 @@ use strict;
 use warnings;
 use POE qw(Component::Server::IRC);
 
-my $pocosi = POE::Component::Server::IRC->create( auth => 1, options => { trace => 0 } );
+my $pocosi = POE::Component::Server::IRC->create( auth => 1, options => { trace => 0 }, plugin_debug => 1, debug => 1 );
 
 POE::Session->create(
 		package_states => [ 
