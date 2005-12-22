@@ -85,7 +85,7 @@ sub _start {
   }
 
   $self->{filter} = POE::Filter::Stackable->new();
-  $self->{ircd_filter} = POE::Filter::IRCD->new( DEBUG => $self->{debug} );
+  $self->{ircd_filter} = POE::Filter::IRCD->new( DEBUG => $self->{debug}, colonify => 1 );
   $self->{line_filter} = POE::Filter::Line->new( InputRegexp => '\015?\012', OutputLiteral => "\015\012" );
   $self->{filter}->push( $self->{line_filter}, $self->{ircd_filter} );
   $self->{can_do_auth} = 0;

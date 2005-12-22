@@ -3,13 +3,13 @@
 use Getopt::Long;
 use POE qw(Component::IRC Wheel::ReadLine);
 
-my ($nick);
-my ($user);
-my ($server);
-my ($port);
-my ($pass);
-my ($ircname);
-my ($current_channel);
+my $nick;
+my $user;
+my $server;
+my $port;
+my $pass;
+my $ircname;
+my $current_channel;
 
 GetOptions(
 "nick=s" => \$nick,
@@ -20,7 +20,7 @@ GetOptions(
 "password=s" => \$pass,
 );
 
-die unless ( $nick and $server );
+die unless $nick and $server;
 print "$nick $server\n";
 
 my ($irc) = POE::Component::IRC->spawn( password => $pass, Nick => $nick, Server => $server, Port => $port, Ircname => $ircname, Username => $user, Raw => 1 );
@@ -35,7 +35,7 @@ $poe_kernel->run();
 exit 0;
 
 sub _start {
-    my ($heap) = $_[HEAP];
+    my $heap = $_[HEAP];
     $heap->{readline_wheel} =
       POE::Wheel::ReadLine->new( InputEvent => 'got_input' );
     $heap->{readline_wheel}->get("> ");

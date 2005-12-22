@@ -21,6 +21,7 @@ sub _start {
 
   $heap->{ircd}->yield( 'register' );
   $heap->{ircd}->add_listener( port => 7667 );
+  $heap->{ircd}->daemon->add_operator( { username => 'moo', password => 'fishdont' } );
   undef;
 }
 
