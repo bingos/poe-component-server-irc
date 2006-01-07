@@ -2,12 +2,14 @@ use lib '../blib/lib';
 use strict;
 use warnings;
 use POE qw(Component::Server::IRC);
+use Net::Netmask;
 
-my $pocosi = POE::Component::Server::IRC->create( auth => 1, options => { trace => 0 }, plugin_debug => 1, debug => 1 );
+my $pocosi = POE::Component::Server::IRC->create( auth => 1, options => { trace => 0 }, plugin_debug => 0, debug => 0 );
 
 POE::Session->create(
 		package_states => [ 
-			'main' => [ qw( _start _default) ],
+			#'main' => [ qw( _start _default) ],
+			'main' => [ qw( _start) ],
 		],
 		options => { trace => 0 },
 		heap => { ircd => $pocosi },
@@ -19,8 +21,13 @@ exit 0;
 sub _start {
   my ($kernel,$heap) = @_[KERNEL,HEAP];
 
+  my $denial = Net::Netmask->new2('default');
+  my $exemption = Net::Netmask->new2('127.0.0.1');
+  $heap->{ircd}->add_denial( $denial ) if $denial;
+  $heap->{ircd}->add_exemption( $exemption ) if $denial and $exemption;
   $heap->{ircd}->yield( 'register' );
   $heap->{ircd}->add_listener( port => 7667 );
+  $heap->{ircd}->daemon->add_peer( name => 'logserv.gumbynet.org.uk', pass => 'op3rs3rv', rpass => 'op3rs3rv' );
   $heap->{ircd}->daemon->add_operator( { username => 'moo', password => 'fishdont' } );
   undef;
 }

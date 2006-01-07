@@ -9,6 +9,7 @@ my $server;
 my $port;
 my $pass;
 my $ircname;
+my $localaddr;
 my $current_channel;
 
 GetOptions(
@@ -18,12 +19,13 @@ GetOptions(
 "port=s" => \$port,
 "ircname=s" => \$ircname,
 "password=s" => \$pass,
+"localaddr=s" => \$localaddr
 );
 
 die unless $nick and $server;
 print "$nick $server\n";
 
-my ($irc) = POE::Component::IRC->spawn( password => $pass, Nick => $nick, Server => $server, Port => $port, Ircname => $ircname, Username => $user, Raw => 1 );
+my ($irc) = POE::Component::IRC->spawn( password => $pass, Nick => $nick, Server => $server, Port => $port, Ircname => $ircname, Username => $user, Raw => 1, LocalAddr => $localaddr );
 
 POE::Session->create(
 	package_states => [
@@ -96,7 +98,8 @@ sub parse_input {
 	  $irc->yield( 'connect' );
 	  last SWITCH;
 	}
-	$irc->yield( $cmd => @args );
+	$irc->yield( $cmd => @args ) unless $cmd eq 'sl';
+	$irc->yield( $cmd => join ' ', @args ) if $cmd eq 'sl';
         $heap->{readline_wheel}->put($cmd . " " . join(' ',@args) );
     }
   }

@@ -8,7 +8,7 @@ our $VERSION = '1.00';
 # We export some stuff
 require Exporter;
 our @ISA = qw( Exporter );
-our %EXPORT_TAGS = ( 'ALL' => [ qw(u_irc l_irc parse_mode_line unparse_mode_line parse_ban_mask validate_nick_name validate_chan_name) ] );
+our %EXPORT_TAGS = ( 'ALL' => [ qw(u_irc l_irc parse_mode_line unparse_mode_line parse_ban_mask validate_nick_name validate_chan_name matches_mask_array matches_mask) ] );
 Exporter::export_ok_tags( 'ALL' );
 
 sub u_irc {
@@ -19,16 +19,15 @@ sub u_irc {
 }
 
 sub l_irc {
-  my ($value) = shift || return undef;
+  my $value = shift || return;
 
   $value =~ tr/A-Z[]\\~/a-z{}|^/;
   return $value;
 }
 
 sub parse_mode_line {
-  my ($hashref) = { };
-
-  my ($count) = 0;
+  my $hashref = { };
+  my $count = 0;
   foreach my $arg ( @_ ) {
         if ( $arg =~ /^(\+|-)/ or $count == 0 ) {
            my ($action) = '+';
@@ -48,10 +47,10 @@ sub parse_mode_line {
 }
 
 sub parse_ban_mask {
-  my ($arg) = shift || return undef;
+  my $arg = shift || return undef;
 
   $arg =~ s/\x2a+/\x2a/g;
-  my (@ban); my ($remainder);
+  my @ban; my $remainder;
   if ( $arg !~ /\x21/ and $arg =~ /\x40/ ) {
      $remainder = $arg;
   } else {
@@ -69,9 +68,9 @@ sub parse_ban_mask {
 }
 
 sub unparse_mode_line {
-  my ($line) = $_[0] || return undef;
+  my $line = $_[0] || return undef;
 
-  my ($action); my ($return);
+  my $action; my $return;
   foreach my $mode ( split(//,$line) ) {
 	if ( $mode =~ /^(\+|-)$/ and ( !$action or $mode ne $action ) ) {
 	  $return .= $mode;
@@ -85,20 +84,39 @@ sub unparse_mode_line {
 }
 
 sub validate_nick_name {
-  my ($nickname) = shift || return 0;
-
-  if ( $nickname =~ /^[A-Za-z_0-9`\-^\|\\\{}\[\]]+$/ ) {
-	return 1;
-  }
+  my $nickname = shift || return 0;
+  return 1 if $nickname =~ /^[A-Za-z_0-9`\-^\|\\\{}\[\]]+$/;
   return 0;
 }
 
 sub validate_chan_name {
-  my ($channel) = shift || return 0;
+  my $channel = shift || return 0;
+  return 1 if $channel =~ /^(\x23|\x26|\x2B)/ and $channel !~ /(\x20|\x07|\x00|\x0D|\x0A|\x2C)+/;
+  return 0;
+}
 
-  if ( $channel =~ /^(\x23|\x26|\x2B)/ and $channel !~ /(\x20|\x07|\x00|\x0D|\x0A|\x2C)+/ ) {
-	return 1;
+sub matches_mask_array {
+  my ($masks,$matches) = @_;
+  return unless $masks and $matches;
+  return unless ref $masks eq 'ARRAY';
+  return unless ref $matches eq 'ARRAY';
+  my $ref = { };
+  foreach my $mask ( @{ $masks } ) {
+	foreach my $match ( @{ $matches } ) {
+    	   push @{ $ref->{ $mask } }, $match if matches_mask( $mask, $match );
+	}
   }
+  return $ref;
+}
+
+sub matches_mask {
+  my ($mask,$match) = @_;
+  return unless $mask and $match;
+  $mask =~ s/\x2A+/\x2A/g;
+  my $umask = quotemeta( u_irc( $mask ) );
+  $umask =~ s/\\\*/[\x01-\xFF]{0,}/g;
+  $umask =~ s/\\\?/[\x01-\xFF]{1,1}/g;
+  return 1 if $match =~ /^$umask$/;
   return 0;
 }
 

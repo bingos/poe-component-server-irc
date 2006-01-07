@@ -4,11 +4,13 @@ use strict;
 use warnings;
 use POE qw(Wheel::SocketFactory Wheel::ReadWrite Filter::Stackable Filter::Line Filter::IRCD);
 use POE::Component::Server::IRC::Plugin qw( :ALL );
+use POE::Component::Server::IRC::Pipeline;
 use Socket;
 use Carp;
+use Net::Netmask;
 use vars qw($VERSION);
 
-$VERSION = '0.6';
+$VERSION = '0.99';
 
 sub create {
   my ($package) = shift;
@@ -20,7 +22,9 @@ sub create {
   my $self = bless \%parms, $package;
 
   $self->{prefix} = 'ircd_backend_' unless $self->{prefix};
+  $self->{antiflood} = 1 unless defined $self->{antiflood} and $self->{antiflood} eq '0';
   my $options = delete $self->{options};
+  my $sslify_options = delete $self->{sslify_options};
 
   $self->{session_id} = POE::Session->create(
 	object_states => [
@@ -33,6 +37,7 @@ sub create {
 			   send_output   => '_send_output',
 			   shutdown 	 => '_shutdown', },
 		$self => [ qw(  __send_event
+				__send_output
 				_accept_connection 
 				_accept_failed 
 				_auth_client
@@ -54,6 +59,19 @@ sub create {
 	],
 	( ref($options) eq 'HASH' ? ( options => $options ) : () ),
   )->ID();
+
+  if ( $sslify_options and ref $sslify_options eq 'ARRAY' ) {
+    $self->{got_ssl} = $self->{got_server_ssl} = 0;
+    eval {
+	require POE::Component::SSLify;
+	import POE::Component::SSLify qw( Client_SSLify Server_SSLify Server_SSLify SSLify_Options );
+    };
+    unless ($@) {
+	eval { SSLify_Options( @{ $sslify_options } ) };
+        $self->{got_server_ssl} = 1 unless $@;
+	warn "$@\n" if $@;
+    }
+  }
 
   return $self;
 }
@@ -213,7 +231,17 @@ sub _accept_failed {
 
 sub _accept_connection {
   my ($kernel,$self,$socket,$peeraddr,$peerport,$listener_id) = @_[KERNEL,OBJECT,ARG0..ARG3];
+  my $sockaddr = inet_ntoa( ( unpack_sockaddr_in ( getsockname $socket ) )[1] );
+  my $sockport = ( unpack_sockaddr_in ( getsockname $socket ) )[0];
   $peeraddr = inet_ntoa( $peeraddr );
+  my $listener = $self->{listeners}->{ $listener_id };
+
+  if ( $self->{got_server_ssl} and $listener->{usessl} ) {
+	eval { $socket = Server_SSLify( $socket ); };
+	warn "$@\n" if $@;
+  }
+
+  return if $self->denied( $peeraddr );
 
   my $wheel = POE::Wheel::ReadWrite->new(
 	Handle => $socket,
@@ -224,11 +252,8 @@ sub _accept_connection {
   );
 
   if ( $wheel ) {
-	my $listener = $self->{listeners}->{ $listener_id };
 	my $wheel_id = $wheel->ID();
-	my $sockaddr = inet_ntoa( ( unpack_sockaddr_in ( getsockname $socket ) )[1] );
-	my $sockport = ( unpack_sockaddr_in ( getsockname $socket ) )[0];
-        my $ref = { wheel => $wheel, peeraddr => $peeraddr, peerport => $peerport, 
+        my $ref = { wheel => $wheel, peeraddr => $peeraddr, peerport => $peerport, flooded => 0,
 		      sockaddr => $sockaddr, sockport => $sockport, idle => time(), antiflood => 1, compress => 0 };
 	$self->_send_event( $self->{prefix} . 'connection' => $wheel_id => $peeraddr => $peerport => $sockaddr => $sockport );
 	if ( $self->{will_do_auth} and $listener->{do_auth} ) {
@@ -379,7 +404,13 @@ sub _sock_up {
   my ($kernel,$self,$socket,$peeraddr,$peerport,$connector_id) = @_[KERNEL,OBJECT,ARG0..ARG3];
   $peeraddr = inet_ntoa( $peeraddr );
 
-  delete $self->{connectors}->{ $connector_id };
+  my $cntr = delete $self->{connectors}->{ $connector_id };
+  if ( $self->{got_ssl} and $cntr->{usessl} ) {
+    eval {
+      $socket = Client_SSLify( $socket );
+    };
+    warn "Couldn't use an SSL socket: $@ \n" if $@;
+  }
 
   my $wheel = POE::Wheel::ReadWrite->new(
 	Handle => $socket,
@@ -523,10 +554,20 @@ sub _event_dispatcher {
 sub send_output {
   my ($self,$output) = splice @_, 0, 2;
   if ( $output and ref( $output ) eq 'HASH' ) {
-    $self->{wheels}->{ $_ }->{wheel}->put( $output ) for grep { $self->_wheel_exists($_) } @_;
+    if ( scalar @_ == 1 or ( $output->{command} and $output->{command} eq 'ERROR' ) ) {
+  	$self->{wheels}->{ $_ }->{wheel}->put( $output ) for grep { $self->_wheel_exists( $_ ) } @_;
+    	return 1;
+    }
+    $self->yield( __send_output => $output => $_ ) for grep { $self->_wheel_exists($_) } @_;
     return 1;
   }
   return 0;
+}
+
+sub __send_output {
+  my ($self,$output,$route_id) = @_[OBJECT,ARG0,ARG1];
+  $self->{wheels}->{ $route_id }->{wheel}->put( $output ) if $self->_wheel_exists( $route_id );
+  undef;
 }
 
 sub _send_output {
@@ -688,6 +729,7 @@ sub ident_agent_error {
 sub antiflood {
   my ($self,$wheel_id,$value) = splice @_, 0, 3;
   return unless $self->_wheel_exists( $wheel_id );
+  return 0 unless $self->{antiflood};
   return $self->{wheels}->{ $wheel_id }->{antiflood} unless defined $value;
   $self->{wheels}->{ $wheel_id }->{antiflood} = $value;
 }
@@ -731,302 +773,245 @@ sub _wheel_exists {
   return 1;
 }
 
+sub _conn_flooded {
+  my $self = shift;
+  my $conn_id = shift || return;
+  return unless $self->_wheel_exists( $conn_id );
+  return $self->{wheels}->{ $conn_id }->{flooded};
+}
+
+##################
+# Access Control #
+##################
+
+sub add_denial {
+  my $self = shift;
+  my $netmask = shift || return;
+  my $reason = shift || 'Denied';
+  return unless $netmask->isa('Net::Netmask');
+  $self->{denials}->{ $netmask } = { blk => $netmask, reason => $reason };
+  return 1;
+}
+ 
+sub del_denial {
+  my $self = shift;
+  my $netmask = shift || return;
+  return unless $netmask->isa('Net::Netmask');
+  return unless $self->{denials}->{ $netmask };
+  delete $self->{denials}->{ $netmask };
+  return 1;
+}
+
+sub add_exemption {
+  my $self = shift;
+  my $netmask = shift || return;
+  return unless $netmask->isa('Net::Netmask');
+  $self->{exemptions}->{ $netmask } = $netmask unless $self->{exemptions}->{ $netmask };
+  return 1;
+}
+
+sub del_exemption {
+  my $self = shift;
+  my $netmask = shift || return;
+  return unless $netmask->isa('Net::Netmask');
+  return unless $self->{exemptions}->{ $netmask };
+  delete $self->{exemptions}->{ $netmask };
+  return 1;
+}
+
+sub denied {
+  my $self = shift;
+  my $ipaddr = shift || return;
+  return 0 if $self->exempted( $ipaddr );
+  foreach my $mask ( keys %{ $self->{denials} } ) {
+    return 1 if $self->{denials}->{ $mask }->{blk}->match($ipaddr);
+  }
+  return 0;
+}
+
+sub exempted {
+  my $self = shift;
+  my $ipaddr = shift || return;
+  foreach my $mask ( keys %{ $self->{exemptions} } ) {
+    return 1 if $self->{exemptions}->{ $mask }->match($ipaddr);
+  }
+  return 0;
+}
+
 ##################
 # Plugin methods #
 ##################
 
+# accesses the plugin pipeline
+sub pipeline {
+  my ($self) = @_;
+  $self->{PLUGINS} = POE::Component::Server::IRC::Pipeline->new($self)
+    unless UNIVERSAL::isa($self->{PLUGINS}, 'POE::Component::Server::IRC::Pipeline');
+  return $self->{PLUGINS};
+}
+
 # Adds a new plugin object
 sub plugin_add {
-	my( $self, $name, $plugin ) = @_;
+  my ($self, $name, $plugin) = @_;
+  my $pipeline = $self->pipeline;
 
-	# Sanity check
-	if ( ! defined $name or ! defined $plugin ) {
-		warn 'Please supply a name and the plugin object to be added!';
-		return undef;
-	}
+  unless (defined $name and defined $plugin) {
+    warn 'Please supply a name and the plugin object to be added!';
+    return;
+  }
 
-	# Tell the plugin to register itself
-	my ($return);
-
-	eval {
-	   $return = $plugin->PCSI_register( $self );
-	};
-
-	if ( $return ) {
-		$self->{PLUGINS}->{OBJECTS}->{ $name } = $plugin;
-
-		# Okay, send an event to let others know this plugin is loaded
-		$self->yield( '__send_event', $self->{prefix} . 'plugin_add', $name, $plugin );
-
-		return 1;
-	} else {
-		return undef;
-	}
+  return $pipeline->push($name => $plugin);
 }
 
 # Removes a plugin object
 sub plugin_del {
-	my( $self, $name ) = @_;
+  my ($self, $name) = @_;
 
-	# Sanity check
-	if ( ! defined $name ) {
-		warn 'Please supply a name/object for the plugin to be removed!';
-		return undef;
-	}
+  unless (defined $name) {
+    warn 'Please supply a name/object for the plugin to be removed!';
+    return;
+  }
 
-	# Is it an object or a name?
-	my $plugin = undef;
-	if ( ! ref( $name ) ) {
-		# Check if it is loaded
-		if ( exists $self->{PLUGINS}->{OBJECTS}->{ $name } ) {
-			$plugin = delete $self->{PLUGINS}->{OBJECTS}->{ $name };
-		} else {
-			return undef;
-		}
-	} else {
-		# It's an object...
-		foreach my $key ( keys %{ $self->{PLUGINS}->{OBJECTS} } ) {
-			# Check if it's the same object
-			if ( ref( $self->{PLUGINS}->{OBJECTS}->{ $key } ) eq ref( $name ) ) {
-				$plugin = $name;
-				$name = $key;
-			}
-		}
-	}
-
-	# Did we get it?
-	if ( defined $plugin ) {
-		# Automatically remove all registrations for this plugin
-		foreach my $type ( qw( SERVER USER ) ) {
-			foreach my $event ( keys %{ $self->{PLUGINS}->{ $type } } ) {
-				$self->_plugin_unregister_do( $type, $event, $plugin );
-			}
-		}
-
-		# Tell the plugin to unregister
-		eval {
-			$plugin->PCSI_unregister( $self );
-		};
-
-		# Okay, send an event to let others know this plugin is deleted
-		$self->yield( '__send_event', $self->{prefix} . 'plugin_del', $name, $plugin );
-
-		# Success!
-		return $plugin;
-	} else {
-		return undef;
-	}
+  my $return = scalar $self->pipeline->remove($name);
+  warn "$@\n" if $@;
+  return $return;
 }
 
 # Gets the plugin object
 sub plugin_get {
-	my( $self, $name ) = @_;
+  my ($self, $name) = @_;  
 
-	# Sanity check
-	if ( ! defined $name ) {
-		warn 'Please supply a name for the plugin object to be retrieved!';
-		return undef;
-	}
+  unless (defined $name) {
+    warn 'Please supply a name/object for the plugin to be removed!';
+    return;
+  }
 
-	# Check if it is loaded
-	if ( exists $self->{PLUGINS}->{OBJECTS}->{ $name } ) {
-		return $self->{PLUGINS}->{OBJECTS}->{ $name };
-	} else {
-		return undef;
-	}
+  return scalar $self->pipeline->get($name);
 }
 
 # Lists loaded plugins
 sub plugin_list {
-	my ($self) = shift;
-	my $return = { };
+  my ($self) = @_;
+  my $pipeline = $self->pipeline;
+  my %return;
 
-	foreach my $name ( keys %{ $self->{PLUGINS}->{OBJECTS} } ) {
-		$return->{ $name } = $self->{PLUGINS}->{OBJECTS}->{ $name };
-	}
-	return $return;
+  for (@{ $pipeline->{PIPELINE} }) {
+    $return{ $pipeline->{PLUGS}{$_} } = $_;
+  }
+
+  return \%return;
+}
+
+# Lists loaded plugins in order!
+sub plugin_order {
+  my ($self) = @_;
+  return $self->pipeline->{PIPELINE};
 }
 
 # Lets a plugin register for certain events
 sub plugin_register {
-	my( $self, $plugin, $type, @events ) = @_;
+  my ($self, $plugin, $type, @events) = @_;
+  my $pipeline = $self->pipeline;
 
-	# Sanity checks
-	if ( ! defined $type or ! ( $type eq 'SERVER' or $type eq 'USER' ) ) {
-		warn 'Type should be SERVER or USER!';
-		return undef;
-	}
-	if ( ! defined $plugin ) {
-		warn 'Please supply the plugin object to register!';
-		return undef;
-	}
-	if ( ! @events ) {
-		warn 'Please supply at least one event name to register!';
-		return undef;
-	}
+  unless (defined $type and ($type eq 'SERVER' or $type eq 'USER')) {
+    warn 'Type should be SERVER or USER!';
+    return;
+  }
 
-	# Okay, do the actual work here!
-	foreach my $ev ( @events ) {
-		# Is it an arrayref?
-		if ( ref( $ev ) and ref( $ev ) eq 'ARRAY' ) {
-			# Loop over it!
-			foreach my $evnt ( @$ev ) {
-				# Make sure it is lowercased
-				$evnt = lc( $evnt );
+  unless (defined $plugin) {
+    warn 'Please supply the plugin object to register!';
+    return;
+  }
 
-				# Push it to the end of the queue
-				push( @{ $self->{PLUGINS}->{ $type }->{ $evnt } }, $plugin );
-			}
-		} else {
-			# Make sure it is lowercased
-			$ev = lc( $ev );
+  unless (@events) {
+    warn 'Please supply at least one event to register!';
+    return;
+  }
 
-			# Push it to the end of the queue
-			push( @{ $self->{PLUGINS}->{ $type }->{ $ev } }, $plugin );
-		}
-	}
+  for my $ev (@events) {
+    if (ref($ev) and ref($ev) eq "ARRAY") {
+      @{ $pipeline->{HANDLES}{$plugin}{$type} }{ map lc, @$ev } = (1) x @$ev;
+    }
+    else {
+      $pipeline->{HANDLES}{$plugin}{$type}{lc $ev} = 1;
+    }
+  }
 
-	# All done!
-	return 1;
+  return 1;
 }
 
 # Lets a plugin unregister events
 sub plugin_unregister {
-	my( $self, $plugin, $type, @events ) = @_;
+  my ($self, $plugin, $type, @events) = @_;
+  my $pipeline = $self->pipeline;
 
-	# Sanity checks
-	if ( ! defined $type or ! ( $type eq 'SERVER' or $type eq 'USER' ) ) {
-		warn 'Type should be SERVER or USER!';
-		return undef;
-	}
-	if ( ! defined $plugin ) {
-		warn 'Please supply the plugin object to register!';
-		return undef;
-	}
-	if ( ! @events ) {
-		warn 'Please supply at least one event name to unregister!';
-		return undef;
-	}
+  unless (defined $type and ($type eq 'SERVER' or $type eq 'USER')) {
+    warn 'Type should be SERVER or USER!';
+    return;
+  }
 
-	# Okay, do the actual work here!
-	foreach my $ev ( @events ) {
-		# Is it an arrayref?
-		if ( ref( $ev ) and ref( $ev ) eq 'ARRAY' ) {
-			# Loop over it!
-			foreach my $evnt ( @$ev ) {
-				# Make sure it is lowercased
-				$evnt = lc( $evnt );
+  unless (defined $plugin) {
+    warn 'Please supply the plugin object to register!';
+    return;
+  }
 
-				# Check if the event even exists
-				if ( ! exists $self->{PLUGINS}->{ $type }->{ $evnt } ) {
-					warn "The event '$evnt' does not exist!";
-					next;
-				}
+  unless (@events) {
+    warn 'Please supply at least one event to unregister!';
+    return;
+  }
 
-				$self->_plugin_unregister_do( $type, $evnt, $plugin );
-			}
-		} else {
-			# Make sure it is lowercased
-			$ev = lc( $ev );
+  for my $ev (@events) {
+    if (ref($ev) and ref($ev) eq "ARRAY") {
+      for my $e (map lc, @$ev) {
+        unless (delete $pipeline->{HANDLES}{$plugin}{$type}{$e}) {
+          warn "The event '$e' does not exist!";
+          next;
+        }
+      }
+    }
+    else {
+      $ev = lc $ev;
+      unless (delete $pipeline->{HANDLES}{$plugin}{$type}{$ev}) {
+        warn "The event '$ev' does not exist!";
+        next;
+      }
+    }
+  }
 
-			# Check if the event even exists
-			if ( ! exists $self->{PLUGINS}->{ $type }->{ $ev } ) {
-				warn "The event '$ev' does not exist!";
-				next;
-			}
-
-			$self->_plugin_unregister_do( $type, $ev, $plugin );
-		}
-	}
-
-	# All done!
-	return 1;
-}
-
-# Helper routine to remove plugins
-sub _plugin_unregister_do {
-	my( $self, $type, $event, $plugin ) = @_;
-
-	# Check if the plugin is there
-	# Yes, this sucks but it doesn't happen often...
-	my $counter = 0;
-
-	# Loop over the array
-	while ( $counter < scalar( @{ $self->{PLUGINS}->{ $type }->{ $event } } ) ) {
-		# See if it is a match
-		if ( ref( $self->{PLUGINS}->{ $type }->{ $event }->[$counter] ) eq ref( $plugin ) ) {
-			# Splice it!
-			splice( @{ $self->{PLUGINS}->{ $type }->{ $event } }, $counter, 1 );
-			last;
-		}
-
-		# Increment the counter
-		$counter++;
-	}
-
-	# All done!
-	return 1;
+  return 1;
 }
 
 # Process an input event for plugins
 sub _plugin_process {
-	my( $self, $type, $event, @args ) = @_;
+  my ($self, $type, $event, @args) = @_;
+  my $pipeline = $self->pipeline;
 
-	# Make sure event is lowercased
-	$event = lc( $event );
+  $event = lc $event;
+  my $prefix = $self->{prefix};
+  $event =~ s/^\Q$prefix\E//;
 
-	# And remove the irc_ prefix
-	my ($prefix) = $self->{prefix};
-	if ( $event =~ /^\Q$prefix\E(.*)$/ ) {
-		$event = $1;
-	}
+  my $sub = ($type eq 'SERVER' ? "IRCD" : "U") . "_$event";
+  my $return = PCSI_EAT_NONE;
 
-	# Check if any plugins are interested in this event
-	if ( not ( exists $self->{PLUGINS}->{ $type }->{ $event } or exists $self->{PLUGINS}->{ $type }->{ 'all' } ) ) {
-		return PCSI_EAT_NONE;
-	}
+  for my $plugin (@{ $pipeline->{PIPELINE} }) {
+    next
+      unless $pipeline->{HANDLES}{$plugin}{$type}{$event}
+      or $pipeline->{HANDLES}{$plugin}{$type}{all};
 
-	# Determine the return value
-	my $return = PCSI_EAT_NONE;
+    my $ret = PCSI_EAT_NONE;
 
-	# Which type are we doing?
-	my $sub;
-	if ( $type eq 'SERVER' ) {
-		$sub = 'IRCD_' . $event;
-	} else {
-		$sub = 'U_' . $event;
-	}
+    eval { $ret = $plugin->$sub($self, @args) };
+    warn "$sub call failed with $@\n" if $@ and $self->{plugin_debug};
+    eval { $ret = $plugin->_default($self, $sub, @args) } if $@;
+    warn "_default call failed with $@\n" if $@ and $self->{plugin_debug};
 
-	# Okay, have the plugins process this event!
-	foreach my $plugin ( @{ $self->{PLUGINS}->{ $type }->{ $event } }, @{ $self->{PLUGINS}->{ $type }->{ 'all' } } ) {
-		# What does the plugin return?
-		my ($ret) = PCSI_EAT_NONE;
-		# Added eval cos we can't trust plugin authors to play by the rules *sigh*
-		eval {
-			$ret = $plugin->$sub( $self, @args );
-		};
+    return $return if $ret == PCSI_EAT_PLUGIN;
+    $return = PCSI_EAT_ALL if $ret == PCSI_EAT_CLIENT;
+    return PCSI_EAT_ALL if $ret == PCSI_EAT_ALL;
+  }
 
-		if ( $@ ) {
-		   warn "$sub failed with -> $@\n" if $self->{plugin_debug};
-		   # Okay, no method of that name fallback on _default() method.
-		   eval {
-			$ret = $plugin->_default( $self, $sub, @args );
-		   };
-		   warn "_default failed with -> $@\n" if $@ and $self->{plugin_debug};
-		}
-
-		if ( $ret == PCSI_EAT_PLUGIN ) {
-			return $return;
-		} elsif ( $ret == PCSI_EAT_CLIENT ) {
-			$return = PCSI_EAT_ALL;
-		} elsif ( $ret == PCSI_EAT_ALL ) {
-			return PCSI_EAT_ALL;
-		}
-	}
-
-	# All done!
-	return $return;
-}
+  return $return;
+}  
 
 1;
 __END__
@@ -1126,6 +1111,22 @@ Takes one argument, a connection_id. Returns a list consisting of: the IP addres
 our socket address; our socket port. Returns undef on error.
 
    my($peeraddr,$peerport,$sockaddr,$sockport) = $object->connection_info( $conn_id );
+
+=item add_denial
+
+Takes one mandatory argument and one optional. The first mandatory argument is a L<Net::Netmask> object that will be used to check connecting IP addresses against. The second optional argument is a reason string for the denial.
+
+=item del_denial
+
+Takes one mandatory argument, a L<Net::Netmask> object to remove from the current denial list.
+
+=item add_exemption
+
+Takes one mandatory argument, a L<Net::Netmask> object that will be checked against connecting IP addresses for exemption from denials.
+
+=item del_exemption
+
+Takes one mandatory argument, a L<Net::Netmask> object to remove from the current exemption list.
 
 =back
 

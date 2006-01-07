@@ -1,17 +1,18 @@
 # http://module-build.sourceforge.net/META-spec.html
 #XXXXXXX This is a prototype!!!  It will change in the future!!! XXXXX#
 name:         POE-Component-Server-IRC
-version:      0.31
+version:      0.99
 version_from: lib/POE/Component/Server/IRC.pm
 installdirs:  site
 requires:
     Carp:                          0
     Date::Format:                  0
-    POE:                           0.31
+    Net::Netmask:                  1.9012
+    POE:                           0.3202
     POE::Component::Client::DNS:   0
     POE::Component::Client::Ident: 0
-    POE::Component::IRC:           4.62
-    POE::Filter::IRCD:             0
+    POE::Component::IRC:           4.75
+    POE::Filter::IRCD:             1.4
     POE::Filter::Zlib:             0
     Socket:                        0
 

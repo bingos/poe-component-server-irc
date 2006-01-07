@@ -10,7 +10,7 @@ use base qw(POE::Component::Server::IRC::Backend);
 use POE::Component::Server::IRC::Daemon;
 use vars qw($VERSION);
 
-$VERSION = '0.31';
+$VERSION = '0.99';
 
 sub _load_our_plugins {
   my ($self) = shift;
