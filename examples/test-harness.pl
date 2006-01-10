@@ -4,7 +4,7 @@ use warnings;
 use POE qw(Component::Server::IRC);
 use Net::Netmask;
 
-my $pocosi = POE::Component::Server::IRC->create( auth => 1, options => { trace => 0 }, plugin_debug => 0, debug => 0 );
+my $pocosi = POE::Component::Server::IRC->create( auth => 1, options => { trace => 0 }, plugin_debug => 1, debug => 1 );
 
 POE::Session->create(
 		package_states => [ 
@@ -22,7 +22,7 @@ sub _start {
   my ($kernel,$heap) = @_[KERNEL,HEAP];
 
   my $denial = Net::Netmask->new2('default');
-  my $exemption = Net::Netmask->new2('127.0.0.1');
+  my $exemption = Net::Netmask->new2('127.0.0');
   $heap->{ircd}->add_denial( $denial ) if $denial;
   $heap->{ircd}->add_exemption( $exemption ) if $denial and $exemption;
   $heap->{ircd}->yield( 'register' );

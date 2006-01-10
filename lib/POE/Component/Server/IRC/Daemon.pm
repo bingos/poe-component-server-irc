@@ -122,6 +122,9 @@ sub IRCD_disconnected {
 	last SWITCH;
     }
     if ( $self->_connection_is_peer( $conn_id ) ) {
+	my $peer = $self->{state}->{conns}->{ $conn_id }->{name};
+	$self->{ircd}->send_output( @{ $self->_daemon_peer_squit( $conn_id, $peer, $self->server_name() ) } );
+	delete $self->{state}->{conns}->{ $conn_id };
 	last SWITCH;
     }
     if ( $self->_connection_is_client( $conn_id ) ) {
@@ -333,7 +336,19 @@ sub _cmd_from_peer {
   my $params = $input->{params};
   my $prefix = $input->{prefix};
   SWITCH: {
+    my $method = '_daemon_peer_' . lc $cmd;
+    if ( $cmd eq 'SQUIT' ) {
+	$self->_daemon_peer_squit( $conn_id, @{ $params } );
 	last SWITCH;
+    }
+    if ( $cmd =~ /^(PING|PONG|SVINFO)$/i and $self->can($method) ) {
+	$self->$method( $conn_id, @{ $params } );
+	last SWITCH;
+    }
+    if ( $self->can($method) ) {
+	$self->$method( $conn_id, $prefix, @{ $params } );
+	last SWITCH;
+    }
   }
   return 1;
 }
@@ -786,7 +801,7 @@ sub _daemon_cmd_version {
   my $nick = shift || return;
   my $server = $self->server_name();
   my $ref = [ ];
-  push @{ $ref }, { prefix => $server, command => '351', params => [ $nick, $self->server_version(), $server, 'eGHIMZ', 'TS5ow' ] };
+  push @{ $ref }, { prefix => $server, command => '351', params => [ $nick, $self->server_version(), $server, 'eGHIMZ TS5ow' ] };
   push @{ $ref }, $_ for @{ $self->_daemon_cmd_isupport( $nick ) };
   return @{ $ref } if wantarray();
   return $ref;
@@ -1363,7 +1378,7 @@ sub _daemon_cmd_join {
 	$self->{state}->{chans}->{ $uchannel } = $record;
 	$self->{state}->{users}->{ $unick }->{chans}->{ $uchannel } = 'o';
 	my @peers = $self->_state_connected_peers();
-	$self->{ircd}->send_output( { command => 'SJOIN', params => [ $record->{ts}, $channel, '+' . $record->{mode}, ':@' . $nick ] }, @peers );
+	$self->{ircd}->send_output( { command => 'SJOIN', params => [ $record->{ts}, $channel, '+' . $record->{mode}, '@' . $nick ] }, @peers );
 	$self->{ircd}->send_output( { prefix => $self->_state_user_full( $nick ), command => 'JOIN', params => [ $channel ] }, $route_id );
 	$self->{ircd}->send_output( { prefix => $server, command => 'MODE', params => [ $channel, '+' . $record->{mode} ] }, $route_id );
 	$self->_send_output_to_client( $route_id => ( ref $_ eq 'ARRAY' ? @{ $_ } : $_ ) ) for $self->_daemon_cmd_names( $nick, $channel );
@@ -1618,6 +1633,133 @@ sub _daemon_cmd_topic {
   return $ref;
 }
 
+sub _daemon_peer_squit {
+  my $self = shift;
+  my $peer_id = shift || return;
+  my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
+  return unless $self->_state_peer_exists( $args->[0] );
+  $self->{ircd}->send_output( { command => 'SQUIT', params => [ $self->_state_peer_name( $args->[0] ), $self->server_name() ] }, grep { $_ ne $peer_id } $self->_state_connected_peers() );
+  foreach my $nick ( $self->_state_server_squit( $args->[0] ) ) {
+    my $output = { prefix => $self->_state_user_full( $nick ), command => 'QUIT', params => [ join ' ', reverse @{ $args } ] };
+    my $common = { };
+    foreach my $uchan ( $self->_state_user_chans( $nick ) ) {
+      $uchan = u_irc $uchan;
+      delete $self->{state}->{chans}->{ $uchan }->{users}->{ $nick };
+      foreach my $user ( $self->_state_chan_list( $uchan ) ) {
+	next unless $self->_state_is_local_user( $user );
+	$common->{ $user } = $self->_state_user_route( $user );
+      }
+      unless ( scalar keys %{ $self->{state}->{chans}->{ $uchan  }->{users} } ) {
+	delete $self->{state}->{chans}->{ $uchan  };
+      }
+    }
+    $self->{ircd}->send_output( $output, keys %{ $common } );
+    my $record = delete $self->{state}->{users}->{ $nick };
+    $self->{state}->{stats}->{ops_online}-- if $record->{umode} =~ /o/;
+  }
+  return @{ $ref } if wantarray();
+  return $ref;
+}
+
+sub _daemon_peer_svinfo {
+  my $self = shift;
+  my $peer_id = shift || return;
+  my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
+  $self->{state}->{conns}->{ $peer_id }->{svinfo} = $args;
+  return @{ $ref } if wantarray();
+  return $ref;
+}
+
+sub _daemon_peer_ping {
+  my $self = shift;
+  my $peer_id = shift || return;
+  my $server = $self->server_name();
+  my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
+  SWITCH: {
+    if ( !$count ) {
+	last SWITCH;
+    }
+    if ( $count >= 2 and ( uc $server ne uc $args->[1] ) ) {
+	$self->{ircd}->send_output( { command => 'PING', params => $args }, $self->_state_peer_route( $args->[1] ) ) if $self->_state_peer_exists( $args->[1] );
+	$self->{ircd}->send_output( { command => 'PING', params => $args }, $self->_state_user_route( $args->[1] ) ) if $self->_state_user_exists( $args->[1] );
+	last SWITCH;
+    }
+    $self->{ircd}->send_output( { command => 'PONG', params => [ $server, $args->[0] ] }, $peer_id );
+  }
+  return @{ $ref } if wantarray();
+  return $ref;
+}
+
+sub _daemon_peer_pong {
+  my $self = shift;
+  my $peer_id = shift || return;
+  my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
+  SWITCH: {
+    if ( !$count ) {
+	last SWITCH;
+    }
+    if ( $count >= 2 and ( uc $self->server_name() ne uc $args->[1] ) ) {
+	$self->{ircd}->send_output( { command => 'PONG', params => $args }, $self->_state_peer_route( $args->[1] ) ) if $self->_state_peer_exists( $args->[1] );
+	$self->{ircd}->send_output( { command => 'PONG', params => $args }, $self->_state_user_route( $args->[1] ) ) if $self->_state_user_exists( $args->[1] );
+	last SWITCH;
+    }
+    delete $self->{state}->{conns}->{ $peer_id }->{pinged};
+  }
+  return @{ $ref } if wantarray();
+  return $ref;
+}
+
+sub _daemon_peer_server {
+  my $self = shift;
+  my $peer_id = shift || return;
+  my $prefix = shift || return;
+  my $server = $self->server_name();
+  my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
+  my $peer = $self->{state}->{conns}->{ $peer_id }->{name};
+  SWITCH: {
+    if ( !$count or $count < 2 ) {
+	last SWITCH;
+    }
+    if ( $self->_state_peer_exists( $args->[0] ) ) {
+	$self->terminate_conn_error( $peer_id, 'Server exists' );
+	last SWITCH;
+    }
+    my $record = { 
+		   name => $args->[0], 
+		   hops => $args->[1], 
+		   desc => ( $args->[2] || '' ),
+		   route_id => $peer_id,
+		   type => 'r',
+		   peers => { },
+		   users => { },
+    		 };
+    my $uname = uc $record->{name};
+    $self->{state}->{peers}->{ $uname } = $record;
+    $self->{state}->{peers}->{ uc $prefix }->{peers}->{ $uname } = $record;
+    $self->{ircd}->send_output( { prefix => $prefix, command => 'SERVER', params => [ $record->{name}, $record->{hops} + 1, $record->{desc} ] }, grep { $_ ne $peer_id } $self->_state_connected_peers() );
+  }
+  return @{ $ref } if wantarray();
+  return $ref;
+}
+
+sub _daemon_peer_nick {
+  my $self = shift;
+  my $peer_id = shift || return;
+  my $prefix = shift;
+  my $server = $self->server_name();
+  my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
+  my $peer = $self->{state}->{conns}->{ $peer_id }->{name};
+  SWITCH: {
+    if ( !$count  ) {
+	last SWITCH;
+    }
+    if ( $prefix and $count ) {
+    }
+  }
+  return @{ $ref } if wantarray();
+  return $ref;
+}
+
 #################
 # State methods #
 #################
@@ -1693,6 +1835,7 @@ sub _state_send_burst {
   my $self = shift;
   my $conn_id = shift || return;
   return unless $self->_connection_exists( $conn_id );
+  print STDERR "Starting server burst\n";
   my $server = $self->server_name();
   my $conn = $self->{state}->{conns}->{ $conn_id };
   my $burst = scalar grep { /^EOB$/i } @{ $conn->{capab} };
@@ -1716,6 +1859,7 @@ sub _state_send_burst {
     my $arrayref = [ $chanrec->{ts}, $chanrec->{name}, '+' . $chanrec->{mode}, ( $chanrec->{ckey} || () ), ( $chanrec->{climit} || () ), join ' ', @nicks ];
     $self->{ircd}->send_output( { prefix => $server, command => 'SJOIN', params => $arrayref }, $conn_id );
   }
+  print STDERR "Finished server burst\n";
   return 1;
 }
 
@@ -1738,6 +1882,22 @@ sub _state_server_burst {
   return $ref;
 }
 
+sub _state_server_squit {
+  my $self = shift;
+  my $peer = shift || return;
+  return unless $self->_state_peer_exists( $peer );
+  my $ref = [ ];
+  my $upeer = uc $peer;
+  push @{ $ref }, $_ for keys %{ $self->{state}->{peers}->{ $upeer }->{users} };
+  foreach my $server ( keys %{ $self->{state}->{peers}->{ $upeer }->{peers} } ) {
+    push @{ $ref }, $_ for $self->_state_server_squit( $server );
+  }
+  delete $self->{state}->{peers}->{ $upeer };
+  delete $self->{state}->{peers}->{ uc $self->server_name() }->{peers}->{ $upeer };
+  return @{ $ref } if wantarray();
+  return $ref;
+}
+
 sub _state_register_peer {
   my $self = shift;
   my $conn_id = shift || return;
@@ -1750,6 +1910,7 @@ sub _state_register_peer {
   $self->{state}->{peers}->{ uc $self->server_name() }->{peers}->{ uc $record->{name} } = $record;
   $self->{state}->{peers}->{ uc $record->{name} } = $record;
   $self->{ircd}->antiflood( $conn_id => 0 );
+  $self->{ircd}->send_output( { prefix => $self->server_name(), command => 'SERVER', params => [ $record->{name}, $record->{hops} + 1, $record->{desc} ] }, grep { $_ ne $conn_id } $self->_state_connected_peers() );
   return 1;
 }
 

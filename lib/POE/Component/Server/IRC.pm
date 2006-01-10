@@ -11,7 +11,7 @@ use POE::Component::Server::IRC::Daemon;
 use vars qw($VERSION $REVISION);
 
 $VERSION = '0.99';
-$REVISION = $LastChangedRevision$;
+($REVISION) = (q$LastChangedRevision$=~/(\d+)/g);
 
 sub _load_our_plugins {
   my ($self) = shift;
