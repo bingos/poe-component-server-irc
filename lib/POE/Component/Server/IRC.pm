@@ -14,18 +14,15 @@ $VERSION = '0.99';
 ($REVISION) = (q$LastChangedRevision$=~/(\d+)/g);
 
 sub _load_our_plugins {
-  my ($self) = shift;
-
-  $self->{daemon} = POE::Component::Server::IRC::Daemon->new();
-
+  my $self = shift;
+  $self->{daemon} = POE::Component::Server::IRC::Daemon->new( config => $self->{config} );
   $self->plugin_add( 'Daemon', $self->{daemon} );
   return 1;
 }
 
 sub _unload_our_plugins {
-  my ($self) = shift;
-
-  my ($daemon) = delete ( $self->{daemon} );
+  my $self = shift;
+  my $daemon = delete ( $self->{daemon} );
   $self->plugin_del( $daemon );
   return 1;
 }

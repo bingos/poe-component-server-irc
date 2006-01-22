@@ -254,9 +254,9 @@ sub _accept_connection {
   if ( $wheel ) {
 	my $wheel_id = $wheel->ID();
         my $ref = { wheel => $wheel, peeraddr => $peeraddr, peerport => $peerport, flooded => 0,
-		      sockaddr => $sockaddr, sockport => $sockport, idle => time(), antiflood => 1, compress => 0 };
+		      sockaddr => $sockaddr, sockport => $sockport, idle => time(), antiflood => $listener->{antiflood}, compress => 0 };
 	$self->_send_event( $self->{prefix} . 'connection' => $wheel_id => $peeraddr => $peerport => $sockaddr => $sockport );
-	if ( $self->{will_do_auth} and $listener->{do_auth} ) {
+	if ( $listener->{do_auth} and $self->{will_do_auth} ) {
 		$kernel->yield( '_auth_client' => $wheel_id );
 	} else {
 		$self->_send_event( $self->{prefix} . 'auth_done' => $wheel_id => { ident    => '',
@@ -282,8 +282,11 @@ sub _add_listener {
   $parms{ lc($_) } = delete $parms{$_} for keys %parms;
 
   my $bindport = $parms{port} || 0;
-  my $auth = $parms{auth} || 1;
   my $freq = $parms{freq} || 180;
+  my $auth = 1;
+  my $antiflood = 1;
+  $auth = 0 if defined $parms{auth} and $parms{auth} eq '0';
+  $antiflood = 0 if defined $parms{antiflood} and $parms{antiflood} eq '0';
 
   my $listener = POE::Wheel::SocketFactory->new(
 	BindPort => $bindport,
@@ -303,6 +306,7 @@ sub _add_listener {
 	$self->{listeners}->{ $listener_id }->{port} = $port;
 	$self->{listeners}->{ $listener_id }->{freq} = $freq;
 	$self->{listeners}->{ $listener_id }->{do_auth} = $auth;
+	$self->{listeners}->{ $listener_id }->{antiflood} = $antiflood;
   }
   undef;
 }
@@ -427,7 +431,7 @@ sub _sock_up {
         my $ref = { wheel => $wheel, peeraddr => $peeraddr, peerport => $peerport, 
 		      sockaddr => $sockaddr, sockport => $sockport, idle => time(), antiflood => 0, compress => 0 };
 	$self->{wheels}->{ $wheel_id } = $ref;
-	$self->_send_event( $self->{prefix} . 'connected' => $wheel_id => $peeraddr => $peerport => $sockaddr => $sockport );
+	$self->_send_event( $self->{prefix} . 'connected' => $wheel_id => $peeraddr => $peerport => $sockaddr => $sockport => $cntr->{name} );
   }
   undef;
 }
@@ -1001,7 +1005,7 @@ sub _plugin_process {
     my $ret = PCSI_EAT_NONE;
 
     eval { $ret = $plugin->$sub($self, @args) };
-    warn "$sub call failed with $@\n" if $@ and $self->{plugin_debug};
+    warn "$sub call failed with $@\n" if $@ and $self->{plugin_debug} and $plugin->can($sub);
     eval { $ret = $plugin->_default($self, $sub, @args) } if $@;
     warn "_default call failed with $@\n" if $@ and $self->{plugin_debug};
 
