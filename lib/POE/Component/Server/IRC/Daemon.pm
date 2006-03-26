@@ -392,7 +392,7 @@ sub _cmd_from_client {
   SWITCH: {
     my $method = '_daemon_cmd_' . lc $cmd;
     if ( $cmd eq 'QUIT' ) {
-	$self->terminate_conn_error( $wheel_id, ( $pcount ? $params->[0] : 'Client Quit' ) );
+	$self->terminate_conn_error( $wheel_id, ( $pcount ? qq{"$params->[0]"} : 'Client Quit' ) );
 	last SWITCH;
     }
     if ( $cmd =~ /^(USERHOST|MODE)$/ and !$pcount ) {
@@ -3033,10 +3033,10 @@ sub configure {
 
   $self->{config}->{CREATED} = time();
   $self->{config}->{CASEMAPPING} = 'rfc1459';
-  $self->{config}->{SERVERNAME} = 'poco.server.irc' unless ( $self->{config}->{SERVERNAME} );
-  $self->{config}->{SERVERDESC} = 'Poco? POCO? POCO!' unless ( $self->{config}->{SERVERDESC} );
+  $self->{config}->{SERVERNAME} = 'poco.server.irc' unless $self->{config}->{SERVERNAME};
+  $self->{config}->{SERVERDESC} = 'Poco? POCO? POCO!' unless $self->{config}->{SERVERDESC};
   $self->{config}->{VERSION} = ref ( $self ) . '-' . $VERSION unless ( $self->{config}->{VERSION} );
-  $self->{config}->{NETWORK} = 'poconet' unless ( $self->{config}->{NETWORK} );
+  $self->{config}->{NETWORK} = 'poconet' unless $self->{config}->{NETWORK};
   $self->{config}->{HOSTLEN} = 63 unless ( defined ( $self->{config}->{HOSTLEN} ) and $self->{config}->{HOSTLEN} > 63 );
   $self->{config}->{NICKLEN} = 9 unless ( defined ( $self->{config}->{NICKLEN} ) and $self->{config}->{NICKLEN} > 9 );
   $self->{config}->{KICKLEN} = 120 unless ( defined ( $self->{config}->{KICKLEN} ) and $self->{config}->{KICKLEN} < 120 );
@@ -3285,5 +3285,154 @@ sub daemon_server_kill {
   return $ref;
 }
 
+sub daemon_server_mode {
+  my $self = shift;
+  my $chan = shift;
+  my $server = $self->server_name();
+  my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
+  SWITCH: {
+    if ( !$self->_state_chan_exists( $chan ) ) {
+	last SWITCH;
+    }
+    my $record = $self->{state}->{chans}->{ u_irc $chan };
+    $chan = $record->{name};
+    if ( $chan =~ /^\x2B/ ) {
+	last SWITCH;
+    }
+    my $full = $server;
+    my $parsed_mode = parse_mode_line( @{ $args } );
+    while( my $mode = shift ( @{ $parsed_mode->{modes} } ) ) {
+      my $arg;
+      $arg = shift ( @{ $parsed_mode->{args} } ) if ( $mode =~ /^(\+[ohvklbIe]|-[ohvbIe])/ );
+      if ( my ($flag,$char) = $mode =~ /^(\+|-)([ohv])/ ) {
+	if ( $flag eq '+' and $record->{users}->{ u_irc $arg } !~ /$char/ ) {
+	  # Update user and chan record
+	  $arg = u_irc $arg;
+	  next if ( $mode eq '+h' and $record->{users}->{ $arg } =~ /o/ );
+	  if ( $char eq 'h' and $record->{users}->{ $arg } =~ /v/ ) {
+	     $record->{users}->{ $arg } =~ s/v//g;
+	  }
+	  if ( $char eq 'o' and $record->{users}->{ $arg } =~ /h/ ) {
+	     $record->{users}->{ $arg } =~ s/h//g;
+	  }
+	  $record->{users}->{ $arg }  = join('', sort split //, $record->{users}->{ $arg } . $char );
+	  $self->{state}->{users}->{ $arg }->{chans}->{ u_irc $chan } = $record->{users}->{ $arg };
+        }
+	if ( $flag eq '-' and $record->{users}->{ u_irc $arg } =~ /$char/ ) {
+	  # Update user and chan record
+	  $arg = u_irc $arg;
+	  $record->{users}->{ $arg } =~ s/$char//g;
+	  $self->{state}->{users}->{ $arg }->{chans}->{ u_irc $chan } = $record->{users}->{ $arg };
+        }
+	next;
+      }
+      if ( $mode eq '+l' and $arg =~ /^\d+$/ and $arg > 0 ) {
+	$record->{mode} = join('', sort split //, $record->{mode} . 'l' ) unless $record->{mode} =~ /l/;
+	$record->{climit} = $arg;
+	next;
+      }
+      if ( $mode eq '-l' and $record->{mode} =~ /l/ ) {
+	$record->{mode} =~ s/l//g;
+	delete $record->{climit};
+	next;
+      }
+      if ( $mode eq '+k' and $arg ) {
+	$record->{mode} = join('', sort split //, $record->{mode} . 'k' ) unless $record->{mode} =~ /k/;
+	$record->{ckey} = $arg;
+	next;
+      }
+      if ( $mode eq '-k' and $record->{mode} =~ /k/ ) {
+	$record->{mode} =~ s/k//g;
+	delete $record->{ckey};
+	next;
+      }
+      # Bans
+      if ( my ($flag) = $mode =~ /(\+|-)b/ ) {
+	my $mask = parse_ban_mask( $arg );
+	my $umask = u_irc $mask;
+	if ( $flag eq '+' and !$record->{bans}->{ $umask } ) {
+	  $record->{bans}->{ $umask } = [ $mask, ( $full || $server ), time() ];
+	}
+	if ( $flag eq '-' and $record->{bans}->{ $umask } ) {
+	  delete $record->{bans}->{ $umask };
+	}
+	next;
+      }
+      # Invex
+      if ( my ($flag) = $mode =~ /(\+|-)I/ ) {
+	my $mask = parse_ban_mask( $arg );
+	my $umask = u_irc $mask;
+	if ( $flag eq '+' and !$record->{invex}->{ $umask } ) {
+	   $record->{invex}->{ $umask } = [ $mask, ( $full || $server ), time() ];
+	}
+	if ( $flag eq '-' and $record->{invex}->{ $umask } ) {
+	  delete $record->{invex}->{ $umask };
+	}
+	next;
+      }
+      # Exceptions
+      if ( my ($flag) = $mode =~ /(\+|-)e/ ) {
+	my $mask = parse_ban_mask( $arg );
+	my $umask = u_irc $mask;
+	if ( $flag eq '+' and !$record->{excepts}->{ $umask } ) {
+	  $record->{excepts}->{ $umask } = [ $mask, ( $full || $server ), time() ];
+	}
+	if ( $flag eq '-' and $record->{excepts}->{ $umask } ) {
+	  delete $record->{excepts}->{ $umask };
+	}
+	next;
+      }
+      # The rest should be argumentless.
+      my ($flag,$char) = split //, $mode;
+      if ( $flag eq '+' and $record->{mode} !~ /$char/ ) {
+	$record->{mode} = join('', sort split //, $record->{mode} . $char );
+	next;
+      }
+      if ( $flag eq '-' and $record->{mode} =~ /$char/ ) {
+	$record->{mode} =~ s/$char//g;
+	next;
+      }
+    } # while
+    unshift @{ $args }, $record->{name};
+    $self->{ircd}->send_output( { prefix => $server, command => 'MODE', params => $args, colonify => 0 }, $self->_state_connected_peers() );
+    $self->{ircd}->send_output( { prefix => ( $full || $server ), command => 'MODE', params => $args, colonify => 0 }, map { $self->_state_user_route($_) } grep { $self->_state_is_local_user($_) } keys %{ $record->{users} } ); 
+  } # SWITCH
+  return @{ $ref } if wantarray();
+  return $ref;
+}
+
+sub daemon_server_kick {
+  my $self = shift;
+  my $server = $self->server_name();
+  my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
+  SWITCH: {
+    if ( !$count or $count < 2 ) {
+	last SWITCH;
+    }
+    my $chan = ( split /,/, $args->[0] )[0];
+    my $who = ( split /,/, $args->[1] )[0];
+    if ( !$self->_state_chan_exists( $chan ) ) {
+	last SWITCH;
+    }
+    $chan = $self->_state_chan_name( $chan );
+    if ( !$self->_state_nick_exists( $who ) ) {
+	last SWITCH;
+    }
+    $who = ( split /!/, $self->_state_user_full( $who ) )[0];
+    if ( !$self->_state_is_chan_member( $who, $chan ) ) {
+	last SWITCH;
+    }
+    my $comment = $args->[2] || $who;
+    $self->_send_output_to_channel( $chan, { prefix => $server, command => 'KICK', params => [ $chan, $who, $comment ] } );
+    $who = u_irc $who; $chan = u_irc $chan;
+    delete $self->{state}->{chans}->{ $chan }->{users}->{ $who };
+    delete $self->{state}->{users}->{ $who }->{chans}->{ $chan };
+    unless ( scalar keys %{ $self->{state}->{chans}->{ $chan  }->{users} } ) {
+	delete $self->{state}->{chans}->{ $chan  };
+    }
+  }
+  return @{ $ref } if wantarray();
+  return $ref;
+}
 
 1;

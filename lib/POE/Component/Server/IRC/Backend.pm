@@ -735,6 +735,17 @@ sub antiflood {
   return unless $self->_wheel_exists( $wheel_id );
   return 0 unless $self->{antiflood};
   return $self->{wheels}->{ $wheel_id }->{antiflood} unless defined $value;
+  unless ( $value ) {
+    # Flush pending messages from that wheel
+    while ( my $alarm_id = shift @{ $self->{wheels}->{ $wheel_id }->{alarm_ids} } ) {
+      $poe_kernel->alarm_remove( $alarm_id );
+      my $input = shift @{ $self->{wheels}->{ $wheel_id }->{msq} };
+      if ( $input ) {
+        my $event = $self->{prefix} . 'cmd_' . lc ( $input->{command} );
+        $self->_send_event( $event => $wheel_id => $input );
+      }
+    }
+  }
   $self->{wheels}->{ $wheel_id }->{antiflood} = $value;
 }
 
@@ -783,6 +794,12 @@ sub _conn_flooded {
   return unless $self->_wheel_exists( $conn_id );
   return $self->{wheels}->{ $conn_id }->{flooded};
 }
+
+######################
+# Spoofed Client API #
+######################
+
+
 
 ##################
 # Access Control #
@@ -1085,14 +1102,6 @@ Takes no arguments. Terminates the component. Removes all listeners and connecto
 
 Takes no arguments. Returns the ID of the component's session. Ideal for posting events to the component.
 
-=item yield
-
-This method provides an alternative object based means of posting events to the component. First argument is the event to post, following arguments are sent as arguments to the resultant post.
-
-=item call
-
-This method provides an alternative object based means of calling events to the component. First argument is the event to call, following arguments are sent as arguments to the resultant call.
-
 =item send_event
 
 Seen an event through the component's event handling system. First argument is the event name, subsequent arguments are the event's parameters.
@@ -1131,6 +1140,14 @@ Takes one mandatory argument, a L<Net::Netmask> object that will be checked agai
 =item del_exemption
 
 Takes one mandatory argument, a L<Net::Netmask> object to remove from the current exemption list.
+
+=item yield
+
+This method provides an alternative object based means of posting events to the component. First argument is the event to post, following arguments are sent as arguments to the resultant post.
+
+=item call
+
+This method provides an alternative object based means of calling events to the component. First argument is the event to call, following arguments are sent as arguments to the resultant call.
 
 =back
 
@@ -1358,3 +1375,9 @@ Args:
 Chris 'BinGOs' Williams
 
 =head1 SEE ALSO
+
+L<POE::Filter::IRCD>
+
+L<POE::Component::IRC>
+
+L<POE>

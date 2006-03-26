@@ -15,7 +15,7 @@ WriteMakefile(
 							  'POE::Filter::Zlib' => 0,
 							  'POE::Component::Client::Ident' => 0,
 							  'POE::Component::Client::DNS' => 0,
-							  'POE::Component::IRC' => 4.75
+							  'POE::Component::IRC' => 4.79
 							 },
 			  'VERSION_FROM' => 'lib/POE/Component/Server/IRC.pm', # finds $VERSION
 			  'dist' => { 'COMPRESS' => 'gzip --best' },
