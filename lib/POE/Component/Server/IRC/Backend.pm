@@ -1014,6 +1014,8 @@ sub _plugin_process {
   my $sub = ($type eq 'SERVER' ? "IRCD" : "U") . "_$event";
   my $return = PCSI_EAT_NONE;
 
+  $self->$sub( $self, @args ) if $self->can($sub);
+
   for my $plugin (@{ $pipeline->{PIPELINE} }) {
     next
       unless $pipeline->{HANDLES}{$plugin}{$type}{$event}
