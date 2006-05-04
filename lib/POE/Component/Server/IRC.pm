@@ -3456,4 +3456,39 @@ sub daemon_server_kick {
   return $ref;
 }
 
+sub daemon_server_remove {
+  my $self = shift;
+  my $server = $self->server_name();
+  my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
+  SWITCH: {
+    if ( !$count or $count < 2 ) {
+	last SWITCH;
+    }
+    my $chan = ( split /,/, $args->[0] )[0];
+    my $who = ( split /,/, $args->[1] )[0];
+    if ( !$self->_state_chan_exists( $chan ) ) {
+	last SWITCH;
+    }
+    $chan = $self->_state_chan_name( $chan );
+    if ( !$self->_state_nick_exists( $who ) ) {
+	last SWITCH;
+    }
+    my $fullwho = $self->_state_user_full( $who );
+    $who = ( split /!/, $who )[0];
+    if ( !$self->_state_is_chan_member( $who, $chan ) ) {
+	last SWITCH;
+    }
+    my $comment = $args->[2] || $chan;
+    $self->_send_output_to_channel( $chan, { prefix => $fullwho, command => 'PART', params => [ $chan, $comment ] } );
+    $who = u_irc $who; $chan = u_irc $chan;
+    delete $self->{state}->{chans}->{ $chan }->{users}->{ $who };
+    delete $self->{state}->{users}->{ $who }->{chans}->{ $chan };
+    unless ( scalar keys %{ $self->{state}->{chans}->{ $chan  }->{users} } ) {
+	delete $self->{state}->{chans}->{ $chan  };
+    }
+  }
+  return @{ $ref } if wantarray();
+  return $ref;
+}
+
 1;
