@@ -13,11 +13,11 @@ use vars qw($VERSION);
 $VERSION = '0.99';
 
 sub create {
-  my ($package) = shift;
+  my $package = shift;
   croak "$package requires an even number of parameters" if @_ & 1;
   my %parms = @_;
 
-  $parms{ lc($_) } = delete $parms{$_} for keys %parms;
+  $parms{ lc $_ } = delete $parms{$_} for keys %parms;
 
   my $self = bless \%parms, $package;
 
@@ -1014,7 +1014,11 @@ sub _plugin_process {
   my $sub = ($type eq 'SERVER' ? "IRCD" : "U") . "_$event";
   my $return = PCSI_EAT_NONE;
 
-  $self->$sub( $self, @args ) if $self->can($sub);
+  if ( $self->can($sub) ) {
+  	$self->$sub( $self, @args );
+  } elsif ( $self->can('_default') ) {
+	$self->_default( $self, $sub, @args );
+  }
 
   for my $plugin (@{ $pipeline->{PIPELINE} }) {
     next
@@ -1303,6 +1307,7 @@ Args:
 	  command => 'PRIVMSG',
 	  params  => [ '#moo', 'cows go moo, not fish :D' ],
 	  raw_line => ':blah!~blah@blah.blah.blah.blah PRIVMSG #moo :cows go moo, not fish :D' };
+
 =back
 
 =head1 PLUGIN SYSTEM
