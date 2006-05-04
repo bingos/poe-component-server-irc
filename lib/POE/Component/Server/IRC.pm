@@ -156,7 +156,7 @@ sub _default {
   return PCSI_EAT_NONE;
 }
 
-sub _auth_done {
+sub _auth_finished {
   my ($self) = shift;
   my ($conn_id) = shift || return undef;
   return unless $self->_connection_exists( $conn_id );
@@ -176,7 +176,7 @@ sub _client_register {
   return unless $self->_connection_exists( $conn_id );
   return unless $self->{state}->{conns}->{ $conn_id }->{nick};
   return unless $self->{state}->{conns}->{ $conn_id }->{user};
-  my $auth = $self->_auth_done( $conn_id );
+  my $auth = $self->_auth_finished( $conn_id );
   return unless $auth;
   # pass required for link
   # Add new nick
@@ -1589,6 +1589,50 @@ sub _daemon_cmd_kick {
     }
     my $comment = $args->[2] || $who;
     $self->_send_output_to_channel( $chan, { prefix => $self->_state_user_full( $nick ), command => 'KICK', params => [ $chan, $who, $comment ] } );
+    $who = u_irc $who; $chan = u_irc $chan;
+    delete $self->{state}->{chans}->{ $chan }->{users}->{ $who };
+    delete $self->{state}->{users}->{ $who }->{chans}->{ $chan };
+    unless ( scalar keys %{ $self->{state}->{chans}->{ $chan  }->{users} } ) {
+	delete $self->{state}->{chans}->{ $chan  };
+    }
+  }
+  return @{ $ref } if wantarray();
+  return $ref;
+}
+
+sub _daemon_cmd_remove {
+  my $self = shift;
+  my $nick = shift || return;
+  my $server = $self->server_name();
+  my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
+  SWITCH: {
+    if ( !$count or $count < 2 ) {
+	push @{ $ref }, [ '461', 'REMOVE' ];
+	last SWITCH;
+    }
+    my $chan = ( split /,/, $args->[0] )[0];
+    my $who = ( split /,/, $args->[1] )[0];
+    if ( !$self->_state_chan_exists( $chan ) ) {
+	push @{ $ref }, [ '403', $chan ];
+	last SWITCH;
+    }
+    $chan = $self->_state_chan_name( $chan );
+    if ( !$self->_state_nick_exists( $who ) ) {
+	push @{ $ref }, [ '401', $who ];
+	last SWITCH;
+    }
+    my $fullwho = $self->_state_user_full( $who );
+    $who = ( split /!/, $fullwho )[0];
+    if ( !$self->_state_is_chan_op( $nick, $chan ) ) {
+	push @{ $ref }, [ '482', $chan ];
+	last SWITCH;
+    }
+    if ( !$self->_state_is_chan_member( $who, $chan ) ) {
+	push @{ $ref }, [ '441', $who, $chan ];
+	last SWITCH;
+    }
+    my $comment = $args->[2] || "Requested by $nick";
+    $self->_send_output_to_channel( $chan, { prefix => $fullwho, command => 'PART', params => [ $chan, $comment ] } );
     $who = u_irc $who; $chan = u_irc $chan;
     delete $self->{state}->{chans}->{ $chan }->{users}->{ $who };
     delete $self->{state}->{users}->{ $who }->{chans}->{ $chan };

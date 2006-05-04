@@ -4,13 +4,13 @@ use warnings;
 use POE qw(Component::Server::IRC);
 use Net::Netmask;
 
-my $pocosi = POE::Component::Server::IRC->create( auth => 1, options => { trace => 0 }, plugin_debug => 1, debug => 1, config => { servername => 'penguin2.gumbynet.org.uk' } );
+my $pocosi = POE::Component::Server::IRC->spawn( auth => 1, options => { trace => 0 }, plugin_debug => 1, debug => 1, config => { servername => 'penguin2.gumbynet.org.uk' } );
 
 POE::Session->create(
 		package_states => [ 
 			'main' => [ qw(_start) ],
 		],
-		options => { trace => 0 },
+		options => { trace => 1 },
 		heap => { ircd => $pocosi },
 );
 
@@ -27,8 +27,8 @@ sub _start {
   $heap->{ircd}->yield( 'register' );
   $heap->{ircd}->add_listener( port => 7667 );
   $heap->{ircd}->add_listener( port => 7668, auth => 0, antiflood => 0 );
-  $heap->{ircd}->daemon->add_peer( name => 'logserv.gumbynet.org.uk', pass => 'op3rs3rv', rpass => 'op3rs3rv' );
-  $heap->{ircd}->daemon->add_operator( { username => 'moo', password => 'fishdont' } );
+  $heap->{ircd}->add_peer( name => 'logserv.gumbynet.org.uk', pass => 'op3rs3rv', rpass => 'op3rs3rv' );
+  $heap->{ircd}->add_operator( { username => 'moo', password => 'fishdont' } );
   undef;
 }
 
