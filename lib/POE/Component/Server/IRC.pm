@@ -1631,7 +1631,8 @@ sub _daemon_cmd_remove {
 	push @{ $ref }, [ '441', $who, $chan ];
 	last SWITCH;
     }
-    my $comment = $args->[2] || "Requested by $nick";
+    my $comment = "Requested by $nick";
+    $comment .= " \"$args->[2]\"" if $args->[2];
     $self->_send_output_to_channel( $chan, { prefix => $fullwho, command => 'PART', params => [ $chan, $comment ] } );
     $who = u_irc $who; $chan = u_irc $chan;
     delete $self->{state}->{chans}->{ $chan }->{users}->{ $who };
@@ -3478,7 +3479,8 @@ sub daemon_server_remove {
     if ( !$self->_state_is_chan_member( $who, $chan ) ) {
 	last SWITCH;
     }
-    my $comment = $args->[2] || $chan;
+    my $comment = 'Enforced PART';
+    $comment .= " \"$args->[2]\"" if $args->[2];
     $self->_send_output_to_channel( $chan, { prefix => $fullwho, command => 'PART', params => [ $chan, $comment ] } );
     $who = u_irc $who; $chan = u_irc $chan;
     delete $self->{state}->{chans}->{ $chan }->{users}->{ $who };
