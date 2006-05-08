@@ -57,6 +57,7 @@ sub create {
 				register 
 				unregister) ],
 	],
+	heap => $self,
 	( ref($options) eq 'HASH' ? ( options => $options ) : () ),
   )->ID();
 
@@ -1013,12 +1014,17 @@ sub _plugin_process {
 
   my $sub = ($type eq 'SERVER' ? "IRCD" : "U") . "_$event";
   my $return = PCSI_EAT_NONE;
+  my $our_ret = $return;
 
   if ( $self->can($sub) ) {
-  	$self->$sub( $self, @args );
+  	$our_ret = $self->$sub( $self, @args );
   } elsif ( $self->can('_default') ) {
-	$self->_default( $self, $sub, @args );
+	$our_ret = $self->_default( $self, $sub, @args );
   }
+
+  return $return if $our_ret == PCSI_EAT_PLUGIN;
+  $return = PCSI_EAT_ALL if $our_ret == PCSI_EAT_CLIENT;
+  return PCSI_EAT_ALL if $our_ret == PCSI_EAT_ALL;
 
   for my $plugin (@{ $pipeline->{PIPELINE} }) {
     next

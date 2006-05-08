@@ -5,7 +5,7 @@
 
 # change 'tests => 1' to 'tests => last_test_to_print';
 
-use Test::More tests => 23;
+use Test::More tests => 19;
 BEGIN { use_ok('POE::Component::Server::IRC') };
 BEGIN { use_ok('POE::Component::IRC') };
 BEGIN { use_ok('POE') };
@@ -25,13 +25,9 @@ if ( $pocosi and $pocoirc ) {
 			'main' => [ qw( _start 
 					_shutdown
 					_default
-					ircd_backend_auth_done
-					ircd_backend_connection
-					ircd_backend_cmd_nick 
-					ircd_backend_cmd_user 
-					ircd_backend_registered
-					ircd_backend_listener_add
-					ircd_backend_listener_del) ],
+					ircd_registered
+					ircd_listener_add
+					ircd_listener_del) ],
 		],
 		options => { trace => 0 },
 		heap => { irc => $pocoirc, ircd => $pocosi },
@@ -61,13 +57,15 @@ sub _shutdown {
   undef;
 }
 
-sub ircd_backend_registered {
+sub ircd_registered {
   my ($heap,$object) = @_[HEAP,ARG0];
+  my $backend = $_[SENDER]->get_heap();
   isa_ok( $object, "POE::Component::Server::IRC" );
+  isa_ok( $backend, "POE::Component::Server::IRC" );
   undef;
 }
 
-sub ircd_backend_listener_add {
+sub ircd_listener_add {
   my ($heap,$port) = @_[HEAP,ARG0];
   ok( 1, "Started a listener on $port" );
   $heap->{port} = $port;
@@ -75,7 +73,7 @@ sub ircd_backend_listener_add {
   undef;
 }
 
-sub ircd_backend_listener_del {
+sub ircd_listener_del {
   my ($heap,$port) = @_[HEAP,ARG0];
   ok( 1, "Stopped listener on $port" );
   $_[KERNEL]->yield( '_shutdown' );
