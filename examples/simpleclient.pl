@@ -30,6 +30,10 @@ my ($irc) = POE::Component::IRC->spawn( password => $pass, Nick => $nick, Server
 POE::Session->create(
 	package_states => [
 		'main' => [ qw(_start _stop got_input parse_input irc_raw) ],
+		'main' => { 'irc_error' => '_error',
+			    'irc_disconnected' => '_error',
+			    'irc_socketerr' => '_error',
+			  },
 	],
 );
 
@@ -49,6 +53,11 @@ sub _stop {
   delete $_[HEAP]->{readline_wheel};
   $irc->yield( unregister => 'all' );
   $irc->yield( 'shutdown' );
+  undef;
+}
+
+sub _error {
+  $_[HEAP]->{readline_wheel}->put(join ' ', "$_[STATE]:", @_[ARG0..$#_]);
   undef;
 }
 

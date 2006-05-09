@@ -8,11 +8,16 @@ use Data::Dumper;
 $Data::Dumper::Indent = 1;
 $|=1;
 
-my $pocosi = POE::Component::Server::IRC->spawn( auth => 1, options => { trace => 0 }, plugin_debug => 0, debug => 1, config => { servername => 'penguin2.gumbynet.org.uk' } );
+my $pocosi = POE::Component::Server::IRC->spawn( auth => 1, options => { trace => 0 }, plugin_debug => 0, debug => 0, config => { servername => 'penguin2.gumbynet.org.uk' } );
 
 POE::Session->create(
 		package_states => [ 
-			'main' => [ qw(_default _start sig_hup) ],
+			'main' => [  qw(_default 
+					_start 
+					sig_hup 
+					ircd_daemon_join
+					ircd_daemon_privmsg
+			) ],
 		],
 		options => { trace => 0 },
 		heap => { ircd => $pocosi },
@@ -43,9 +48,9 @@ sub _start {
 sub _default {
   my ( $event, $args ) = @_[ ARG0 .. $#_ ];
   print STDOUT "$event: ";
-  print STDOUT Dumper(@$args) unless $event eq "ircd_registered";
-  print STDOUT "\n";
-  return 0;
+  #print STDOUT Dumper(@$args) unless $event eq "ircd_registered";
+  #print STDOUT "\n";
+  #return 0;
   foreach (@$args) {
     SWITCH: {
         if ( ref($_) eq 'ARRAY' ) {
@@ -65,8 +70,26 @@ sub _default {
 
 sub sig_hup {
   my ($kernel,$heap) = @_[KERNEL,HEAP];
-  print STDOUT Dumper($heap->{ircd}->{state});
   $heap->{ircd}->yield( 'del_spoofed_nick' => 'OperServ' => 'ARGH! SIGHUP!' );
-  #$heap->{ircd}->yield( 'daemon_cmd_part' => 'OperServ' => '#foo' );
   $kernel->sig_handled();
+}
+
+sub ircd_daemon_join {
+  my ($kernel,$heap) = @_[KERNEL,HEAP];
+  my $nick = ( split /!/, $_[ARG0] )[0];
+  return if $nick eq 'OperServ';
+  return unless $heap->{ircd}->_state_user_is_operator($nick);
+  my $channel = $_[ARG1];
+  return if $heap->{ircd}->_state_is_chan_op( $nick, $channel );
+  $heap->{ircd}->daemon_server_mode( $channel, '+o', $nick );
+  undef;
+}
+
+sub ircd_daemon_privmsg {
+  my ($kernel,$heap) = @_[KERNEL,HEAP];
+  my $nick = ( split /!/, $_[ARG0] )[0];
+  return unless $heap->{ircd}->_state_user_is_operator($nick);
+  my $target = $_[ARG1];
+  $heap->{ircd}->yield( 'daemon_cmd_privmsg', $target, $nick, $_[ARG2] );
+  undef;
 }

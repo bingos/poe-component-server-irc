@@ -33,7 +33,7 @@ sub _load_our_plugins {
   my $self = shift;
   $poe_kernel->state( 'add_spoofed_nick', $self );
   $poe_kernel->state( 'del_spoofed_nick', $self );
-  $poe_kernel->state( "daemon_cmd_$_", $self, '_spoofed_command' ) for qw(join part);
+  $poe_kernel->state( "daemon_cmd_$_", $self, '_spoofed_command' ) for qw(join part mode privmsg notice);
 }
 
 sub IRCD_listener_add {
@@ -458,10 +458,10 @@ sub _daemon_cmd_message {
 	  push @{ $ref }, [ '404', $channel ];
 	  next LOOP;
 	}
-	#if ( $channel and $self->_state_user_banned( $nick, $channel ) ) {
-	#  push @{ $ref }, [ '404', $channel ];
-	#  next LOOP;
-	#}
+	if ( $channel and $self->_state_user_banned( $nick, $channel ) and $self->_state_user_chan_mode( $nick, $channel ) !~ /[ohv]/ ) {
+	  push @{ $ref }, [ '404', $channel ];
+	  next LOOP;
+	}
 	if ( $channel ) {
 	  my $common = { };
 	  my $msg = { command => $type, params => [ $channel, $args->[1] ] };
@@ -472,7 +472,12 @@ sub _daemon_cmd_message {
 	  foreach my $route_id ( keys %{ $common } ) {
 		$msg->{prefix} = $nick;
 		$msg->{prefix} = $full if $self->_connection_is_client( $route_id );
-	  	$self->{ircd}->send_output( $msg, $route_id )
+		unless ( $route_id eq 'spoofed' ) {
+	  	  $self->{ircd}->send_output( $msg, $route_id );
+		} else {
+		  my $tmsg = $type eq 'PRIVMSG' ? 'public' : 'notice';
+		  $self->{ircd}->send_event( "daemon_$tmsg", $full, $channel, $args->[1] );
+		}
 	  }
 	  next LOOP;
 	}
@@ -482,7 +487,7 @@ sub _daemon_cmd_message {
 	  my $route_id = $self->_state_user_route( $target );
 	  if ( $route_id eq 'spoofed' ) {
 	     $msg->{prefix} = $full;
-	     $self->{ircd}->send_event( "daemon_" . lc $type, $target, $msg );
+	     $self->{ircd}->send_event( "daemon_" . lc $type, $full, $target, $args->[1] );
 	  } else {
 	     $msg->{prefix} = $full if $self->_connection_is_client( $route_id );
 	     $self->{ircd}->send_output( $msg, $route_id );
@@ -506,7 +511,7 @@ sub _daemon_cmd_quit {
   my $record = delete $self->{state}->{peers}->{ uc $self->server_name() }->{users}->{ $nick };
   $self->{ircd}->send_output( { prefix => $record->{nick}, command => 'QUIT', params => [ $qmsg ] }, $self->_state_connected_peers() ) unless $record->{killed};
   push @{ $ref }, { prefix => $full, command => 'QUIT', params => [ $qmsg ] };
-  $self->{ircd}->send_event( "daemon_quit", $record->{nick}, { prefix => $full, command => 'QUIT', params => [ $qmsg ] } );
+  $self->{ircd}->send_event( "daemon_quit", $full, $qmsg );
   # Okay, all 'local' users who share a common channel with user.
   my $common = { };
   foreach my $uchan ( keys %{ $record->{chans} } ) {
@@ -620,6 +625,7 @@ sub _daemon_cmd_oper {
     push @{ $ref }, { prefix => $server, command => '381', params => [ $nick, 'You are now an IRC operator' ] };
     my $reply = { prefix => $nick, command => 'MODE', params => [ $nick, '+o' ] };
     $self->{ircd}->send_output( $reply, $self->_state_connected_peers() );
+    $self->{ircd}->send_event( "daemon_umode", $self->_state_user_full( $nick ), '+o' );
     $self->{ircd}->antiflood( $self->_state_user_route( $nick ), 0 );
     push @{ $ref }, $reply;
   }
@@ -637,6 +643,7 @@ sub _daemon_cmd_die {
 	push @{ $ref }, [ '481' ];
 	last SWITCH;
      }
+     $self->{ircd}->send_event( "daemon_die", $nick );
      $self->{ircd}->shutdown();
   }
   return @{ $ref } if wantarray();
@@ -805,7 +812,7 @@ sub _daemon_cmd_nick {
     }
     $self->{ircd}->send_output( { prefix => $nick, command => 'NICK', params => [ $new, $record->{ts} ] }, @peers );
     $self->{ircd}->send_output( { prefix => $full, command => 'NICK', params => [ $new ] }, map{ $common->{$_} } keys %{ $common } );
-    $self->{ircd}->send_event( "daemon_nick", $full, { prefix => $full, command => 'NICK', params => [ $new ] } );
+    $self->{ircd}->send_event( "daemon_nick", $full, $new );
   }
   return @{ $ref } if wantarray();
   return $ref;
@@ -1448,7 +1455,8 @@ sub _daemon_cmd_mode {
     } # while
     if ( $reply ) {
 	$reply = unparse_mode_line( $reply );
-	$self->_send_output_to_channel( $chan, { prefix => $self->_state_user_full( $nick ), command => 'MODE', params => [ $chan, $reply, @reply_args ], colonify => 0 } );
+	my $output = { prefix => $self->_state_user_full( $nick ), command => 'MODE', params => [ $chan, $reply, @reply_args ], colonify => 0 };
+	$self->_send_output_to_channel( $chan, $output );
     }
   } # SWITCH
   return @{ $ref } if wantarray();
@@ -1483,7 +1491,7 @@ sub _daemon_cmd_join {
 	next LOOP;
       }
       # Too many channels
-      if ( scalar $self->_state_user_chans( $nick ) >= $self->server_config('MAXCHANNELS') ) {
+      if ( scalar $self->_state_user_chans( $nick ) >= $self->server_config('MAXCHANNELS') and !$self->_state_user_is_operator( $nick ) ) {
 	$self->_send_output_to_client( $route_id => '405' => $channel );
 	next LOOP;
       }
@@ -1496,7 +1504,7 @@ sub _daemon_cmd_join {
 	$self->{ircd}->send_output( { command => 'SJOIN', params => [ $record->{ts}, $channel, '+' . $record->{mode}, '@' . $nick ] }, @peers );
 	my $output = { prefix => $self->_state_user_full( $nick ), command => 'JOIN', params => [ $channel ] };
 	$self->{ircd}->send_output( $output, $route_id );
-	$self->{ircd}->send_event( "daemon_join", $output );
+	$self->{ircd}->send_event( "daemon_join", $output->{prefix}, $channel );
 	$self->{ircd}->send_output( { prefix => $server, command => 'MODE', params => [ $channel, '+' . $record->{mode} ] }, $route_id );
 	$self->_send_output_to_client( $route_id => ( ref $_ eq 'ARRAY' ? @{ $_ } : $_ ) ) for $self->_daemon_cmd_names( $nick, $channel );
 	$self->_send_output_to_client( $route_id => ( ref $_ eq 'ARRAY' ? @{ $_ } : $_ ) ) for $self->_daemon_cmd_topic( $nick, $channel );
@@ -1708,7 +1716,13 @@ sub _daemon_cmd_invite {
         $local = 1;
 	$away = $record->{away} if $record->{away};
     }
-    $self->{ircd}->send_output( { prefix => $self->_state_user_full( $nick ), command => 'INVITE', params => [ $who, $chan ] }, $self->_state_user_route( $who ) );
+    my $route_id = $self->_state_user_route( $who );
+    my $output = { prefix => $self->_state_user_full( $nick ), command => 'INVITE', params => [ $who, $chan ] };
+    if ( $route_id eq 'spoofed' ) {
+	$self->{ircd}->send_event( "daemon_invite", $output->{prefix}, @{ $output->{params} } );
+    } else {
+    	$self->{ircd}->send_output( $output, $route_id );
+    }
     push @{ $ref }, { prefix => $server, command => '341', params => [ $chan, $who ] };
     if ( $local and $away ) {
 	push @{ $ref }, { prefix => $server, command => '301', params => [ $nick, $who, ( $away =~ /\s+/ ? $away : ":$away" ) ] };
@@ -1754,6 +1768,7 @@ sub _daemon_cmd_umode {
     if ( $set ) {
       my $hashref = { prefix => $nick, command => 'MODE', params => [ $nick, $set ] };
       $self->{ircd}->send_output( $hashref, $self->_state_connected_peers() ) unless $peer_ignore;
+      $self->{ircd}->send_event( "daemon_umode", $self->_state_user_full( $nick ), $set ) unless $peer_ignore;
       push @{ $ref }, $hashref;
     }
   }
@@ -1851,7 +1866,7 @@ sub _daemon_peer_squit {
       }
     }
     $self->{ircd}->send_output( $output, values %{ $common } );
-    $self->{ircd}->send_event( "daemon_quit", $output->{prefix}, $output );
+    $self->{ircd}->send_event( "daemon_quit", $output->{prefix}, $output->{params}->[0] );
     my $record = delete $self->{state}->{users}->{ $nick };
     $self->{state}->{stats}->{ops_online}-- if $record->{umode} =~ /o/;
     $self->{state}->{stats}->{invisible}-- if $record->{umode} =~ /i/;
@@ -1985,7 +2000,7 @@ sub _daemon_peer_quit {
   return unless $record;
   $self->{ircd}->send_output( { prefix => $record->{nick}, command => 'QUIT', params => [ $qmsg ] }, grep { !$conn_id or $_ ne $conn_id } $self->_state_connected_peers() ) unless $record->{killed};
   push @{ $ref }, { prefix => $full, command => 'QUIT', params => [ $qmsg ] };
-  $self->{ircd}->send_event( "daemon_quit", $record->{nick}, { prefix => $full, command => 'QUIT', params => [ $qmsg ] } );
+  $self->{ircd}->send_event( "daemon_quit", $full, $qmsg );
   # Okay, all 'local' users who share a common channel with user.
   my $common = { };
   foreach my $uchan ( keys %{ $record->{chans} } ) {
@@ -2051,7 +2066,7 @@ sub _daemon_peer_nick {
     	}
         $self->{ircd}->send_output( { prefix => $prefix, command => 'NICK', params => $args }, grep { $_ ne $peer_id } $self->_state_connected_peers() );
     	$self->{ircd}->send_output( { prefix => $full, command => 'NICK', params => [ $new ] }, map{ $common->{$_} } keys %{ $common } );
-    	$self->{ircd}->send_event( "daemon_nick", $full, { prefix => $full, command => 'NICK', params => [ $new ] } );
+    	$self->{ircd}->send_event( "daemon_nick", $full, $new );
 	last SWITCH;
     }
     if ( $self->_state_nick_exists( $args->[0] ) and my ($nick,$userhost) = split /!/, $self->_state_user_full( $args->[0] ) ) {
@@ -2096,6 +2111,7 @@ sub _daemon_peer_nick {
     $self->{state}->{stats}->{invisible}++ if $record->{umode} =~ /i/;
     $self->{state}->{peers}->{ uc $record->{server} }->{users}->{ $unick } = $record;
     $self->{ircd}->send_output( { command => 'NICK', params => $args }, grep { $_ ne $peer_id } $self->_state_connected_peers() );
+    $self->{ircd}->send_event( "daemon_nick", @{ $args } );
   }
   return @{ $ref } if wantarray();
   return $ref;
@@ -2305,7 +2321,7 @@ sub _daemon_peer_sjoin {
           push @op_list, $proper for split //, $umode;
 	  my $output = { prefix => $self->_state_user_full( $nick ), command => 'JOIN', params => [ $chanrec->{name} ] };
 	  $self->{ircd}->send_output( $output, @local_users );
-	  $self->{ircd}->send_event( "daemon_join", $output );
+	  $self->{ircd}->send_event( "daemon_join", $output->{prefix}, $chanrec->{name} );
 	  if ( $umode ) {
 		$modes .= $umode;
 		push @mode_parms, @op_list;
@@ -2431,6 +2447,7 @@ sub _daemon_peer_mode {
     unshift @{ $args }, $record->{name};
     $self->{ircd}->send_output( { prefix => $nick, command => 'MODE', params => $args, colonify => 0 }, grep { $_ ne $peer_id } $self->_state_connected_peers() );
     $self->{ircd}->send_output( { prefix => ( $full || $server ), command => 'MODE', params => $args, colonify => 0 }, map { $self->_state_user_route($_) } grep { $self->_state_is_local_user($_) } keys %{ $record->{users} } ); 
+    $self->{ircd}->send_event( "daemon_mode", $full, @{ $args } );
   } # SWITCH
   return @{ $ref } if wantarray();
   return $ref;
@@ -2464,6 +2481,7 @@ sub _daemon_peer_umode {
 	}
   }
   $self->{ircd}->send_output( { prefix => $nick, command => 'MODE', params => [ $nick, $umode ] }, grep { $_ ne $peer_id } $self->_state_connected_peers() );
+  $self->{ircd}->send_event( "daemon_umode", $self->_state_user_full( $nick ), $umode );
   return @{ $ref } if wantarray();
   return $ref;
 }
@@ -2493,7 +2511,12 @@ sub _daemon_peer_message {
 	  foreach my $route_id ( keys %{ $common } ) {
 		$msg->{prefix} = $nick;
 		$msg->{prefix} = $full if $self->_connection_is_client( $route_id );
-	  	$self->{ircd}->send_output( $msg, $route_id )
+		unless ( $route_id eq 'spoofed' ) {
+	  	  $self->{ircd}->send_output( $msg, $route_id );
+		} else {
+		  my $tmsg = $type eq 'PRIVMSG' ? 'public' : 'notice';
+		  $self->{ircd}->send_event( "daemon_$tmsg", $full, $channel, $args->[1] );
+		}
 	  }
 	  next LOOP;
 	}
@@ -2502,8 +2525,7 @@ sub _daemon_peer_message {
 	  my $msg = { prefix => $nick, command => $type, params => [ $target, $args->[1] ] };
 	  my $route_id = $self->_state_user_route( $target );
 	  if ( $route_id eq 'spoofed' ) {
-	     $msg->{prefix} = $full;
-	     $self->{ircd}->send_event( "daemon_" . lc $type, $target, $msg );
+	     $self->{ircd}->send_event( "daemon_" . lc $type, $full, $target, $args->[1] );
 	  } else {
 	     $msg->{prefix} = $full if $self->_connection_is_client( $route_id );
 	     $self->{ircd}->send_output( $msg, $route_id );
@@ -2750,7 +2772,7 @@ sub _state_register_client {
   $self->{state}->{peers}->{ uc $record->{server} }->{users}->{ u_irc $record->{nick} } = $record; 
   my $arrayref = [ $record->{nick}, $record->{hops} + 1, $record->{ts}, '+i', $record->{auth}->{ident}, $record->{auth}->{hostname}, $record->{server}, $record->{ircname} ];
   $self->{ircd}->send_output( { command => 'NICK', params => $arrayref }, $self->_state_connected_peers() );
-  $self->{ircd}->send_event( "daemon_nick", $record->{nick}, { command => 'NICK', params => $arrayref } );
+  $self->{ircd}->send_event( "daemon_nick", @{ $arrayref } );
   $self->_state_update_stats();
   return 1;
 }
@@ -2900,7 +2922,7 @@ sub _state_is_local_user {
   my $nick = shift || return;
   return unless $self->_state_nick_exists( $nick );
   my $record = $self->{state}->{peers}->{ uc $self->server_name() };
-  return 1 if defined ( $record->{users}->{ u_irc $nick } );
+  return 1 if defined $record->{users}->{ u_irc $nick };
   return 0;
 }
 
@@ -3248,7 +3270,7 @@ sub _send_output_to_channel {
     $self->{ircd}->send_output( $output2, keys %{ $peers } );
   }
   $self->{ircd}->send_output( $output, @{ $ref } );
-  $self->{ircd}->send_event( "daemon_" . lc $output->{command}, $output );
+  $self->{ircd}->send_event( "daemon_" . lc $output->{command}, $output->{prefix}, @{ $output->{params} } );
   return 1;
 }
 
@@ -3363,6 +3385,7 @@ sub daemon_server_mode {
       my $arg;
       $arg = shift ( @{ $parsed_mode->{args} } ) if ( $mode =~ /^(\+[ohvklbIe]|-[ohvbIe])/ );
       if ( my ($flag,$char) = $mode =~ /^(\+|-)([ohv])/ ) {
+	next unless $self->_state_is_chan_member( $arg, $chan );
 	if ( $flag eq '+' and $record->{users}->{ u_irc $arg } !~ /$char/ ) {
 	  # Update user and chan record
 	  $arg = u_irc $arg;
@@ -3454,6 +3477,7 @@ sub daemon_server_mode {
     unshift @{ $args }, $record->{name};
     $self->{ircd}->send_output( { prefix => $server, command => 'MODE', params => $args, colonify => 0 }, $self->_state_connected_peers() );
     $self->{ircd}->send_output( { prefix => ( $full || $server ), command => 'MODE', params => $args, colonify => 0 }, map { $self->_state_user_route($_) } grep { $self->_state_is_local_user($_) } keys %{ $record->{users} } ); 
+    $self->{ircd}->send_event( "daemon_mode", $server, @{ $args } );
   } # SWITCH
   return @{ $ref } if wantarray();
   return $ref;
@@ -3550,7 +3574,7 @@ sub add_spoofed_nick {
   $self->{state}->{peers}->{ uc $record->{server} }->{users}->{ u_irc $record->{nick} } = $record; 
   my $arrayref = [ $record->{nick}, $record->{hops} + 1, $record->{ts}, '+' . $record->{umode}, $record->{auth}->{ident}, $record->{auth}->{hostname}, $record->{server}, $record->{ircname} ];
   $self->{ircd}->send_output( { command => 'NICK', params => $arrayref }, $self->_state_connected_peers() );
-  $self->{ircd}->send_event( "daemon_nick", $record->{nick}, { command => 'NICK', params => $arrayref } );
+  $self->{ircd}->send_event( "daemon_nick", @{ $arrayref } );
   $self->_state_update_stats();
   undef;
 }
@@ -3568,6 +3592,11 @@ sub _spoofed_command {
   return unless $self->_state_nick_exists( $nick );
   $state =~ s/daemon_cmd_//;
   my $command = "_daemon_cmd_" . $state;
+  if ( $state =~ /^(privmsg|notice)$/ ) {
+	my $type = uc $1;
+	$self->_daemon_cmd_message( $nick, $type, @_[ARG1 .. $#_] );
+	return;
+  }
   $self->$command( $nick, @_[ARG1 .. $#_] ) if $self->can($command);
   undef;
 }
