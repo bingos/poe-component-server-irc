@@ -1,4 +1,4 @@
-use Test::More tests => 15;
+use Test::More tests => 17;
 BEGIN { use_ok('POE::Component::Server::IRC::Common', qw(:ALL)) }
 ok( 'SIMPLE' eq u_irc( 'simple' ), "Upper simple test" );
 ok( 'simple' eq l_irc( 'SIMPLE' ), "Lower simple test" );
@@ -16,3 +16,5 @@ ok( validate_chan_name( '#chan.nel' ), "Channel is valid test" );
 ok( !validate_chan_name( '#chan,nel' ), "Channel is invalid test" );
 ok( matches_mask( '**', '127.0.0.1' ), "Mask matches Test" );
 ok( !matches_mask( '127.0.0.2', '127.0.0.1' ), "Mask not matches Test" );
+ok( matches_mask( $banmask, 'stalin!joe@kremlin.ru'), "Mask matches Test 2" );
+ok( !matches_mask( $banmask, 'BinGOs!joe@kremlin.ru'), "Mask not matches Test 2" );

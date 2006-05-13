@@ -112,8 +112,9 @@ sub matches_mask_array {
 sub matches_mask {
   my ($mask,$match) = @_;
   return unless $mask and $match;
+  $match = u_irc $match;
   $mask =~ s/\x2A+/\x2A/g;
-  my $umask = quotemeta( u_irc( $mask ) );
+  my $umask = quotemeta u_irc $mask;
   $umask =~ s/\\\*/[\x01-\xFF]{0,}/g;
   $umask =~ s/\\\?/[\x01-\xFF]{1,1}/g;
   return 1 if $match =~ /^$umask$/;

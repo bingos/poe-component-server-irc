@@ -1997,7 +1997,7 @@ sub _daemon_peer_quit {
 
   $nick = u_irc $nick;
   my $record = delete $self->{state}->{users}->{ $nick };
-  return unless $record;
+  return $ref unless $record;
   $self->{ircd}->send_output( { prefix => $record->{nick}, command => 'QUIT', params => [ $qmsg ] }, grep { !$conn_id or $_ ne $conn_id } $self->_state_connected_peers() ) unless $record->{killed};
   push @{ $ref }, { prefix => $full, command => 'QUIT', params => [ $qmsg ] };
   $self->{ircd}->send_event( "daemon_quit", $full, $qmsg );
@@ -2350,7 +2350,7 @@ sub _daemon_peer_mode {
 	last SWITCH;
     }
     my $full;
-    $full = $self->_state_user_full( $nick ) if $self->_state_nick_exists( $full );
+    $full = $self->_state_user_full( $nick ) if $self->_state_nick_exists( $nick );
     my $parsed_mode = parse_mode_line( @{ $args } );
     while( my $mode = shift ( @{ $parsed_mode->{modes} } ) ) {
       my $arg;
@@ -2447,7 +2447,7 @@ sub _daemon_peer_mode {
     unshift @{ $args }, $record->{name};
     $self->{ircd}->send_output( { prefix => $nick, command => 'MODE', params => $args, colonify => 0 }, grep { $_ ne $peer_id } $self->_state_connected_peers() );
     $self->{ircd}->send_output( { prefix => ( $full || $server ), command => 'MODE', params => $args, colonify => 0 }, map { $self->_state_user_route($_) } grep { $self->_state_is_local_user($_) } keys %{ $record->{users} } ); 
-    $self->{ircd}->send_event( "daemon_mode", $full, @{ $args } );
+    $self->{ircd}->send_event( "daemon_mode", ( $full || $server ), @{ $args } );
   } # SWITCH
   return @{ $ref } if wantarray();
   return $ref;
@@ -2456,8 +2456,8 @@ sub _daemon_peer_mode {
 sub _daemon_peer_umode {
   my $self = shift;
   my $peer_id = shift || return;
+  my $prefix = shift || return;
   my $nick = shift || return;
-  shift;
   my $umode = shift;
   my $server = $self->server_name();
   my $ref = [ ];
@@ -2480,7 +2480,7 @@ sub _daemon_peer_umode {
           }
 	}
   }
-  $self->{ircd}->send_output( { prefix => $nick, command => 'MODE', params => [ $nick, $umode ] }, grep { $_ ne $peer_id } $self->_state_connected_peers() );
+  $self->{ircd}->send_output( { prefix => $prefix, command => 'MODE', params => [ $nick, $umode ] }, grep { $_ ne $peer_id } $self->_state_connected_peers() );
   $self->{ircd}->send_event( "daemon_umode", $self->_state_user_full( $nick ), $umode );
   return @{ $ref } if wantarray();
   return $ref;
@@ -2974,16 +2974,10 @@ sub _state_user_matches_list {
   my $list = shift || 'bans';
   return unless $self->_state_nick_exists( $nick );
   return 0 unless $self->_state_chan_exists( $chan );
-  my $full = u_irc $self->_state_user_full( $nick );
+  my $full = $self->_state_user_full( $nick );
   my $record = $self->{state}->{chans}->{ u_irc $chan };
   foreach my $mask ( keys %{ $record->{ $list } } ) {
-	$mask = quotemeta( $mask );
-	# From RFC ? == [\x01-\xFF]{1,1} * == [\x01-\xFF]* @ would be \x2A
-        $mask =~ s/\\\*/[\x01-\xFF]{0,}/g;
-    	$mask =~ s/\\\?/[\x01-\xFF]{1,1}/g;
-	if ( $full =~ /^$mask$/ ) {
-		return 1;
-	}
+	return 1 if matches_mask( $mask, $full );
   }
   return 0;
 }
@@ -3602,3 +3596,56 @@ sub _spoofed_command {
 }
 
 1;
+__END__
+
+=head1 NAME
+
+POE::Component::Server::IRC - a fully event-driven networkable IRC server daemon module.
+
+=head1 SYNOPSIS
+
+=head1 DESCRIPTION
+
+POE::Component::Server::IRC is a POE component which implements an IRC server ( also referred to as
+an IRC daemon or IRCd ). It should be compliant with the pertient IRC RFCs and is based on reverse
+engineering Hybrid IRCd behaviour with regards to interactions with IRC clients and other IRC servers.
+
+Yes, that's right. POE::Component::Server::IRC is capable of linking to form IRC networks. It supports 
+the TS5 server to server protocol and has been tested with linking to Hybrid-7 based networks. It should
+in theory work with any TS5-based IRC network.
+
+POE::Component::Server::IRC also has a services API, which enables one to extend the IRCd to create 
+IRC Services. This is fully event-driven ( of course =] ). There is also a Plugin system, similar to that
+sported by L<POE::Component::IRC>. 
+
+=head1 CONSTRUCTOR
+
+=head1 METHODS
+
+=head1 INPUT EVENTS
+
+=head1 OUTPUT EVENTS
+
+=head1 PLUGIN SYSTEM
+
+=head1 AUTHOR
+
+=head1 KUDOS
+
+=head1 SEE ALSO
+
+POE L<POE>
+
+L<POE::Component::Server::IRC::Backend>
+
+Hybrid IRCD L<http://ircd-hybrid.com/>
+
+TSOra L<http://www.idolnet.org/docs/README.TSora>
+
+RFC 2810 L<http://www.faqs.org/rfcs/rfc2810.html>
+
+RFC 2811 L<http://www.faqs.org/rfcs/rfc2811.html>
+
+RFC 2812 L<http://www.faqs.org/rfcs/rfc2812.html>
+
+RFC 2813 L<http://www.faqs.org/rfcs/rfc2813.html>
