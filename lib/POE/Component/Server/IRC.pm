@@ -13,6 +13,7 @@ use POE;
 use POE::Component::Server::IRC::Common qw(:ALL);
 use POE::Component::Server::IRC::Plugin qw(:ALL);
 use Date::Format;
+use Data::Dumper;
 use vars qw($VERSION $REVISION);
 
 $VERSION = '0.99';
@@ -137,19 +138,6 @@ sub _default {
   return PCSI_EAT_ALL unless $self->_connection_exists( $conn_id );
   $self->{state}->{conns}->{ $conn_id }->{seen} = time();
   SWITCH: {
-	# Registered ?
-	  # no. okay is a valid command for an unreg'ed conn ?
-		# No, tell them so.
-		# Yes, process.
-	# valid command for a reg'ed connection ?
-		# No, bitch at connection.
-	# Okay, start of our routing:
-	 # Must be either a server or client connection by this point. Let's find out which.
-	# Is connection type == 'server' ?
-		# Yes, process as server.
-	# Okay, must be a client by this point.
-	 # Wipe out prefix, not should be ignored.
-	# Process as client.
 	unless ( $self->_connection_registered( $conn_id ) ) {
 		$self->_cmd_from_unknown( $conn_id, $input );
 		last SWITCH;
@@ -191,6 +179,10 @@ sub _client_register {
   my $auth = $self->_auth_finished( $conn_id );
   return unless $auth;
   # pass required for link
+  unless ( $self->_state_auth_client_conn( $conn_id ) ) {
+    $self->terminate_conn_error( $conn_id, 'You are not authorized to use this server' );
+    return;
+  }
   # Add new nick
   $self->_state_register_client( $conn_id );
   my $server = $self->server_name();
@@ -2731,6 +2723,26 @@ sub _state_cmd_stat {
   return 1;
 }
 
+sub _state_auth_client_conn {
+  my $self = shift;
+  my $conn_id = shift || return;
+  return 1 unless $self->{config}->{auth} and scalar @{ $self->{config}->{auth} };
+  my $record = $self->{state}->{conns}->{ $conn_id };
+  my $host = $record->{auth}->{hostname} || $record->{socket}->[0];
+  my $user = $record->{auth}->{ident} || "~" . $record->{user};
+  my $uh = join '@', $user, $host;
+  my $ui = join '@', $user, $record->{socket}->[0];
+  foreach my $auth ( @{ $self->{config}->{auth} } ) {
+	if ( matches_mask( $auth->{mask}, $uh ) or matches_mask( $auth->{mask}, $ui ) ) {
+	  return 0 if $auth->{password} and ( !$record->{pass} or $auth->{password} ne $record->{pass} );
+	  $record->{auth}->{hostname} = $auth->{spoof} if $auth->{spoof};
+	  $record->{auth}->{ident} = $record->{user} if !$record->{auth}->{ident} and $auth->{no_tilde};
+	  return 1;
+	}
+  }
+  return 0;
+}
+
 sub _state_auth_peer_conn {
   my $self = shift;
   my ($conn_id,$name,$pass) = @_;
@@ -2747,7 +2759,7 @@ sub _state_auth_peer_conn {
     	return 1 if $block->match( $client_ip );
     }
   } 
-  return 1 if ref $peers->{ uc $name }->{ipmask} eq 'SCALAR' and matches_mask( $peers->{ uc $name }->{ipmask}, $client_ip );
+  return 1 if matches_mask( $peers->{ uc $name }->{ipmask}, $client_ip );
   return 0;
 }
 
@@ -2880,8 +2892,8 @@ sub _state_register_client {
   $record->{umode} = '';
   $record->{_ignore_i_umode} = 1;
   $record->{ts} = $record->{idle_time} = $record->{conn_time} = time();
-  $record->{auth}->{ident} = '^' . $record->{user} unless $record->{auth}->{ident};
-  $record->{auth}->{hostname} = $self->server_name() if $record->{socket}->[0] =~ /^127\./;
+  $record->{auth}->{ident} = '~' . $record->{user} unless $record->{auth}->{ident};
+  $record->{auth}->{hostname} = $self->server_name() if $record->{auth}->{hostname} eq 'localhost' or ( !$record->{auth}->{hostname} and $record->{socket}->[0] =~ /^127\./ );
   $record->{auth}->{hostname} = $record->{socket}->[0] unless $record->{auth}->{hostname};
   $self->{state}->{users}->{ u_irc $record->{nick} } = $record;
   $self->{state}->{peers}->{ uc $record->{server} }->{users}->{ u_irc $record->{nick} } = $record; 
@@ -3164,13 +3176,7 @@ sub _state_o_line {
     	return 1 if $block->match( $client_ip );
     }
   } 
-  if ( ref $ops->{ $user }->{ipmask} eq 'SCALAR' ) {
-    my $ipmask = $ops->{ $user }->{ipmask};
-    $ipmask = quotemeta( $ipmask );
-    $ipmask =~ s/\\\*/[\x01-\xFF]{0,}/g;
-    $ipmask =~ s/\\\?/[\x01-\xFF]{1,1}/g;
-    return 1 if $client_ip =~ /^$ipmask$/;
-  }
+  return 1 if matches_mask( $ops->{ $user }->{ipmask}, $client_ip );
   return 0;
 }
 
@@ -3411,6 +3417,33 @@ sub del_operator {
   delete $self->{config}->{ops}->{ $user };
 }
 
+sub add_auth {
+  my $self = shift;
+  my $parms;
+  if ( ref $_[0] eq 'HASH' ) {
+     $parms = $_[0];
+  } else {
+     $parms = { @_ };
+  }
+  $parms->{ lc $_ } = delete $parms->{ $_ } for keys %{ $parms };
+  unless ( $parms->{mask} ) {
+     warn "Not enough parameters specified\n";
+     return;
+  }
+  push @{ $self->{config}->{auth} }, $parms;
+  return 1;
+}
+
+sub del_auth {
+  my $self = shift;
+  my $mask = shift || return;
+  my $i = 0;
+  for ( @{ $self->{config}->{auth} } ) {
+    splice( @{ $self->{config}->{auth} }, $i, 1 ), last if $_->{mask} eq $mask;
+    ++$i;
+  }
+}
+
 sub add_peer {
   my $self = shift;
   my $parms;
@@ -3430,6 +3463,7 @@ sub add_peer {
   foreach ( qw(sockport sockaddr) ) {
 	$parms->{ $_ } = '*' unless $parms->{ $_ };
   }
+  $parms->{ipmask} = $parms->{raddress} if $parms->{raddress};
   my $name = $parms->{name};
   $self->{config}->{peers}->{ uc $name } = $parms;
   $self->{ircd}->add_connector( remoteaddress => $parms->{raddress}, remoteport => $parms->{rport}, name => $name ) if $parms->{type} eq 'r' and $parms->{auto};
@@ -3805,6 +3839,57 @@ This method provides an alternative object based means of calling events to the 
 =item shutdown
 
 Takes no arguments. Terminates the component. Removes all listeners and connectors. Disconnects all current client and server connections.
+
+=item add_operator
+
+This adds an O line to the IRCd. Takes a number of parameters:
+
+  'username', the username of the IRC oper, mandatory;
+  'password', the password, mandatory;
+  'ipmask', either a scalar ipmask or an arrayref of Net::Netmask objects;
+
+A scalar ipmask can be contain '*' to match any number of characters or '?' to match one character. If no 'ipmask' is provided, operators are only allowed to OPER from the loopback interface.
+
+=item del_operator
+
+Takes a single argument, the username to remove.
+
+=item add_peer
+
+Adds peer servers that we will allow to connect to us and who we will connect to. Takes the following parameters:
+
+  'name', the name of the server. This is the IRC name, not hostname, mandatory;
+  'pass', the password they must supply to us, mandatory;
+  'rpass', the password we need to supply to them, mandatory;
+  'type', the type of server, 'c' for a connecting server, 'r' for one
+	  that we will connect to;
+  'raddress', the remote address to connect to, implies 'type' eq 'r';
+  'ipmask', either a scalar ipmask or an arrayref of Net::Netmask objects;
+
+=item del_peer
+
+Takes a single argument, the peer to remove.
+
+=item add_auth
+
+By default the IRCd allows any user@host to connect the server without a password. Configuring auths enables you to
+control, who can connect and set passwords.
+
+Takes a number of parameters:
+
+  'mask', a user@host or user@ipaddress mask to match against, mandatory;
+  'password', if specified any matching mask must provide this to connect;
+  'spoof', if specified any matching mask will have their hostname changed to this;
+  'no_tilde', if specified the '~' prefix is removed from their username;
+
+Auth masks are processed in order of addition.
+
+If auth masks have been defined, then a connecting user *must* match one of the masks in order to authorised
+to connect. This is a feature >;)
+
+=item del_auth
+
+Takes a single argument, the mask to remove.
 
 =back
 

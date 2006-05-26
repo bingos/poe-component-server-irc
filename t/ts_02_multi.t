@@ -5,7 +5,7 @@
 
 # change 'tests => 1' to 'tests => last_test_to_print';
 
-use Test::More tests => 21;
+use Test::More tests => 34;
 BEGIN { use_ok('POE::Component::Server::IRC') };
 BEGIN { use_ok('POE::Component::IRC') };
 BEGIN { use_ok('POE') };
@@ -16,9 +16,10 @@ BEGIN { use_ok('POE') };
 # its man page ( perldoc Test::More ) for help writing this test script.
 
 my $pocosi = POE::Component::Server::IRC->spawn( auth => 0, options => { trace => 0 }, antiflood => 0, plugin_debug => 0, debug => 0 );
-my $pocoirc = POE::Component::IRC->spawn( flood => 1 );
+my @pocoirc;
+push @pocoirc, POE::Component::IRC->spawn( alias => $_, flood => 1 ) for qw(one two);
 
-if ( $pocosi and $pocoirc ) {
+if ( $pocosi and @pocoirc ) {
 	isa_ok( $pocosi, "POE::Component::Server::IRC" );
 	POE::Session->create(
 		package_states => [ 
@@ -31,7 +32,7 @@ if ( $pocosi and $pocoirc ) {
 					ircd_listener_del) ],
 		],
 		options => { trace => 0 },
-		heap => { irc => $pocoirc, ircd => $pocosi },
+		heap => { irc => \@pocoirc, ircd => $pocosi },
 	);
 	$poe_kernel->run();
 }
@@ -41,7 +42,7 @@ exit 0;
 sub _start {
   my ($kernel,$heap) = @_[KERNEL,HEAP];
 
-  $heap->{irc}->yield( 'register' => 'all' );
+  $_->yield( 'register' => 'all' ) for @{ $heap->{irc} };
   $heap->{ircd}->yield( 'register' );
   $heap->{ircd}->add_listener();
   $kernel->delay( '_shutdown' => 20 );
@@ -51,8 +52,7 @@ sub _start {
 sub _shutdown {
   my $heap = $_[HEAP];
   $_[KERNEL]->delay( '_shutdown' => undef );
-  $heap->{irc}->yield( 'unregister' => 'all' );
-  $heap->{irc}->yield( 'shutdown' );
+  $_->yield( 'shutdown' ) for @{ $heap->{irc} };
   $heap->{ircd}->yield( 'shutdown' );
   delete $heap->{irc}; delete $heap->{ircd};
   undef;
@@ -70,7 +70,7 @@ sub ircd_listener_add {
   my ($heap,$port) = @_[HEAP,ARG0];
   ok( 1, "Started a listener on $port" );
   $heap->{port} = $port;
-  $heap->{irc}->yield( connect => { server => 'localhost', port => $port, nick => __PACKAGE__ } );
+  $_->yield( connect => { server => 'localhost', port => $port, nick => "foo" . $_->session_alias() } ) for @{ $heap->{irc} };
   undef;
 }
 
@@ -103,16 +103,18 @@ sub ircd_backend_cmd_user {
 
 sub _default {
   my $event = $_[ARG0];
+  my $sender = $_[SENDER]->ID();
+  my $irc = $_[SENDER]->get_heap();
   if ( $event =~ /^irc_(00[1234]|25[15]|422)/ or $event eq 'irc_isupport' ) {
 	ok( 1, $event );
   }
   if ( $event eq 'irc_mode' ) {
 	ok( 1, $event );
-	$_[HEAP]->{irc}->yield( 'nick' => 'moo' );
+	$irc->yield( 'nick' => 'moo' . $sender );
   }
   if ( $event eq 'irc_nick' ) {
 	ok( 1, $event );
-	$_[HEAP]->{irc}->yield( 'quit' => 'moo' );
+	$irc->yield( 'quit' => 'moo' . $sender );
   }
   if ( $event eq 'irc_error' ) {
 	ok( 1, $event );

@@ -1,7 +1,7 @@
 #!/usr/local/bin/perl -w
 
 use Getopt::Long;
-use POE qw(Component::IRC Wheel::ReadLine);
+use POE qw(Component::IRC Wheel::ReadLine Component::IRC::Plugin::CTCP);
 
 my $nick;
 my $user;
@@ -25,7 +25,7 @@ GetOptions(
 die unless $nick and $server;
 print "$nick $server\n";
 
-my ($irc) = POE::Component::IRC->spawn( password => $pass, Nick => $nick, Server => $server, Port => $port, Ircname => $ircname, Username => $user, Raw => 1, LocalAddr => $localaddr );
+my $irc = POE::Component::IRC->spawn( password => $pass, Nick => $nick, Server => $server, Port => $port, Ircname => $ircname, Username => $user, Raw => 1, LocalAddr => $localaddr );
 
 POE::Session->create(
 	package_states => [
@@ -46,6 +46,7 @@ sub _start {
       POE::Wheel::ReadLine->new( InputEvent => 'got_input' );
     $heap->{readline_wheel}->get("> ");
     $irc->yield( register => 'all' );
+    $irc->plugin_add( 'CTCP' => POE::Component::IRC::Plugin::CTCP->new() );
     undef;
 }
 

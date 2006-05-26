@@ -32,14 +32,16 @@ sub _start {
 
   print STDOUT "$$\n";
   $kernel->sig( 'HUP' => 'sig_hup' );
-  my $denial = Net::Netmask->new2('default');
-  my $exemption = Net::Netmask->new2('127.0.0');
-  $heap->{ircd}->add_denial( $denial ) if $denial;
-  $heap->{ircd}->add_exemption( $exemption ) if $denial and $exemption;
+  #my $denial = Net::Netmask->new2('default');
+  #my $exemption = Net::Netmask->new2('127.0.0');
+  #$heap->{ircd}->add_denial( $denial ) if $denial;
+  #$heap->{ircd}->add_exemption( $exemption ) if $denial and $exemption;
   $heap->{ircd}->yield( 'register' );
+  $heap->{ircd}->add_auth( mask => '*@localhost', spoof => 'moos.loud.me.uk', no_tilde => 1 );
+  $heap->{ircd}->add_auth( mask => '*@*' );
   $heap->{ircd}->add_listener( port => 7667 );
   $heap->{ircd}->add_listener( port => 7668, auth => 0, antiflood => 0 );
-  $heap->{ircd}->add_peer( name => 'irc2.gumbynet.org.uk', pass => 'op3rs3rv', rpass => 'op3rs3rv', type => 'r', raddress => '127.0.0.12', rport => 7666, auto => 1 );
+  $heap->{ircd}->add_peer( name => 'irc2.gumbynet.org.uk', pass => 'op3rs3rv', rpass => 'op3rs3rv', type => 'r', raddress => '127.0.0.12', rport => 7666, auto => 0 );
   $heap->{ircd}->add_operator( { username => 'moo', password => 'fishdont' } );
   $heap->{ircd}->yield( 'add_spoofed_nick', { nick => 'OperServ', umode => 'oi', ircname => 'The OperServ bot' } );
   $heap->{ircd}->yield( 'daemon_cmd_join', 'OperServ', '#foo' );
@@ -49,9 +51,6 @@ sub _start {
 sub _default {
   my ( $event, $args ) = @_[ ARG0 .. $#_ ];
   print STDOUT "$event: ";
-  #print STDOUT Dumper(@$args) unless $event eq "ircd_registered";
-  #print STDOUT "\n";
-  #return 0;
   foreach (@$args) {
     SWITCH: {
         if ( ref($_) eq 'ARRAY' ) {

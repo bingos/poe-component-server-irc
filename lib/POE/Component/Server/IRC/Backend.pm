@@ -103,10 +103,9 @@ sub _start {
 	$kernel->refcount_increment( $self->{session_id} => __PACKAGE__ );
   }
 
-  $self->{filter} = POE::Filter::Stackable->new();
   $self->{ircd_filter} = POE::Filter::IRCD->new( DEBUG => $self->{debug}, colonify => 1 );
   $self->{line_filter} = POE::Filter::Line->new( InputRegexp => '\015?\012', OutputLiteral => "\015\012" );
-  $self->{filter}->push( $self->{line_filter}, $self->{ircd_filter} );
+  $self->{filter} = POE::Filter::Stackable->new( Filters => [ $self->{line_filter}, $self->{ircd_filter} ] );
   $self->{can_do_auth} = 0;
   eval {
 	require POE::Component::Client::Ident::Agent;
@@ -452,8 +451,7 @@ sub _add_filter {
   my $wheel_id = $_[ARG0] || croak "You must supply a connection id\n";
   my $filter = $_[ARG1] || croak "You must supply a filter object\n";
   return unless $self->_wheel_exists( $wheel_id );
-  my $stackable = POE::Filter::Stackable->new();
-  $stackable->push( $self->{line_filter}, $self->{ircd_filter}, $filter );
+  my $stackable = POE::Filter::Stackable->new( Filters => [ $self->{line_filter}, $self->{ircd_filter}, $filter ] );
   if ( $self->compressed_link( $wheel_id ) ) {
 	$stackable->unshift( POE::Filter::Zlib->new() );
   }
@@ -491,6 +489,7 @@ sub _anti_flood {
 
 sub _conn_error {
   my ($self,$errstr,$wheel_id) = @_[OBJECT,ARG2,ARG3];
+  return unless $self->_wheel_exists( $wheel_id );
   $self->_disconnected( $wheel_id, $errstr || $self->{wheels}->{ $wheel_id }->{disconnecting} );
   undef;
 }
@@ -594,9 +593,12 @@ sub _auth_client {
   $self->send_output( { command => 'NOTICE', params => [ 'AUTH', '*** Checking Hostname' ] }, $wheel_id );
 
   if ( $peeraddr !~ /^127\./ ) {
-	my $response = $self->{resolver}->resolve( event => '_got_hostname_response', host => $peeraddr,
-						     context => { wheel => $wheel_id, peeraddress => $peeraddr },
-						     type => 'PTR' );
+	my $response = $self->{resolver}->resolve( 
+		event => '_got_hostname_response', 
+		host => $peeraddr,
+		context => { wheel => $wheel_id, peeraddress => $peeraddr },
+		type => 'PTR' 
+	);
 	if ( $response ) {
 		$kernel->yield( '_got_hostname_response' => $response );
 	}
@@ -605,9 +607,15 @@ sub _auth_client {
 	$self->{wheels}->{ $wheel_id }->{auth}->{hostname} = 'localhost';
 	$self->yield( '_auth_done' => $wheel_id );
   }
-  POE::Component::Client::Ident::Agent->spawn( PeerAddr => $peeraddr, PeerPort => $peerport, SockAddr => $sockaddr,
-				               SockPort => $sockport, BuggyIdentd => 1, TimeOut => 10,
-					       Reference => $wheel_id );
+  POE::Component::Client::Ident::Agent->spawn( 
+		PeerAddr => $peeraddr, 
+		PeerPort => $peerport, 
+		SockAddr => $sockaddr,
+	        SockPort => $sockport, 
+		BuggyIdentd => 1, 
+		TimeOut => 10,
+		Reference => $wheel_id 
+  );
   undef;
 }
 
@@ -647,7 +655,12 @@ sub _got_hostname_response {
 	if ( $context->{hostname} =~ /\.$/ ) {
 	   chop $context->{hostname};
 	}
-	my $query = $self->{resolver}->resolve( event => 'got_ip_response', host => $answer->rdatastr(), context => $context, type => 'A' );
+	my $query = $self->{resolver}->resolve( 
+		event => '_got_ip_response', 
+		host => $answer->rdatastr(), 
+		context => $context, 
+		type => 'A' 
+	);
 	if ( defined $query ) {
 	   $self->yield( '_got_ip_response' => $query );
 	}
@@ -669,7 +682,7 @@ sub _got_ip_response {
     return unless $self->_wheel_exists( $wheel_id );
     if ( defined $response->{response} ) {
       my @answers = $response->{response}->answer();
-      my $peeraddress = $response->{context}->{peeraddr};
+      my $peeraddress = $response->{context}->{peeraddress};
       my $hostname = $response->{context}->{hostname};
 
       if ( scalar @answers == 0 ) {
@@ -684,6 +697,7 @@ sub _got_ip_response {
 	   $self->send_output( { command => 'NOTICE', params => [ 'AUTH', '*** Found your hostname' ] }, $wheel_id ) unless $self->{wheels}->{ $wheel_id }->{auth}->{hostname};
 	   $self->{wheels}->{ $wheel_id }->{auth}->{hostname} = $hostname;
 	   $self->yield( '_auth_done' => $wheel_id );
+	   return;
 	} else {
 	   $self->send_output( { command => 'NOTICE', params => [ 'AUTH', '*** Your forward and reverse DNS do not match' ] }, $wheel_id ) unless $self->{wheels}->{ $wheel_id }->{auth}->{hostname};
 	   $self->{wheels}->{ $wheel_id }->{auth}->{hostname} = '';
@@ -846,7 +860,7 @@ sub denied {
   my $ipaddr = shift || return;
   return 0 if $self->exempted( $ipaddr );
   foreach my $mask ( keys %{ $self->{denials} } ) {
-    return 1 if $self->{denials}->{ $mask }->{blk}->match($ipaddr);
+    return $self->{denials}->{ $mask }->{reason} if $self->{denials}->{ $mask }->{blk}->match($ipaddr);
   }
   return 0;
 }
