@@ -1223,7 +1223,21 @@ sub _daemon_cmd_names {
 	my $type = '=';
 	$type = '@' if $record->{mode} =~ /s/;
 	$type = '*' if $record->{mode} =~ /p/;
-	push @{ $ref }, { prefix => $server, command => '353', params => [ $nick, $type, $record->{name}, join(' ', $self->state_chan_list_prefixed( $record->{name} ) ) ] };
+	my $length = length($server) + 3 + length($chan) + length($nick) + 7;
+	my $buffer = '';
+	foreach my $name ( sort $self->state_chan_list_prefixed( $record->{name} ) ) {
+	  if ( length( join ' ', $buffer, $name ) + $length > 510 ) {
+	    push @{ $ref }, { prefix => $server, command => '353', params => [ $nick, $type, $record->{name}, $buffer ] };
+	    $buffer = $name;
+	    next;
+	  }
+	  if ( $buffer ) {
+	    $buffer = join ' ', $buffer, $name;
+	  } else {
+	    $buffer = $name;
+	  }
+	}
+	push @{ $ref }, { prefix => $server, command => '353', params => [ $nick, $type, $record->{name}, $buffer ] };
     }
     push @{ $ref }, { prefix => $server, command => '366', params => [ $nick, $query, 'End of NAMES list' ] };
   }
