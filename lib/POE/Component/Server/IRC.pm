@@ -3786,6 +3786,63 @@ POE::Component::Server::IRC - a fully event-driven networkable IRC server daemon
 
 =head1 SYNOPSIS
 
+  # A fairly simple example:
+  use strict;
+  use warnings;
+  use POE qw(Component::Server::IRC);
+
+  my %config = ( 
+		servername => 'simple.poco.server.irc', 
+		nicklen    => 15,
+		network    => 'SimpleNET'
+  );
+
+  my $pocosi = POE::Component::Server::IRC->spawn( config => \%config );
+
+  POE::Session->create(
+	package_states => [
+	   'main' => [qw(_start _default)],
+	],
+	heap => { ircd => $pocosi },
+  );
+
+  $poe_kernel->run();
+  exit 0;
+
+  sub _start {
+    my ($kernel,$heap) = @_[KERNEL,HEAP];
+    $heap->{ircd}->yield( 'register' );
+    # Anyone connecting from the loopback gets spoofed hostname
+    $heap->{ircd}->add_auth( mask => '*@localhost', spoof => 'm33p.com', no_tilde => 1 );
+    # We have to add an auth as we have specified one above.
+    $heap->{ircd}->add_auth( mask => '*@*' );
+    # Start a listener on the 'standard' IRC port.
+    $heap->{ircd}->add_listener( port => 6667 );
+    # Add an operator who can connect from localhost
+    $heap->{ircd}->add_operator( { username => 'moo', password => 'fishdont' } );
+    undef;
+  }
+
+  sub _default {
+     my ( $event, $args ) = @_[ ARG0 .. $#_ ];
+     print STDOUT "$event: ";
+     foreach (@$args) {
+     SWITCH: {
+              if ( ref($_) eq 'ARRAY' ) {
+                  print STDOUT "[", join ( ", ", @$_ ), "] ";
+                  last SWITCH;
+              }
+              if ( ref($_) eq 'HASH' ) {
+                  print STDOUT "{", join ( ", ", %$_ ), "} ";
+                  last SWITCH;
+              }
+              print STDOUT "'$_' ";
+          }
+      }
+      print STDOUT "\n";
+      return 0;    # Don't handle signals.
+  }
+
 =head1 DESCRIPTION
 
 POE::Component::Server::IRC is a POE component which implements an IRC server ( also referred to as
@@ -3806,7 +3863,7 @@ sported by L<POE::Component::IRC>.
 
 =item spawn
 
-Creates a L<POE::Session> and associated object. The session's heap is set to the object, so it 
+Creates a L<POE::Session> and associated object. The session's heap is set to the object, so it is
 possible to retrieve the object in any of your event handlers by using $_[SENDER]->get_heap().
 
 Returns the object, takes the following parameters:
@@ -3914,6 +3971,90 @@ Takes a single argument, the mask to remove.
 =head2 STATE MANIPULATION
 
 The STATE contains all the salient information regarding nicknames, channels and peers. These methods allow you to query and manipulate this information.
+
+=over
+
+=item server_name
+
+No arguments, returns the name of the ircd.
+
+=item server_version
+
+No arguments, returns the software version of the ircd.
+
+=item server_created
+
+No arguments, returns a string signifying when the ircd was created.
+
+=item server_config
+
+Takes one argument, the server configuration value to query.
+
+=item state_nick_exists
+
+Takes one argument, a nickname, returns true or false dependent on whether the given nickname exists or not.
+
+=item state_chan_exists
+
+Takes one argument, a channel name, returns true or false dependent on whether the given channel exists or not.
+
+=item state_peer_exists
+
+Takes one argument, a peer server name, returns true or false dependent on whether the given peer exists or not.
+
+=item state_user_full
+
+Takes one argument, a nickname, returns that users full nick!user@host if they exist, undef if they don't.
+
+=item state_user_is_operator
+
+Takes one argument, a nickname, returns true or false dependent on whether the given nickname is an IRC operator or not.
+
+=item state_user_chans
+
+Takes one argument, a nickname, returns a list of channels that that nick is a member of.
+
+=item state_user_server
+
+Takes one argument, a nickname, returns the name of the peer server that that user is connected from.
+
+=item state_chan_list
+
+Takes one argument, a channel name, returns a list of the member nicks on that channel.
+
+=item state_chan_list_prefixed
+
+Takes one argument, a channel name, returns a list of the member nicks on that channel, nicknames will be prefixed with @%+ if they are +o +h or +v, respectively.
+
+=item state_chan_topic
+
+Takes one argument, a channel name, returns undef if no topic is set on that channel, or an arrayref consisting of the topic, who set it and the time they set it.
+
+=item state_chan_mode_set
+
+Takes two arguments, a channel name and a channel mode character. Returns true if that channel mode is set, false otherwise.
+
+=item state_is_chan_member
+
+Takes two arguments, a nick and a channel name. Returns true if that nick is on channel, false otherwise.
+
+=item state_user_chan_mode
+
+Takes two arguments, a nick and a channel name. Returns that nicks status ( +ohv or '' ) on that channel.
+
+=item state_is_chan_op
+
+Takes two arguments, a nick and a channel name. Returns true if that nick is an channel operator, false otherwise.
+
+=item state_is_chan_hop
+
+Takes two arguments, a nick and a channel name. Returns true if that nick is an channel half-operator, false otherwise.
+
+=item state_has_chan_voice
+
+Takes two arguments, a nick and a channel name. Returns true if that nick has channel voice, false otherwise.
+
+=back
 
 =head1 INPUT EVENTS
 
