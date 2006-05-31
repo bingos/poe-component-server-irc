@@ -516,6 +516,7 @@ sub _conn_input {
   my ($kernel,$self,$input,$wheel_id) = @_[KERNEL,OBJECT,ARG0,ARG1];
   my $conn = $self->{wheels}->{ $wheel_id };
 
+  $self->_send_event( $self->{prefix} . 'raw_input' => $wheel_id => $input->{raw_line} ) if $self->{raw_events};
   $conn->{seen} = time();
   $kernel->delay_adjust( $conn->{alarm} => $conn->{freq} );
   #ToDo: Antiflood code

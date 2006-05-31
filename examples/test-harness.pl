@@ -8,7 +8,7 @@ use Data::Dumper;
 $Data::Dumper::Indent = 1;
 $|=1;
 
-my $pocosi = POE::Component::Server::IRC->spawn( auth => 1, options => { trace => 0 }, plugin_debug => 0, debug => 0, config => { servername => 'logserv.gumbynet.org.uk' } );
+my $pocosi = POE::Component::Server::IRC->spawn( auth => 1, options => { trace => 0 }, plugin_debug => 0, debug => 0, config => { servername => 'logserv.gumbynet.org.uk' }, raw_events => 0 );
 
 POE::Session->create(
 		package_states => [ 

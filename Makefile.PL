@@ -11,11 +11,11 @@ WriteMakefile(
 							  'Net::Netmask' => 1.9012,
 							  'Socket' => 0,
 							  'Date::Format' => 0,
-							  'POE::Filter::IRCD' => 1.4,
+							  'POE::Filter::IRCD' => 1.7,
 							  'POE::Filter::Zlib' => 0,
-							  'POE::Component::Client::Ident' => 0,
-							  'POE::Component::Client::DNS' => 0,
-							  'POE::Component::IRC' => 4.79
+							  'POE::Component::Client::Ident' => 1.00,
+							  'POE::Component::Client::DNS' => 0.99,
+							  'POE::Component::IRC' => 4.88
 							 },
 			  'VERSION_FROM' => 'lib/POE/Component/Server/IRC.pm', # finds $VERSION
 			  'dist' => { 'COMPRESS' => 'gzip --best' },

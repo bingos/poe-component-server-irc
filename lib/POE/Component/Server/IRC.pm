@@ -684,6 +684,10 @@ sub _daemon_cmd_connect {
 	push @{ $ref }, { command => 'NOTICE', params => [ $nick, "Connect: Host $args->[0] is not listed in ircd.conf" ] };
 	last SWITCH;
      }
+     if ( my $peer_name = $self->_state_peer_name( $args->[0] ) ) {
+	push @{ $ref }, { command => 'NOTICE', params => [ $nick, "Connect: Server $args->[0] already exists from $peer_name." ] };
+	last SWITCH;
+     }
      my $connector = $self->{config}->{peers}->{ uc $args->[0] };
      my $name = $connector->{name};
      my $rport = $args->[1] || $connector->{rport};
@@ -754,8 +758,12 @@ sub _daemon_cmd_kill {
 	my $route_id = $self->_state_user_route( $target );
         $self->{ircd}->send_output( { prefix => $nick, command => 'KILL', params => [ $target, join('!', $server, $nick ) . " ($comment)" ] }, $self->_state_connected_peers() );
 	$self->{ircd}->send_output( { prefix => $self->state_user_full( $nick ), command => 'KILL', params => [ $target, $comment ] }, $route_id );
-	$self->{state}->{conns}->{ $route_id }->{killed} = 1;
-	$self->terminate_conn_error( $route_id, "Killed ($nick ($comment))" );
+	if ( $route_id eq 'spoofed' ) {
+	  $self->call( 'del_spoofed_nick', $target, "Killed ($comment)" );
+	} else {
+	  $self->{state}->{conns}->{ $route_id }->{killed} = 1;
+	  $self->terminate_conn_error( $route_id, "Killed ($comment)" );
+	}
      } else {
 	$self->{state}->{users}->{ u_irc $target }->{killed} = 1;
         $self->{ircd}->send_output( { prefix => $nick, command => 'KILL', params => [ $target, join('!', $server, $nick ) . " ($comment)" ] }, $self->_state_connected_peers() );
@@ -1970,8 +1978,12 @@ sub _daemon_peer_kill {
 	my $route_id = $self->_state_user_route( $target );
         $self->{ircd}->send_output( { prefix => $nick, command => 'KILL', params => [ $target, join('!', $server, $comment ) ] }, grep { $_ ne $peer_id } $self->_state_connected_peers() );
 	$self->{ircd}->send_output( { prefix => $self->state_user_full( $nick ), command => 'KILL', params => [ $target, join('!', $server, $comment ) ] }, $route_id );
-	$self->{state}->{conns}->{ $route_id }->{killed} = 1;
-	$self->terminate_conn_error( $route_id, "Killed ($comment)" );
+	if ( $route_id eq 'spoofed' ) {
+	  $self->call( 'del_spoofed_nick', $target, "Killed ($comment)" );
+	} else {
+	  $self->{state}->{conns}->{ $route_id }->{killed} = 1;
+	  $self->terminate_conn_error( $route_id, "Killed ($comment)" );
+	}
      } else {
 	$self->{state}->{users}->{ u_irc $target }->{killed} = 1;
         $self->{ircd}->send_output( { prefix => $nick, command => 'KILL', params => [ $target, join('!', $server, $comment ) ] }, grep { $_ ne $peer_id } $self->_state_connected_peers() );
@@ -3511,8 +3523,13 @@ sub daemon_server_kill {
      if ( $self->_state_is_local_user( $target ) ) {
 	my $route_id = $self->_state_user_route( $target );
 	$self->{ircd}->send_output( { prefix => $server, command => 'KILL', params => [ $target, $comment ] }, $route_id );
-	$self->{state}->{conns}->{ $route_id }->{killed} = 1;
 	$self->terminate_conn_error( $route_id, "Killed ($server ($comment))" );
+	if ( $route_id eq 'spoofed' ) {
+	  $self->call( 'del_spoofed_nick', $target, "Killed ($server ($comment))" );
+	} else {
+	  $self->{state}->{conns}->{ $route_id }->{killed} = 1;
+	  $self->terminate_conn_error( $route_id, "Killed ($server ($comment))" );
+	}
      } else {
 	$self->{state}->{users}->{ u_irc $target }->{killed} = 1;
         $self->{ircd}->send_output( { prefix => $server, command => 'KILL', params => [ $target, "$server ($comment)" ] }, grep { !$conn_id || $_ ne $conn_id } $self->_state_connected_peers() );
@@ -3718,6 +3735,7 @@ sub add_spoofed_nick {
   return unless $ref->{nick};
   return if $self->state_nick_exists( $ref->{nick} );
   my $record = $ref;
+  $record->{ts} = time() unless $record->{ts};
   $record->{type} = 's';
   $record->{server} = $self->server_name();
   $record->{hops} = 0;
@@ -3725,7 +3743,7 @@ sub add_spoofed_nick {
   $record->{umode} = 'i' unless $record->{umode};
   $self->{state}->{stats}->{invisible}++ if $record->{umode} =~ /i/;
   $self->{state}->{stats}->{ops_online}++ if $record->{umode} =~ /o/;
-  $record->{ts} = $record->{idle_time} = $record->{conn_time} = time();
+  $record->{idle_time} = $record->{conn_time} = $record->{ts};
   $record->{auth}->{ident} = delete $record->{user} || $record->{nick};
   $record->{auth}->{hostname} = delete $record->{hostname} || $self->server_name();
   $self->{state}->{users}->{ u_irc $record->{nick} } = $record;
@@ -3884,7 +3902,7 @@ Takes a number of parameters:
 
 Auth masks are processed in order of addition.
 
-If auth masks have been defined, then a connecting user *must* match one of the masks in order to authorised
+If auth masks have been defined, then a connecting user *must* match one of the masks in order to be authorised
 to connect. This is a feature >;)
 
 =item del_auth
