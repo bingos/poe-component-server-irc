@@ -81,7 +81,6 @@ sub ircd_daemon_server {
   }
   if ( $ircd->server_name() eq 'listen.server.irc' ) {
 	ok( $_[ARG0] eq 'connect.server.irc', $_[ARG0] . ' connected to ' . $_[ARG1] );
-	$ircd->del_listener( port => $heap->{port} );
   }
   undef;
 }
@@ -95,6 +94,7 @@ sub ircd_daemon_nick {
 sub ircd_daemon_quit {
   my ($kernel,$heap,$sender) = @_[KERNEL,HEAP,SENDER];
   pass("Kill test");
+  $heap->{listen}->del_listener( port => $heap->{port} );
   undef;
 }
 
