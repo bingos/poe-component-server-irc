@@ -1104,7 +1104,7 @@ sub _daemon_cmd_userhost {
     $str = join(' ', $str, $proper . ( $self->state_user_is_operator($proper) ? '*' : '' ) . '=' . ( $self->_state_user_away($proper) ? '-' : '+' ) . $userhost ) if $proper and $userhost;
   }
 
-  push( @{ $ref }, { prefix => $server, command => '302', params => [ $nick, ( $str ? $str : ':' ) ] } );
+  push @{ $ref }, { prefix => $server, command => '302', params => [ $nick, ( $str ? $str : ':' ) ] };
 
   return @{ $ref } if wantarray();
   return $ref;
@@ -1294,7 +1294,23 @@ sub _daemon_cmd_whois {
 	  $prefix .= '+' if $record->{chans}->{ $chan } =~ /v/;
 	  push @chans, $prefix . $self->{state}->{chans}->{ $chan }->{name};
         }
-	push @{ $ref }, { prefix => $server, command => '319', params => [ $nick, $record->{nick}, join(' ', @chans) ] } if scalar @chans;
+	if ( @chans ) {
+	  my $buffer = '';
+	  my $length = length( $server ) + 3 + length( $nick ) + length( $record->{nick} ) + 7;
+	  LOOP2: foreach my $chan ( @chans ) {
+	    if ( length( join ' ', $buffer, $chan ) + $length > 510 ) {
+	  	push @{ $ref }, { prefix => $server, command => '319', params => [ $nick, $record->{nick}, $buffer ] };
+		$buffer = $chan;
+		next LOOP2;
+	    }
+	    if ( $buffer ) {
+		$buffer = join ' ', $buffer, $chan;
+	    } else {
+		$buffer = $chan;
+	    }
+	  }
+	  push @{ $ref }, { prefix => $server, command => '319', params => [ $nick, $record->{nick}, $buffer ] };
+	}
 	push @{ $ref }, { prefix => $server, command => '312', params => [ $nick, $record->{nick}, $record->{server}, $self->_state_peer_desc( $record->{server} ) ] };
 	push @{ $ref }, { prefix => $server, command => '301', params => [ $nick, $record->{nick}, $record->{away} ] } if $record->{type} eq 'c' and $record->{away};
 	push @{ $ref }, { prefix => $server, command => '313', params => [ $nick, $record->{nick}, 'is an IRC Operator' ] } if $record->{umode} and $record->{umode} =~ /o/;

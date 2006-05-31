@@ -45,6 +45,7 @@ sub _start {
   $heap->{ircd}->add_operator( { username => 'moo', password => 'fishdont' } );
   $heap->{ircd}->yield( 'add_spoofed_nick', { nick => 'OperServ', umode => 'oi', ircname => 'The OperServ bot' } );
   $heap->{ircd}->yield( 'daemon_cmd_join', 'OperServ', '#foo' );
+  $heap->{ircd}->yield( 'daemon_cmd_join', 'OperServ', '#foo' . $_ ) for '001' .. '400';
   undef;
 }
 
