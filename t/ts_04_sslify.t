@@ -9,18 +9,18 @@ BEGIN: {
   $GOT_SSL = 0;
   eval {
         require POE::Component::SSLify;
-        $GOT_SSL = 1;
+        $GOT_SSL = 0;
   };
 }
 
 unless ( $GOT_SSL ) {
-  plan skip_all => "POE::Component::SSLify not installed";
+  plan skip_all => "Not done yet";
 }
 
 plan tests => 18;
 
 my $pocosi = POE::Component::Server::IRC->spawn( auth => 0, options => { trace => 0 }, antiflood => 0, plugin_debug => 0, debug => 0, sslify_options => [ 'ircd.key', 'ircd.crt' ] );
-my $pocoirc = POE::Component::IRC->spawn( flood => 1, UseSSL => 1 );
+my $pocoirc = POE::Component::IRC->spawn( flood => 1, UseSSL => 1, options => { trace => 0 } );
 
 if ( $pocosi and $pocoirc ) {
 	isa_ok( $pocosi, "POE::Component::Server::IRC" );
