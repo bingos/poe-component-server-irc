@@ -1,0 +1,50 @@
+Certificate:
+    Data:
+        Version: 1 (0x0)
+        Serial Number: 2 (0x2)
+        Signature Algorithm: md5WithRSAEncryption
+        Issuer: C=GB, ST=Staffordshire, L=Stafford, O=BingosNET, OU=tech, CN=Kidney BinGOs/Email=chris@bingosnet.co.uk
+        Validity
+            Not Before: May 31 12:13:18 2006 GMT
+            Not After : May 31 12:13:18 2007 GMT
+        Subject: C=GB, ST=Staffordshire, L=Stafford, O=POE::Component::Server::IRC, OU=bleh, CN=poco.server.irc/Email=bingos@poco.server.irc
+        Subject Public Key Info:
+            Public Key Algorithm: rsaEncryption
+            RSA Public Key: (1024 bit)
+                Modulus (1024 bit):
+                    00:e6:6c:9b:d9:a4:a1:6d:3c:e7:aa:91:1d:62:60:
+                    53:72:7b:91:8e:12:fb:0d:94:24:22:9a:2a:21:b6:
+                    e4:e1:da:37:c4:73:0b:22:d5:b6:42:06:4a:1f:7d:
+                    11:65:19:d2:07:4a:1e:2a:1c:e4:23:be:cb:21:25:
+                    c3:3c:bb:08:23:1f:9a:4b:8b:f3:73:0b:17:67:56:
+                    86:61:48:d0:2e:45:b3:a9:5b:98:23:e5:8d:e6:04:
+                    e6:38:58:af:5d:95:dc:3b:ac:4b:ab:a2:b3:f1:51:
+                    c9:30:78:7b:f1:40:87:8c:50:72:9f:74:3d:15:de:
+                    cb:c8:19:9a:27:62:08:82:2d
+                Exponent: 65537 (0x10001)
+    Signature Algorithm: md5WithRSAEncryption
+        7b:d8:88:37:bb:c5:7b:64:5c:3e:32:d6:84:b8:61:50:e8:5b:
+        ea:a9:26:49:27:32:da:4e:1d:cc:9c:86:6c:2d:b3:e6:4b:59:
+        93:d8:d6:96:bc:a1:87:86:0b:33:bf:3c:97:76:db:0a:61:55:
+        e7:d4:ae:42:51:d4:01:84:dd:1d:59:26:bf:58:52:bd:9e:31:
+        53:ec:8d:9c:59:20:4f:7a:a6:70:22:49:e0:c7:ca:67:02:c3:
+        61:3e:45:16:c4:61:cc:33:74:10:ad:bc:40:fd:3b:bb:94:13:
+        28:8a:fa:b4:47:5e:25:dc:a2:6b:77:27:9a:88:a8:7d:ef:7a:
+        ca:71
+-----BEGIN CERTIFICATE-----
+MIICuDCCAiECAQIwDQYJKoZIhvcNAQEEBQAwgZkxCzAJBgNVBAYTAkdCMRYwFAYD
+VQQIEw1TdGFmZm9yZHNoaXJlMREwDwYDVQQHEwhTdGFmZm9yZDESMBAGA1UEChMJ
+QmluZ29zTkVUMQ0wCwYDVQQLEwR0ZWNoMRYwFAYDVQQDEw1LaWRuZXkgQmluR09z
+MSQwIgYJKoZIhvcNAQkBFhVjaHJpc0BiaW5nb3NuZXQuY28udWswHhcNMDYwNTMx
+MTIxMzE4WhcNMDcwNTMxMTIxMzE4WjCBrjELMAkGA1UEBhMCR0IxFjAUBgNVBAgT
+DVN0YWZmb3Jkc2hpcmUxETAPBgNVBAcTCFN0YWZmb3JkMSQwIgYDVQQKExtQT0U6
+OkNvbXBvbmVudDo6U2VydmVyOjpJUkMxDTALBgNVBAsTBGJsZWgxGDAWBgNVBAMT
+D3BvY28uc2VydmVyLmlyYzElMCMGCSqGSIb3DQEJARYWYmluZ29zQHBvY28uc2Vy
+dmVyLmlyYzCBnzANBgkqhkiG9w0BAQEFAAOBjQAwgYkCgYEA5myb2aShbTznqpEd
+YmBTcnuRjhL7DZQkIpoqIbbk4do3xHMLItW2QgZKH30RZRnSB0oeKhzkI77LISXD
+PLsIIx+aS4vzcwsXZ1aGYUjQLkWzqVuYI+WN5gTmOFivXZXcO6xLq6Kz8VHJMHh7
+8UCHjFByn3Q9Fd7LyBmaJ2IIgi0CAwEAATANBgkqhkiG9w0BAQQFAAOBgQB72Ig3
+u8V7ZFw+MtaEuGFQ6FvqqSZJJzLaTh3MnIZsLbPmS1mT2NaWvKGHhgszvzyXdtsK
+YVXn1K5CUdQBhN0dWSa/WFK9njFT7I2cWSBPeqZwIkngx8pnAsNhPkUWxGHMM3QQ
+rbxA/Tu7lBMoivq0R14l3KJrdyeaiKh973rKcQ==
+-----END CERTIFICATE-----

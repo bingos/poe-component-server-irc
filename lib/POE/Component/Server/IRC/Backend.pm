@@ -64,8 +64,9 @@ sub create {
   if ( $sslify_options and ref $sslify_options eq 'ARRAY' ) {
     $self->{got_ssl} = $self->{got_server_ssl} = 0;
     eval {
-	require POE::Component::SSLify;
-	import POE::Component::SSLify qw( Client_SSLify Server_SSLify Server_SSLify SSLify_Options );
+	require POE::Component::SSLify; 
+	import POE::Component::SSLify qw(SSLify_Options Server_SSLify Client_SSLify);
+	$self->{got_ssl} = 1;
     };
     unless ($@) {
 	eval { SSLify_Options( @{ $sslify_options } ) };
@@ -285,6 +286,8 @@ sub _add_listener {
   my $freq = $parms{freq} || 180;
   my $auth = 1;
   my $antiflood = 1;
+  my $usessl = 0;
+  $usessl = 1 if $parms{usessl};
   $auth = 0 if defined $parms{auth} and $parms{auth} eq '0';
   $antiflood = 0 if defined $parms{antiflood} and $parms{antiflood} eq '0';
 
@@ -307,6 +310,7 @@ sub _add_listener {
 	$self->{listeners}->{ $listener_id }->{freq} = $freq;
 	$self->{listeners}->{ $listener_id }->{do_auth} = $auth;
 	$self->{listeners}->{ $listener_id }->{antiflood} = $antiflood;
+	$self->{listeners}->{ $listener_id }->{usessl} = $usessl;
   }
   undef;
 }
