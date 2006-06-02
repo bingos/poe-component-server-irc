@@ -34,7 +34,7 @@ sub _load_our_plugins {
   my $self = shift;
   $poe_kernel->state( 'add_spoofed_nick', $self );
   $poe_kernel->state( 'del_spoofed_nick', $self );
-  $poe_kernel->state( "daemon_cmd_$_", $self, '_spoofed_command' ) for qw(join part mode privmsg notice);
+  $poe_kernel->state( "daemon_cmd_$_", $self, '_spoofed_command' ) for qw(join part mode nick privmsg notice);
 }
 
 sub IRCD_listener_add {
@@ -652,6 +652,23 @@ sub _daemon_cmd_die {
      }
      $self->{ircd}->send_event( "daemon_die", $nick );
      $self->{ircd}->shutdown();
+  }
+  return @{ $ref } if wantarray();
+  return $ref;
+}
+
+sub _daemon_cmd_rehash {
+  my $self = shift;
+  my $nick = shift || return;
+  my $server = $self->server_name();
+  my $ref = [ ];
+  SWITCH: {
+     if ( !$self->state_user_is_operator( $nick ) ) {
+	push @{ $ref }, [ '481' ];
+	last SWITCH;
+     }
+     $self->{ircd}->send_event( "daemon_rehash", $nick );
+     push @{ $ref }, { prefix => $server, command => '383', params => [ $nick, 'ircd.conf', 'Rehashing' ] };
   }
   return @{ $ref } if wantarray();
   return $ref;
@@ -3786,9 +3803,10 @@ sub add_spoofed_nick {
 }
 
 sub del_spoofed_nick {
-  my ($kernel,$self,$nick,$message) = @_[KERNEL,OBJECT,ARG0,ARG1];
+  my ($kernel,$self,$nick) = @_[KERNEL,OBJECT,ARG0];
   return unless $self->state_nick_exists( $nick );
   return unless $self->_state_user_route( $nick ) eq 'spoofed';
+  my $message = $_[ARG1] || 'Client Quit';
   $self->{ircd}->send_output( @{ $self->_daemon_cmd_quit( $nick, qq{"$message"} ) }, qq{"$message"} );
   undef;
 }
@@ -3796,6 +3814,7 @@ sub del_spoofed_nick {
 sub _spoofed_command {
   my ($kernel,$self,$state,$nick) = @_[KERNEL,OBJECT,STATE,ARG0];
   return unless $self->state_nick_exists( $nick );
+  return unless $self->_state_user_route( $nick ) eq 'spoofed';
   $state =~ s/daemon_cmd_//;
   my $command = "_daemon_cmd_" . $state;
   if ( $state =~ /^(privmsg|notice)$/ ) {
