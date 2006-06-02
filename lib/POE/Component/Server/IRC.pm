@@ -899,7 +899,7 @@ sub _daemon_cmd_info {
 	$self->{ircd}->send_output( { prefix => $nick, command => 'INFO', params => [ $self->_state_peer_name( $target ) ] }, $self->_state_peer_route( $target ) );
 	last SWITCH;
     }
-    push( @{ $ref }, { prefix => $server, command => '371', params => [ $nick, ( / / ? $_ : ":$_" ) ] } ) for @{ $self->server_config('Info') };
+    push( @{ $ref }, { prefix => $server, command => '371', params => [ $nick, $_ ] } ) for @{ $self->server_config('Info') };
     push( @{ $ref }, { prefix => $server, command => '374', params => [ $nick, 'End of /INFO list.' ] } );
   }
   return @{ $ref } if wantarray();
