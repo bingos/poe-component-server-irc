@@ -8,7 +8,7 @@ use Data::Dumper;
 $Data::Dumper::Indent = 1;
 $|=1;
 
-my $pocosi = POE::Component::Server::IRC->spawn( auth => 1, options => { trace => 0 }, plugin_debug => 0, debug => 0, config => { servername => 'logserv.gumbynet.org.uk' }, raw_events => 0 );
+my $pocosi = POE::Component::Server::IRC->spawn( auth => 1, options => { trace => 0 }, plugin_debug => 0, debug => 1, config => { servername => 'logserv.gumbynet.org.uk' }, raw_events => 0 );
 
 POE::Session->create(
 		package_states => [ 
@@ -41,7 +41,7 @@ sub _start {
   $heap->{ircd}->add_auth( mask => '*@*' );
   $heap->{ircd}->add_listener( port => 7667 );
   $heap->{ircd}->add_listener( port => 7668, auth => 0, antiflood => 0 );
-  $heap->{ircd}->add_peer( name => 'irc2.gumbynet.org.uk', pass => 'op3rs3rv', rpass => 'op3rs3rv', type => 'r', raddress => '127.0.0.12', rport => 7666, auto => 0 );
+  $heap->{ircd}->add_peer( name => 'irc2.gumbynet.org.uk', pass => 'op3rs3rv', rpass => 'op3rs3rv', type => 'r', raddress => '127.0.0.12', rport => 7666, auto => 1 );
   $heap->{ircd}->add_operator( { username => 'moo', password => 'fishdont' } );
   $heap->{ircd}->yield( 'add_spoofed_nick', { nick => 'OperServ', umode => 'oi', ircname => 'The OperServ bot' } );
   $heap->{ircd}->yield( 'daemon_cmd_join', 'OperServ', '#foo' );

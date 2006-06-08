@@ -95,6 +95,7 @@ sub ircd_daemon_quit {
   my ($kernel,$heap,$sender) = @_[KERNEL,HEAP,SENDER];
   pass("Kill test");
   $heap->{listen}->del_listener( port => $heap->{port} );
+  $kernel->state( $_[STATE] );
   undef;
 }
 

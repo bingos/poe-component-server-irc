@@ -1837,23 +1837,27 @@ sub _daemon_cmd_invite {
 	push @{ $ref }, [ '482', $chan ];
 	last SWITCH;
     }
-    my $local; my $away;
+    my $local;
     if ( $self->_state_is_local_user( $who ) ) {
 	my $record = $self->{state}->{users}->{ u_irc $who };
 	$record->{invites}->{ u_irc $chan } = time();
         $local = 1;
-	$away = $record->{away} if $record->{away};
     }
+    my $away = $self->_state_user_away_msg($who); 
     my $route_id = $self->_state_user_route( $who );
-    my $output = { prefix => $self->state_user_full( $nick ), command => 'INVITE', params => [ $who, $chan ] };
+    my $output = { prefix => $self->state_user_full( $nick ), command => 'INVITE', params => [ $who, $chan ], colonify => 0 };
     if ( $route_id eq 'spoofed' ) {
 	$self->{ircd}->send_event( "daemon_invite", $output->{prefix}, @{ $output->{params} } );
     } else {
+	unless ( $local ) {
+	  $output->{prefix} = $nick;
+	  push @{ $output->{params} }, time();
+	}
     	$self->{ircd}->send_output( $output, $route_id );
     }
     push @{ $ref }, { prefix => $server, command => '341', params => [ $chan, $who ] };
-    if ( $local and $away ) {
-	push @{ $ref }, { prefix => $server, command => '301', params => [ $nick, $who, ( $away =~ /\s+/ ? $away : ":$away" ) ] };
+    if ( defined $away ) {
+	push @{ $ref }, { prefix => $server, command => '301', params => [ $nick, $who, $away ] };
     }
   }
   return @{ $ref } if wantarray();
@@ -2001,6 +2005,20 @@ sub _daemon_peer_squit {
     my $record = delete $self->{state}->{users}->{ $nick };
     $self->{state}->{stats}->{ops_online}-- if $record->{umode} =~ /o/;
     $self->{state}->{stats}->{invisible}-- if $record->{umode} =~ /i/;
+  }
+  return @{ $ref } if wantarray();
+  return $ref;
+}
+
+sub _daemon_peer_gline {
+  my $self = shift;
+  my $peer_id = shift || return;
+  my $nick = shift || return;
+  my $server = $self->server_name();
+  my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
+  # :klanker GLINE * meep.com :Fuckers
+  SWITCH: {
+	last SWITCH;
   }
   return @{ $ref } if wantarray();
   return $ref;
@@ -2697,6 +2715,41 @@ sub _daemon_peer_topic {
   return $ref;
 }
 
+sub _daemon_peer_invite {
+  my $self = shift;
+  my $peer_id = shift || return;
+  my $nick = shift || return;
+  my $server = $self->server_name();
+  my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
+  SWITCH: {
+    if ( !$count or $count < 3 ) {
+	last SWITCH;
+    }
+    my ($who,$chan) = @{ $args };
+    $who = ( split /!/, $self->state_user_full( $who ) )[0];
+    $chan = $self->_state_chan_name( $chan );
+    my $local;
+    if ( $self->_state_is_local_user( $who ) ) {
+	my $record = $self->{state}->{users}->{ u_irc $who };
+	$record->{invites}->{ u_irc $chan } = time();
+        $local = 1;
+    }
+    my $route_id = $self->_state_user_route( $who );
+    my $output = { prefix => $self->state_user_full( $nick ), command => 'INVITE', params => [ $who, $chan ], colonify => 0 };
+    if ( $route_id eq 'spoofed' ) {
+	$self->{ircd}->send_event( "daemon_invite", $output->{prefix}, @{ $output->{params} } );
+    } else {
+	unless ( $local ) {
+	  $output->{prefix} = $nick;
+	  push @{ $output->{params} }, $args->[2];
+	}
+    	$self->{ircd}->send_output( $output, $route_id );
+    }
+  }
+  return @{ $ref } if wantarray();
+  return $ref;
+}
+
 sub _daemon_peer_away {
   my $self = shift;
   my $peer_id = shift || return;
@@ -3018,8 +3071,15 @@ sub _state_user_away {
   my $self = shift;
   my $nick = shift || return;
   return unless $self->state_nick_exists( $nick );
-  return 0 unless $self->{state}->{users}->{ u_irc $nick }->{umode} =~ /a/;
-  return 1;
+  return 1 if defined $self->{state}->{users}->{ u_irc $nick }->{away};
+  return 0;
+}
+
+sub _state_user_away_msg {
+  my $self = shift;
+  my $nick = shift || return;
+  return unless $self->state_nick_exists( $nick );
+  return $self->{state}->{users}->{ u_irc $nick }->{away};
 }
 
 sub state_user_is_operator {
