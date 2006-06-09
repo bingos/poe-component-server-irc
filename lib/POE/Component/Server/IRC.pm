@@ -747,6 +747,41 @@ sub _daemon_cmd_squit {
   return $ref;
 }
 
+sub _daemon_cmd_gline {
+  my $self = shift;
+  my $nick = shift || return;
+  my $server = $self->server_name();
+  my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
+  # :klanker GLINE * meep.com :Fuckers
+  SWITCH: {
+     if ( !$self->state_user_is_operator( $nick ) ) {
+	push @{ $ref }, [ '481' ];
+	last SWITCH;
+     }
+     if ( !$count or $count < 2 ) {
+	push @{ $ref }, [ '461', 'GLINE' ];
+	last SWITCH;
+     }
+     if ( $args->[0] !~ /\@/ and !$self->state_nick_exists( $args->[0] ) ) {
+	push @{ $ref }, [ '401', $args->[0] ];
+	last SWITCH;
+     }
+     my ($user_part,$host_part);
+     if ( $args->[0] =~ /\@/ ) {
+	($user_part,$host_part) = ( split /[!@]/, $self->state_user_full( $args->[0] ) )[1..2];
+     } else {
+	($user_part,$host_part) = split /\@/, $args->[0];
+     }
+     my $time = time();
+     my $reason = join ' ', $args->[1], time2str("(%c)", $time );
+     my $full = $self->state_user_full( $nick );
+     push @{ $self->{state}->{glines} }, { setby => $full, setat => time(), user => $user_part, host => $host_part, reason => $reason };
+     $self->{ircd}->send_output( { prefix => $nick, command => 'GLINE', params => [ $user_part, $host_part, $time ], colonify => 0 }, grep { $self->_state_peer_capab( $_, 'GLN' ) } $self->_state_connected_peers() );
+  }
+  return @{ $ref } if wantarray();
+  return $ref;
+}
+
 sub _daemon_cmd_kill {
   my $self = shift;
   my $nick = shift || return;
@@ -2018,7 +2053,12 @@ sub _daemon_peer_gline {
   my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
   # :klanker GLINE * meep.com :Fuckers
   SWITCH: {
+     if ( !$count or $count < 3 ) {
 	last SWITCH;
+     }
+     my $full = $self->state_user_full( $nick );
+     push @{ $self->{state}->{glines} }, { setby => $full, setat => time(), user => $args->[0], host => $args->[1], reason => $args->[2] };
+     $self->{ircd}->send_output( { prefix => $nick, command => 'GLINE', params => $args, colonify => 0 }, grep { $_ ne $peer_id and $self->_state_peer_capab( $_, 'GLN' ) } $self->_state_connected_peers() );
   }
   return @{ $ref } if wantarray();
   return $ref;
@@ -3049,6 +3089,16 @@ sub _state_peer_desc {
   my $peer = shift || return;
   return unless $self->state_peer_exists( $peer );
   return $self->{state}->{peers}->{ uc $peer }->{desc};
+}
+
+sub _state_peer_capab {
+  my $self = shift;
+  my $conn_id = shift || return;
+  my $capab = shift || return;
+  $capab = uc $capab;
+  return unless $self->_connection_is_peer( $conn_id );
+  my $conn = $self->{state}->{conns}->{ $conn_id };
+  return scalar grep { $_ eq $capab } @{ $conn->{capab} };
 }
 
 sub state_user_full {
