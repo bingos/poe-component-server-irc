@@ -183,6 +183,14 @@ sub _client_register {
     $self->terminate_conn_error( $conn_id, 'You are not authorized to use this server' );
     return;
   }
+  if ( $self->_state_user_matches_gline( $conn_id ) ) {
+    $self->terminate_conn_error( $conn_id, 'G-Lined' );
+    return;
+  }
+  if ( $self->_state_user_matches_kline( $conn_id ) ) {
+    $self->terminate_conn_error( $conn_id, 'K-Lined' );
+    return;
+  }
   # Add new nick
   $self->_state_register_client( $conn_id );
   my $server = $self->server_name();
@@ -776,7 +784,9 @@ sub _daemon_cmd_gline {
      my $reason = join ' ', $args->[1], time2str("(%c)", $time );
      my $full = $self->state_user_full( $nick );
      push @{ $self->{state}->{glines} }, { setby => $full, setat => time(), user => $user_part, host => $host_part, reason => $reason };
-     $self->{ircd}->send_output( { prefix => $nick, command => 'GLINE', params => [ $user_part, $host_part, $time ], colonify => 0 }, grep { $self->_state_peer_capab( $_, 'GLN' ) } $self->_state_connected_peers() );
+     $self->{ircd}->send_output( { prefix => $nick, command => 'GLINE', params => [ $user_part, $host_part, $reason ], colonify => 0 }, grep { $self->_state_peer_capab( $_, 'GLN' ) } $self->_state_connected_peers() );
+     $self->{ircd}->send_event( "daemon_gline", $full, $user_part, $host_part, $reason );
+     $self->terminate_conn_error( $_, 'G-Lined' ) for $self->_state_local_users_match_gline( $user_part, $host_part );
   }
   return @{ $ref } if wantarray();
   return $ref;
@@ -2045,6 +2055,42 @@ sub _daemon_peer_squit {
   return $ref;
 }
 
+sub _daemon_peer_kline {
+  my $self = shift;
+  my $peer_id = shift || return;
+  my $nick = shift || return;
+  my $server = $self->server_name();
+  my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
+  SWITCH: {
+     if ( !$count or $count < 5 ) {
+	last SWITCH;
+     }
+     my $full = $self->state_user_full( $nick );
+     my $target = $args->[0];
+     my $us = 0;
+     my $ucserver = uc $server;
+     my %targets;
+     foreach my $peer ( keys %{ $self->{state}->{peers} } ) {
+	if ( matches_mask( $target, $peer ) ) {
+	   if ( $ucserver eq $peer ) {
+		$us = 1;
+	   } else {
+		$targets{ $self->_state_peer_route( $peer ) }++;
+	   }
+	}
+     }
+     delete $targets{ $peer_id };
+     $self->{ircd}->send_output( { prefix => $nick, command => 'KLINE', params => $args, colonify => 0 }, grep { $self->_state_peer_capab( $_, 'KLN' ) } keys %targets );
+     if ( $us ) {
+     	$self->{ircd}->send_event( "daemon_kline", $full, @{ $args } );
+	push @{ $self->{state}->{klines} }, { setby => $full, setat => time(), target => $args->[0], duration => $args->[1], user => $args->[2], host => $args->[3], reason => $args->[4] };
+	$self->terminate_conn_error( $_, 'K-Lined' ) for $self->_state_local_users_match_gline( $args->[2], $args->[3] );
+     }
+  }
+  return @{ $ref } if wantarray();
+  return $ref;
+}
+
 sub _daemon_peer_gline {
   my $self = shift;
   my $peer_id = shift || return;
@@ -2059,6 +2105,8 @@ sub _daemon_peer_gline {
      my $full = $self->state_user_full( $nick );
      push @{ $self->{state}->{glines} }, { setby => $full, setat => time(), user => $args->[0], host => $args->[1], reason => $args->[2] };
      $self->{ircd}->send_output( { prefix => $nick, command => 'GLINE', params => $args, colonify => 0 }, grep { $_ ne $peer_id and $self->_state_peer_capab( $_, 'GLN' ) } $self->_state_connected_peers() );
+     $self->{ircd}->send_event( "daemon_gline", $full, @{ $args } );
+     $self->terminate_conn_error( $_, 'G-Lined' ) for $self->_state_local_users_match_gline( $args->[0], $args->[1] );
   }
   return @{ $ref } if wantarray();
   return $ref;
@@ -2873,6 +2921,63 @@ sub _state_cmd_stat {
   $record->{bytes} += length $line;
   $self->{state}->{stats}->{cmds}->{ $cmd } = $record;
   return 1;
+}
+
+sub _state_local_users_match_gline {
+  my $self = shift;
+  my $luser = shift || return;
+  my $host = shift || return;
+  my $local = $self->{state}->{peers}->{ uc $self->server_name() }->{users};
+  my @conns;
+  if ( my $netmask = Net::Netmask->new2($host) ) {
+    foreach my $user ( values %{ $local } ) {
+	next if $user->{route_id} eq 'spoofed';
+	next if $user->{umode} and $user->{umode} =~ /o/;
+	push @conns, $user->{route_id} if $netmask->match($user->{socket}->[0]) and matches_mask( $luser, $user->{auth}->{ident} );
+    }
+  } else {
+    foreach my $user ( values %{ $local } ) {
+	print STDERR Dumper( $user );
+	next if $user->{route_id} eq 'spoofed';
+	next if $user->{umode} and $user->{umode} =~ /o/;
+	push @conns, $user->{route_id} if ( matches_mask( $host, $user->{socket}->[0] ) or matches_mask( $host, $user->{auth}->{hostname} ) ) and matches_mask( $luser, $user->{auth}->{ident} );
+    }
+  }
+  return @conns;
+}
+
+sub _state_user_matches_kline {
+  my $self = shift;
+  my $conn_id = shift || return;
+  my $record = $self->{state}->{conns}->{ $conn_id };
+  my $host = $record->{auth}->{hostname} || $record->{socket}->[0];
+  my $user = $record->{auth}->{ident} || "~" . $record->{user};
+  my $ip = $record->{socket}->[0];
+  foreach my $gline ( @{ $self->{state}->{klines} } ) {
+	if ( my $netmask = Net::Netmask->new2($gline->{host}) ) {
+	   return 1 if $netmask->match($ip) and matches_mask( $gline->{user}, $user );
+	} else {
+	   return 1 if ( matches_mask( $gline->{host}, $host ) or matches_mask( $gline->{host}, $ip ) ) and matches_mask( $gline->{user}, $user );
+	}
+  }
+  return 0;
+}
+
+sub _state_user_matches_gline {
+  my $self = shift;
+  my $conn_id = shift || return;
+  my $record = $self->{state}->{conns}->{ $conn_id };
+  my $host = $record->{auth}->{hostname} || $record->{socket}->[0];
+  my $user = $record->{auth}->{ident} || "~" . $record->{user};
+  my $ip = $record->{socket}->[0];
+  foreach my $gline ( @{ $self->{state}->{glines} } ) {
+	if ( my $netmask = Net::Netmask->new2($gline->{host}) ) {
+	   return 1 if $netmask->match($ip) and matches_mask( $gline->{user}, $user );
+	} else {
+	   return 1 if ( matches_mask( $gline->{host}, $host ) or matches_mask( $gline->{host}, $ip ) ) and matches_mask( $gline->{user}, $user );
+	}
+  }
+  return 0;
 }
 
 sub _state_auth_client_conn {

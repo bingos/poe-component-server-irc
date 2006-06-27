@@ -8,7 +8,7 @@ use Data::Dumper;
 $Data::Dumper::Indent = 1;
 $|=1;
 
-my $pocosi = POE::Component::Server::IRC->spawn( auth => 1, options => { trace => 0 }, plugin_debug => 0, debug => 1, config => { servername => 'logserv.gumbynet.org.uk' }, raw_events => 0 );
+my $pocosi = POE::Component::Server::IRC->spawn( auth => 1, options => { trace => 0 }, plugin_debug => 0, debug => 0, config => { servername => 'logserv.gumbynet.org.uk' }, raw_events => 0 );
 
 POE::Session->create(
 		package_states => [ 
@@ -70,7 +70,8 @@ sub _default {
 
 sub sig_hup {
   my ($kernel,$heap) = @_[KERNEL,HEAP];
-  $heap->{ircd}->yield( 'del_spoofed_nick' => 'OperServ' => 'ARGH! SIGHUP!' );
+  #$heap->{ircd}->yield( 'del_spoofed_nick' => 'OperServ' => 'ARGH! SIGHUP!' );
+  print STDOUT Dumper($heap->{ircd}->{state});
   $kernel->sig_handled();
 }
 

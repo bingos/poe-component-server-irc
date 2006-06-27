@@ -92,6 +92,7 @@ sub ircd_backend_cmd_user {
 sub _default {
   my $event = $_[ARG0];
   my $sender = $_[SENDER]->ID();
+  return 0 if $sender eq $poe_kernel->ID();
   my $irc = $_[SENDER]->get_heap();
   if ( $event =~ /^irc_(00[1234]|25[15]|422)/ or $event eq 'irc_isupport' ) {
 	ok( 1, $event );
@@ -108,5 +109,5 @@ sub _default {
 	ok( 1, $event );
 	$_[HEAP]->{ircd}->del_listener( port => $_[HEAP]->{port} );
   }
-  undef;
+  return 0;
 }
