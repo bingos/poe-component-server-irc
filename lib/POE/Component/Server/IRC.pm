@@ -34,7 +34,7 @@ sub _load_our_plugins {
   my $self = shift;
   $poe_kernel->state( 'add_spoofed_nick', $self );
   $poe_kernel->state( 'del_spoofed_nick', $self );
-  $poe_kernel->state( "daemon_cmd_$_", $self, '_spoofed_command' ) for qw(join part mode nick privmsg notice);
+  $poe_kernel->state( "daemon_cmd_$_", $self, '_spoofed_command' ) for qw(join part mode nick privmsg notice gline kline unkline);
 }
 
 sub IRCD_listener_add {
@@ -750,6 +750,145 @@ sub _daemon_cmd_squit {
      my $conn_id = $self->_state_peer_route( $peer );
      $self->{ircd}->disconnect( $conn_id );
      $self->{ircd}->send_output( { command => 'ERROR', params => [ join ' ', 'Closing Link:', $self->client_ip( $conn_id ), $args->[0], "($nick)" ] }, $conn_id );
+  }
+  return @{ $ref } if wantarray();
+  return $ref;
+}
+
+sub _daemon_cmd_kline {
+  my $self = shift;
+  my $nick = shift || return;
+  my $server = $self->server_name();
+  my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
+  # KLINE [time] <nick|user@host> [ ON <server> ] :[reason]
+  SWITCH: {
+     if ( !$self->state_user_is_operator( $nick ) ) {
+	push @{ $ref }, [ '481' ];
+	last SWITCH;
+     }
+     if ( !$count or $count < 1 ) {
+	push @{ $ref }, [ '461', 'KLINE' ];
+	last SWITCH;
+     }
+     my $duration = 0;
+     if ( $args->[0] =~ /^\d+$/ ) {
+	$duration = shift @{ $args };
+	$duration = 14400 if $duration > 14400;
+     }
+     my $mask = shift @{ $args };
+     unless ( $mask ) {
+	push @{ $ref }, [ '461', 'KLINE' ];
+	last SWITCH;
+     }
+     my ($user,$host);
+     if ( $mask !~ /\@/ ) {
+	if ( my $rogue = $self->_state_user_full( $mask ) ) {
+	  ($user,$host) = ( split /[!\@]/, $rogue )[1..2]
+	} else {
+	  push @{ $ref }, [ '401', $mask ];
+	  last SWITCH;
+	}
+     } else {
+	($user,$host) = split /\@/, $mask;
+     }
+     my $full = $self->state_user_full( $nick );
+     my $us = 0;
+     my $ucserver = uc $server;
+     if ( $args->[0] and uc $args->[0] eq 'ON' and scalar @{ $args } < 2 ) {
+	push @{ $ref }, [ '461', 'KLINE' ];
+	last SWITCH;
+     }
+     my ($target,$reason);
+     if ( $args->[0] and uc $args->[0] eq 'ON' ) {
+       $target = shift @{ $args };
+       $reason = shift @{ $args } || 'No Reason';
+       my %targets;
+       foreach my $peer ( keys %{ $self->{state}->{peers} } ) {
+	 if ( matches_mask( $target, $peer ) ) {
+	   if ( $ucserver eq $peer ) {
+		$us = 1;
+	   } else {
+		$targets{ $self->_state_peer_route( $peer ) }++;
+	   }
+	 }
+       }
+       $self->{ircd}->send_output( { prefix => $nick, command => 'KLINE', params => [ $target, $duration, $user, $host, $reason ], colonify => 0 }, grep { $self->_state_peer_capab( $_, 'KLN' ) } keys %targets );
+     } else {
+	$us = 1;
+     }
+     if ( $us ) {
+	$target = $server unless $target;
+	unless ( $reason ) {
+	  $reason = pop @{ $args } || 'No Reason';
+	}
+     	$self->{ircd}->send_event( "daemon_kline", $full, $target, $duration, $user, $host, $reason );
+	push @{ $self->{state}->{klines} }, { setby => $full, setat => time(), target => $target, duration => $duration, user => $user, host => $host, reason => $reason };
+	$self->terminate_conn_error( $_, 'K-Lined' ) for $self->_state_local_users_match_gline( $user, $host );
+     }
+  }
+  return @{ $ref } if wantarray();
+  return $ref;
+}
+
+sub _daemon_cmd_unkline {
+  my $self = shift;
+  my $nick = shift || return;
+  my $server = $self->server_name();
+  my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
+  # UNKLINE <user@host> [ ON <target_mask> ]
+  SWITCH: {
+     if ( !$self->state_user_is_operator( $nick ) ) {
+	push @{ $ref }, [ '481' ];
+	last SWITCH;
+     }
+     if ( !$count or $count < 1 ) {
+	push @{ $ref }, [ '461', 'UNKLINE' ];
+	last SWITCH;
+     }
+     my ($user,$host);
+     if ( $args->[0] !~ /\@/ ) {
+	if ( my $rogue = $self->_state_user_full( $args->[0] ) ) {
+	  ($user,$host) = ( split /[!\@]/, $rogue )[1..2]
+	} else {
+	  push @{ $ref }, [ '401', $args->[0] ];
+	  last SWITCH;
+	}
+     } else {
+	($user,$host) = split /\@/, $args->[0];
+     }
+     my $full = $self->state_user_full( $nick );
+     my $us = 0;
+     my $ucserver = uc $server;
+     if ( $count > 1 and uc $args->[2] eq 'ON' and $count < 3 ) {
+	push @{ $ref }, [ '461', 'UNKLINE' ];
+	last SWITCH;
+     }
+     if ( $count > 1 and $args->[2] and uc $args->[2] eq 'ON' ) {
+       my $target = $args->[2];
+       my %targets;
+       foreach my $peer ( keys %{ $self->{state}->{peers} } ) {
+	 if ( matches_mask( $target, $peer ) ) {
+	   if ( $ucserver eq $peer ) {
+		$us = 1;
+	   } else {
+		$targets{ $self->_state_peer_route( $peer ) }++;
+	   }
+	 }
+       }
+       $self->{ircd}->send_output( { prefix => $nick, command => 'UNKLINE', params => [ $target, $user, $host ], colonify => 0 }, grep { $self->_state_peer_capab( $_, 'UNKLN' ) } keys %targets );
+     } else {
+	$us = 1;
+     }
+     if ( $us ) {
+	my $target = $args->[3] || $server;
+     	$self->{ircd}->send_event( "daemon_unkline", $full, $target, $user, $host );
+	my $i = 0;
+	for ( @{ $self->{state}->{klines} } ) {
+	  splice ( @{ $self->{state}->{klines} }, $i, 1), last
+		if $_->{user} eq $user and $_->{host} eq $host;
+	  ++$i;
+	}
+     }
   }
   return @{ $ref } if wantarray();
   return $ref;
@@ -2091,6 +2230,47 @@ sub _daemon_peer_kline {
   return $ref;
 }
 
+sub _daemon_peer_unkline {
+  my $self = shift;
+  my $peer_id = shift || return;
+  my $nick = shift || return;
+  my $server = $self->server_name();
+  my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
+  # :klanker UNKLINE logserv.gumbynet.org.uk * moos.loud.me.uk
+  SWITCH: {
+     if ( !$count or $count < 3 ) {
+	last SWITCH;
+     }
+     my $full = $self->state_user_full( $nick );
+     my $target = $args->[0];
+     my $us = 0;
+     my $ucserver = uc $server;
+     my %targets;
+     foreach my $peer ( keys %{ $self->{state}->{peers} } ) {
+	if ( matches_mask( $target, $peer ) ) {
+	   if ( $ucserver eq $peer ) {
+		$us = 1;
+	   } else {
+		$targets{ $self->_state_peer_route( $peer ) }++;
+	   }
+	}
+     }
+     delete $targets{ $peer_id };
+     $self->{ircd}->send_output( { prefix => $nick, command => 'UNKLINE', params => $args, colonify => 0 }, grep { $self->_state_peer_capab( $_, 'UNKLN' ) } keys %targets );
+     if ( $us ) {
+     	$self->{ircd}->send_event( "daemon_unkline", $full, @{ $args } );
+	my $i = 0;
+	for ( @{ $self->{state}->{klines} } ) {
+	  splice ( @{ $self->{state}->{klines} }, $i, 1), last
+		if $_->{user} eq $args->[1] and $_->{host} eq $args->[2];
+	  ++$i;
+	}
+     }
+  }
+  return @{ $ref } if wantarray();
+  return $ref;
+}
+
 sub _daemon_peer_gline {
   my $self = shift;
   my $peer_id = shift || return;
@@ -2937,7 +3117,6 @@ sub _state_local_users_match_gline {
     }
   } else {
     foreach my $user ( values %{ $local } ) {
-	print STDERR Dumper( $user );
 	next if $user->{route_id} eq 'spoofed';
 	next if $user->{umode} and $user->{umode} =~ /o/;
 	push @conns, $user->{route_id} if ( matches_mask( $host, $user->{socket}->[0] ) or matches_mask( $host, $user->{auth}->{hostname} ) ) and matches_mask( $luser, $user->{auth}->{ident} );
@@ -3604,7 +3783,7 @@ sub configure {
     map { ( uc $_, $self->{config}->{$_} ) } qw(MAXCHANNELS MAXTARGETS MAXBANS NICKLEN TOPICLEN KICKLEN CASEMAPPING NETWORK),
   };
 
-  $self->{config}->{capab} = [ qw(QS EX IE HOPS KLN GLN EOB) ];
+  $self->{config}->{capab} = [ qw(QS EX IE HOPS UNKLN KLN GLN EOB) ];
 
   return 1;
 }
@@ -4322,6 +4501,39 @@ Takes two arguments, a nick and a channel name. Returns true if that nick has ch
 
 =head1 INPUT EVENTS
 
+These are POE events that can be sent to the component.
+
+=over
+
+=item register
+
+Send this event to the ircd to start to receive 'ircd_*' events.
+
+=item unregister
+
+Send this event to stop the ircd sending you events.
+
+=item shutdown
+
+Make it all go away.
+
+=item add_spoofed_nick
+
+Takes a single argument a hashref which should have the following keys:
+
+  'nick', the nickname to add, mandatory;
+  'user', the ident you want the nick to have, default same as nick;
+  'hostname', the hostname, defaults to the server name;
+  'umode', specify whether this is to be an IRCop etc, default 'i';
+  'ts', unixtime, default is time(), best not to meddle;
+
+=item del_spoofed_nick
+
+Takes a single mandatory argument, the spoofed nickname to remove. Optionally, you may
+specify a quit message for the spoofed nick.
+
+=back
+
 =head1 OUTPUT EVENTS
 
 =head1 PLUGIN SYSTEM
@@ -4340,7 +4552,7 @@ Buu for pestering me when I started to procrastinate =]
 
 L<Net::Netmask>
 
-POE L<POE>
+POE L<POE> L<http://poe.perl.org/>
 
 L<POE::Component::Server::IRC::Backend>
 
