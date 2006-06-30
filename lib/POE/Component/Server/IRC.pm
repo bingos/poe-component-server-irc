@@ -191,6 +191,10 @@ sub _client_register {
     $self->terminate_conn_error( $conn_id, 'K-Lined' );
     return;
   }
+  if ( $self->_state_user_matches_rkline( $conn_id ) ) {
+    $self->terminate_conn_error( $conn_id, 'K-Lined' );
+    return;
+  }
   # Add new nick
   $self->_state_register_client( $conn_id );
   my $server = $self->server_name();
@@ -750,6 +754,74 @@ sub _daemon_cmd_squit {
      my $conn_id = $self->_state_peer_route( $peer );
      $self->{ircd}->disconnect( $conn_id );
      $self->{ircd}->send_output( { command => 'ERROR', params => [ join ' ', 'Closing Link:', $self->client_ip( $conn_id ), $args->[0], "($nick)" ] }, $conn_id );
+  }
+  return @{ $ref } if wantarray();
+  return $ref;
+}
+
+sub _daemon_cmd_rkline {
+  my $self = shift;
+  my $nick = shift || return;
+  my $server = $self->server_name();
+  my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
+  # RKLINE [time] <mask> [ON <server>] :[reason]
+  SWITCH: {
+     if ( !$self->state_user_is_operator( $nick ) ) {
+	push @{ $ref }, [ '481' ];
+	last SWITCH;
+     }
+     if ( !$count or $count < 1 ) {
+	push @{ $ref }, [ '461', 'RKLINE' ];
+	last SWITCH;
+     }
+     my $duration = 0;
+     if ( $args->[0] =~ /^\d+$/ ) {
+	$duration = shift @{ $args };
+	$duration = 14400 if $duration > 14400;
+     }
+     my $mask = shift @{ $args };
+     unless ( $mask ) {
+	push @{ $ref }, [ '461', 'RKLINE' ];
+	last SWITCH;
+     }
+     my ($user,$host) = split /\@/, $mask;
+     unless ( $user and $host ) {
+	last SWITCH;
+     }
+     my $full = $self->state_user_full( $nick );
+     my $us = 0;
+     my $ucserver = uc $server;
+     if ( $args->[0] and uc $args->[0] eq 'ON' and scalar @{ $args } < 2 ) {
+	push @{ $ref }, [ '461', 'RKLINE' ];
+	last SWITCH;
+     }
+     my ($target,$reason);
+     if ( $args->[0] and uc $args->[0] eq 'ON' ) {
+       $target = shift @{ $args };
+       $reason = shift @{ $args } || 'No Reason';
+       my %targets;
+       foreach my $peer ( keys %{ $self->{state}->{peers} } ) {
+	 if ( matches_mask( $target, $peer ) ) {
+	   if ( $ucserver eq $peer ) {
+		$us = 1;
+	   } else {
+		$targets{ $self->_state_peer_route( $peer ) }++;
+	   }
+	 }
+       }
+       $self->{ircd}->send_output( { prefix => $nick, command => 'RKLINE', params => [ $target, $duration, $user, $host, $reason ], colonify => 0 }, grep { $self->_state_peer_capab( $_, 'KLN' ) } keys %targets );
+     } else {
+	$us = 1;
+     }
+     if ( $us ) {
+	$target = $server unless $target;
+	unless ( $reason ) {
+	  $reason = pop @{ $args } || 'No Reason';
+	}
+     	$self->{ircd}->send_event( "daemon_rkline", $full, $target, $duration, $user, $host, $reason );
+	push @{ $self->{state}->{rklines} }, { setby => $full, setat => time(), target => $target, duration => $duration, user => $user, host => $host, reason => $reason };
+	$self->terminate_conn_error( $_, 'K-Lined' ) for $self->_state_local_users_match_rkline( $user, $host );
+     }
   }
   return @{ $ref } if wantarray();
   return $ref;
@@ -2194,6 +2266,43 @@ sub _daemon_peer_squit {
   return $ref;
 }
 
+sub _daemon_peer_rkline {
+  my $self = shift;
+  my $peer_id = shift || return;
+  my $nick = shift || return;
+  my $server = $self->server_name();
+  my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
+  # :klanker RKLINE logserv.gumbynet.org.uk 600 ^m.*\ foo\.(com|uk|net)$ :Foo
+  SWITCH: {
+     if ( !$count or $count < 5 ) {
+	last SWITCH;
+     }
+     my $full = $self->state_user_full( $nick );
+     my $target = $args->[0];
+     my $us = 0;
+     my $ucserver = uc $server;
+     my %targets;
+     foreach my $peer ( keys %{ $self->{state}->{peers} } ) {
+	if ( matches_mask( $target, $peer ) ) {
+	   if ( $ucserver eq $peer ) {
+		$us = 1;
+	   } else {
+		$targets{ $self->_state_peer_route( $peer ) }++;
+	   }
+	}
+     }
+     delete $targets{ $peer_id };
+     $self->{ircd}->send_output( { prefix => $nick, command => 'RKLINE', params => $args, colonify => 0 }, grep { $self->_state_peer_capab( $_, 'KLN' ) } keys %targets );
+     if ( $us ) {
+     	$self->{ircd}->send_event( "daemon_rkline", $full, @{ $args } );
+	push @{ $self->{state}->{rklines} }, { setby => $full, setat => time(), target => $args->[0], duration => $args->[1], user => $args->[2], host => $args->[3], reason => $args->[4] };
+	$self->terminate_conn_error( $_, 'K-Lined' ) for $self->_state_local_users_match_rkline( $args->[2], $args->[3] );
+     }
+  }
+  return @{ $ref } if wantarray();
+  return $ref;
+}
+
 sub _daemon_peer_kline {
   my $self = shift;
   my $peer_id = shift || return;
@@ -3103,6 +3212,22 @@ sub _state_cmd_stat {
   return 1;
 }
 
+sub _state_local_users_match_rkline {
+  my $self = shift;
+  my $luser = shift || return;
+  my $host = shift || return;
+  my $local = $self->{state}->{peers}->{ uc $self->server_name() }->{users};
+  my @conns;
+  foreach my $user ( values %{ $local } ) {
+	next if $user->{route_id} eq 'spoofed';
+	next if $user->{umode} and $user->{umode} =~ /o/;
+	eval {
+	   push @conns, $user->{route_id} if ( $user->{socket}->[0] =~ /$host/ or $user->{auth}->{hostname} =~ /$host/ ) and $user->{auth}->{ident} =~ /$luser/;
+	};
+  }
+  return @conns;
+}
+
 sub _state_local_users_match_gline {
   my $self = shift;
   my $luser = shift || return;
@@ -3123,6 +3248,21 @@ sub _state_local_users_match_gline {
     }
   }
   return @conns;
+}
+
+sub _state_user_matches_rkline {
+  my $self = shift;
+  my $conn_id = shift || return;
+  my $record = $self->{state}->{conns}->{ $conn_id };
+  my $host = $record->{auth}->{hostname} || $record->{socket}->[0];
+  my $user = $record->{auth}->{ident} || "~" . $record->{user};
+  my $ip = $record->{socket}->[0];
+  foreach my $gline ( @{ $self->{state}->{rklines} } ) {
+	eval {
+	   return 1 if ( $host =~ /$gline->{host}/ or $ip =~ /$gline->{host}/ ) and $user =~ /$gline->{user}/;
+	};
+  }
+  return 0;
 }
 
 sub _state_user_matches_kline {
