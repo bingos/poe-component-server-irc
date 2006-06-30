@@ -34,7 +34,7 @@ sub _load_our_plugins {
   my $self = shift;
   $poe_kernel->state( 'add_spoofed_nick', $self );
   $poe_kernel->state( 'del_spoofed_nick', $self );
-  $poe_kernel->state( "daemon_cmd_$_", $self, '_spoofed_command' ) for qw(join part mode nick privmsg notice gline kline unkline);
+  $poe_kernel->state( "daemon_cmd_$_", $self, '_spoofed_command' ) for qw(join part mode nick privmsg notice gline kline unkline rkline);
 }
 
 sub IRCD_listener_add {
@@ -4549,6 +4549,22 @@ to connect. This is a feature >;)
 
 Takes a single argument, the mask to remove.
 
+=item add_denial
+
+Takes one mandatory argument and one optional. The first mandatory argument is a L<Net::Netmask> object that will be used to check connecting IP addresses against. The second optional argument is a reason string for the denial.
+
+=item del_denial
+
+Takes one mandatory argument, a L<Net::Netmask> object to remove from the current denial list.
+
+=item add_exemption
+
+Takes one mandatory argument, a L<Net::Netmask> object that will be checked against connecting IP addresses for exemption from denials.
+
+=item del_exemption
+
+Takes one mandatory argument, a L<Net::Netmask> object to remove from the current exemption list.
+
 =back
 
 =head2 STATE MANIPULATION
@@ -4637,6 +4653,18 @@ Takes two arguments, a nick and a channel name. Returns true if that nick is an 
 
 Takes two arguments, a nick and a channel name. Returns true if that nick has channel voice, false otherwise.
 
+=item daemon_server_kill
+
+Takes two arguments, a nickname and a comment ( which is optional ); Issues a SERVER KILL of the given nick;
+
+=item daemon_server_mode
+
+First argument is a channel name, remaining arguments are channel modes and their parameters to apply.
+
+=item daemon_server_kick
+
+Takes two arguments that are mandatory and an optional one: channel name, nickname of the user to kick and a pithy comment.
+
 =back
 
 =head1 INPUT EVENTS
@@ -4647,15 +4675,31 @@ These are POE events that can be sent to the component.
 
 =item register
 
-Send this event to the ircd to start to receive 'ircd_*' events.
+Takes no arguments. Registers a session to receive events from the component.
 
 =item unregister
 
-Send this event to stop the ircd sending you events.
+Takes no arguments. Unregisters a previously registered session.
 
-=item shutdown
+=item add_listener
 
-Make it all go away.
+Takes a number of arguments. Adds a new listener.
+
+        'port', the TCP port to listen on. Default is a random port;
+        'auth', enable or disable auth sub-system for this listener. Default enabled;
+        'bindaddr', specify a local address to bind the listener to;
+        'listenqueue', change the SocketFactory's ListenQueue;
+
+A listener is required to accept connections from clients.
+
+=item del_listener
+
+Takes either 'port' or 'listener':
+
+        'listener' is a previously returned listener ID;
+        'port', listening TCP port;
+
+The listener will be deleted. Note: any connected clients on that port will not be disconnected.
 
 =item add_spoofed_nick
 
@@ -4667,6 +4711,8 @@ Takes a single argument a hashref which should have the following keys:
   'umode', specify whether this is to be an IRCop etc, default 'i';
   'ts', unixtime, default is time(), best not to meddle;
 
+Note: spoofed nicks are currently only really functional for use as IRC services;
+
 =item del_spoofed_nick
 
 Takes a single mandatory argument, the spoofed nickname to remove. Optionally, you may
@@ -4675,6 +4721,233 @@ specify a quit message for the spoofed nick.
 =back
 
 =head1 OUTPUT EVENTS
+
+After a session has registered with the component it will receive the following events:
+
+=over
+
+=item ircd_registered
+
+Emitted: when a session registers with the component;
+Target: the registering session;
+Args:
+        ARG0, the component's object;
+
+=item ircd_unregistered
+
+Emitted: when a session unregisters with the component;
+Target: the unregistering session;
+Args: none
+
+=item ircd_listener_add
+
+Emitted: on a successful add_listener() call;
+Target: all plugins and registered sessions;
+Args:
+        ARG0, the listening port;
+        ARG1, the listener id;
+
+=item ircd_listener_del
+
+Emitted: on a successful del_listener() call;
+Target: all plugins and registered sessions;
+Args:
+        ARG0, the listening port;
+        ARG1, the listener id;
+
+=item ircd_daemon_server
+
+Emitted: when a server is introduced onto the network;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, server name;
+	ARG1, the name of the server that is introducing them;
+	ARG2, Hop count;
+	ARG3, Server description;
+
+=item ircd_daemon_squit
+
+Emitted: when a server quits the network;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the server name;
+
+=item ircd_daemon_nick
+
+Emitted: when a user is introduced onto the network or a user changes nick;
+Target: all plugins and registered sessions;
+Args: ( new nick ):
+	ARG0, nickname;
+	ARG1, hop count;
+	ARG2, Time Stamp (TS);
+	ARG3, umode;
+	ARG4, ident;
+	ARG5, hostname;
+	ARG6, servername;
+	ARG7, Real Name;
+
+Args: ( nick change ):
+	ARG0, the full user (nick!ident@host);
+	ARG1, the nickname they are changing to;
+
+=item ircd_daemon_umode
+
+Emitted: when a user performs a umode change;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the full user (nick!ident@host);
+	ARG1, the umode changes they made;
+
+=item ircd_daemon_quit
+
+Emitted: when a user quits or the server they are on squits;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the full user (nick!ident@host);
+	ARG1, Quit message;
+
+=item ircd_daemon_join
+
+Emitted: when a user joins a channel;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the full user (nick!ident@host);
+	ARG1, the channel name;
+
+=item ircd_daemon_part
+
+Emitted: when a user parts a channel;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the full user (nick!ident@host);
+	ARG1, the channel name;
+	ARG2, part message or nickname;
+
+=item ircd_daemon_kick
+
+Emitted: when a user is kicked from a channel;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the full user (nick!ident@host) of the kicker;
+	ARG1, the channel name;
+	ARG2, the nick of the kicked person;
+	ARG3, some pithy comment;
+
+=item ircd_daemon_mode
+
+Emitted: when a mode is changed on a channel;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the full user (nick!ident@host) or servername;
+	ARG1, Channel name;
+	ARG2 .. $#_: modes and arguments;
+
+=item ircd_daemon_topic
+
+Emitted: when a topic changes on a channel;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the full user (nick!ident@host);
+	ARG1, Channel name;
+	ARG2, the new topic;
+
+=item ircd_daemon_public
+
+Emitted: on channel targetted privmsg, a spoofed nick must be on the channel;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the full user (nick!ident@host);
+	ARG1, the channel name;
+	ARG2, what was said;
+
+=item ircd_daemon_privmsg
+
+Emitted: when someone sends a privmsg to a spoofed nick;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the full user (nick!ident@host);
+	ARG1, the spoofed nick targetted;
+	ARG2, what was said;
+
+=item ircd_daemon_notice
+
+Emitted: when someone sends a notice to a spoofed nick or channel;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the full user (nick!ident@host);
+	ARG1, the spoofed nick targetted or channel spoofed nick is on;
+	ARG2, what was said;
+
+=item ircd_daemon_invite
+
+Emitted: when someone invites a spoofed nick to a channel;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the full user (nick!ident@host);
+	ARG1, the spoofed nick targetted;
+	ARG2, the channel invited to;
+
+=item ircd_daemon_rehash
+
+Emitted: when an oper issues REHASH command;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the full user (nick!ident@host);
+
+=item ircd_daemon_die
+
+Emitted: when an oper issues DIE command;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the full user (nick!ident@host);
+
+Note: the component will shutdown, this is a feature;
+
+=item ircd_daemon_gline
+
+Emitted: when an oper issues GLINE command;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the full user (nick!ident@host);
+	ARG1, user mask;
+	ARG2, host mask;
+	ARG3, Reason;
+
+=item ircd_daemon_kline
+
+Emitted: when an oper issues KLINE command;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the full user (nick!ident@host);
+	ARG1, target for the KLINE;
+	ARG2, duration in seconds;
+	ARG3, user mask;
+	ARG4, host mask;
+	ARG5, Reason;
+
+=item ircd_daemon_rkline
+
+Emitted: when an oper issues RKLINE command;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the full user (nick!ident@host);
+	ARG1, target for the RKLINE;
+	ARG2, duration in seconds;
+	ARG3, user mask;
+	ARG4, host mask;
+	ARG5, Reason;
+
+=item ircd_daemon_unkline
+
+Emitted: when an oper UNKLINEs a KLINE;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the full user (nick!ident@host);
+	ARG1, target for the UNKLINE;
+	ARG2, user mask;
+	ARG3, host mask;
+
+=back
 
 =head1 PLUGIN SYSTEM
 
