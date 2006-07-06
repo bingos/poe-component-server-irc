@@ -34,7 +34,7 @@ sub _load_our_plugins {
   my $self = shift;
   $poe_kernel->state( 'add_spoofed_nick', $self );
   $poe_kernel->state( 'del_spoofed_nick', $self );
-  $poe_kernel->state( "daemon_cmd_$_", $self, '_spoofed_command' ) for qw(join part mode nick privmsg notice gline kline unkline rkline);
+  $poe_kernel->state( "daemon_cmd_$_", $self, '_spoofed_command' ) for qw(join part mode kick topic nick privmsg notice gline kline unkline rkline);
 }
 
 sub IRCD_listener_add {
@@ -3820,8 +3820,10 @@ sub configure {
   $self->{config}->{CREATED} = time();
   $self->{config}->{CASEMAPPING} = 'rfc1459';
   $self->{config}->{SERVERNAME} = 'poco.server.irc' unless $self->{config}->{SERVERNAME};
+  $self->{config}->{SERVERNAME} =~ s/[^a-zA-Z0-9\-.]//g;
+  $self->{config}->{SERVERNAME} .= '.' unless $self->{config}->{SERVERNAME} =~ /\./;
   $self->{config}->{SERVERDESC} = 'Poco? POCO? POCO!' unless $self->{config}->{SERVERDESC};
-  $self->{config}->{VERSION} = ref ( $self ) . '-' . $VERSION unless ( $self->{config}->{VERSION} );
+  $self->{config}->{VERSION} = ref ( $self ) . '-' . $VERSION unless $self->{config}->{VERSION};
   $self->{config}->{NETWORK} = 'poconet' unless $self->{config}->{NETWORK};
   $self->{config}->{HOSTLEN} = 63 unless ( defined ( $self->{config}->{HOSTLEN} ) and $self->{config}->{HOSTLEN} > 63 );
   $self->{config}->{NICKLEN} = 9 unless ( defined ( $self->{config}->{NICKLEN} ) and $self->{config}->{NICKLEN} > 9 );
@@ -4523,21 +4525,22 @@ Adds peer servers that we will allow to connect to us and who we will connect to
 	  that we will connect to;
   'raddress', the remote address to connect to, implies 'type' eq 'r';
   'ipmask', either a scalar ipmask or an arrayref of Net::Netmask objects;
+  'auto', if set to true value will automatically connect to remote server if type is 'r';
 
 =item del_peer
 
-Takes a single argument, the peer to remove.
+Takes a single argument, the peer to remove. This does not disconnect the said peer if it is currently connected.
 
 =item add_auth
 
-By default the IRCd allows any user@host to connect the server without a password. Configuring auths enables you to
-control, who can connect and set passwords.
+By default the IRCd allows any user@host to connect to the server without a password. Configuring auths enables you to
+control who can connect and set passwords required to connect.
 
 Takes a number of parameters:
 
   'mask', a user@host or user@ipaddress mask to match against, mandatory;
-  'password', if specified any matching mask must provide this to connect;
-  'spoof', if specified any matching mask will have their hostname changed to this;
+  'password', if specified any client matching the mask must provide this to connect;
+  'spoof', if specified any client matching the mask will have their hostname changed to this;
   'no_tilde', if specified the '~' prefix is removed from their username;
 
 Auth masks are processed in order of addition.
@@ -4717,6 +4720,138 @@ Note: spoofed nicks are currently only really functional for use as IRC services
 
 Takes a single mandatory argument, the spoofed nickname to remove. Optionally, you may
 specify a quit message for the spoofed nick.
+
+=back
+
+The following input events are for the benefit of spoofed nicks. All require a nickname
+of a spoofed nick as the first argument. 
+
+=over
+
+=item daemon_cmd_join
+
+Takes two arguments, a spoofed nick and a channel name to join.
+
+=item daemon_cmd_part
+
+Takes two arguments, a spoofed nick and a channel name to part from.
+
+=item daemon_cmd_mode
+
+Takes at least three arguments, a spoofed nick, a channel and a channel mode to apply.
+Additional arguments are parameters for the channel modes.
+
+=item daemon_cmd_kick
+
+Takes at least three arguments, a spoofed nick, a channel name and the nickname of a 
+user to kick from that channel. You may supply a fourth argument which will be the 
+kick comment.
+
+=item daemon_cmd_topic
+
+Takes three arguments, a spoofed nick, a channel name and the topic to set on that 
+channel. If the third argument is an empty string then the channel topic will be unset.
+
+=item daemon_cmd_nick
+
+Takes two arguments, a spoofed nick and a new nickname to change to.
+
+=item daemon_cmd_gline
+
+Takes three arguments, a spoofed nick, a user@host mask to gline and a reason for the
+gline.
+
+=item daemon_cmd_kline
+
+Takes a number of arguments depending on where the KLINE is to be applied and for how long:
+
+To set a permanent KLINE:
+
+  $poe_kernel->post( 'ircd', 
+		     'daemon_cmd_kline', 
+		     $spoofed_nick,
+		     $nick || $user_host_mask,
+		     $reason,
+  );
+
+To set a temporary 10 minute KLINE:
+
+  $poe_kernel->post( 'ircd', 
+		     'daemon_cmd_kline', 
+		     $spoofed_nick,
+		     10,
+		     $nick || $user_host_mask,
+		     $reason,
+  );
+
+To set a temporary 10 minute KLINE on all servers:
+
+  $poe_kernel->post( 'ircd', 
+		     'daemon_cmd_kline', 
+		     $spoofed_nick,
+		     10,
+		     $nick || $user_host_mask,
+		     'on',
+		     '*',
+		     $reason,
+  );
+
+=item daemon_cmd_unkline
+
+Removes a KLINE as indicated by the user@host mask supplied. 
+
+To remove a KLINE:
+
+  $poe_kernel->post( 'ircd', 
+		     'daemon_cmd_unkline', 
+		     $spoofed_nick,
+		     $user_host_mask,
+  );
+
+To remove a KLINE from all servers:
+
+  $poe_kernel->post( 'ircd', 
+		     'daemon_cmd_unkline', 
+		     $spoofed_nick,
+		     $user_host_mask,
+		     'on',
+		     '*',
+  );
+
+=item daemon_cmd_rkline
+
+Used to set a regex based KLINE. The regex given must be based on a user@host mask.
+
+To set a permanent RKLINE:
+
+  $poe_kernel->post( 'ircd', 
+		     'daemon_cmd_rkline', 
+		     $spoofed_nick,
+		     '^.*$@^(yahoo|google|microsoft)\.com$',
+		     $reason,
+  );
+
+To set a temporary 10 minute RKLINE:
+
+  $poe_kernel->post( 'ircd', 
+		     'daemon_cmd_rkline', 
+		     $spoofed_nick,
+		     10,
+		     '^.*$@^(yahoo|google|microsoft)\.com$',
+		     $reason,
+  );
+
+To set a temporary 10 minute RKLINE on all servers:
+
+  $poe_kernel->post( 'ircd', 
+		     'daemon_cmd_kline', 
+		     $spoofed_nick,
+		     10,
+		     '^.*$@^(yahoo|google|microsoft)\.com$',
+		     'on',
+		     '*',
+		     $reason,
+  );
 
 =back
 
@@ -4950,6 +5085,227 @@ Args:
 =back
 
 =head1 PLUGIN SYSTEM
+
+Plugins are a way of handling output events from the component with plugin object
+handlers that are loaded and processed within the component event dispatch system.
+
+Events are processed with the dispatch system, first by plugin handlers within the 
+component itself, then by loaded plugins, then dispatched to registered sessions.
+
+The general architecture of using the plugins should be:
+
+	# Import the stuff...
+	use POE;
+	use POE::Component::Server::IRC;
+	use POE::Component::Server::IRC::Plugin::ExamplePlugin;
+
+	# Create the IRC server here
+	my $irc = POE::Component::Server::IRC->spawn() or die 'Nooo!';
+
+	# Create our session here
+	POE::Session->create( ... );
+
+	# Create the plugin
+	# Of course it could be something like $plugin = MyPlugin->new();
+	my $plugin = POE::Component::Server::IRC::Plugin::ExamplePlugin->new( ... );
+
+	# Hook it up!
+	$irc->plugin_add( 'ExamplePlugin', $plugin );
+
+	# OOPS, we lost the plugin object!
+	my $pluginobj = $irc->plugin_get( 'ExamplePlugin' );
+
+	# We want a list of plugins and objects
+	my $hashref = $irc->plugin_list();
+
+	# Oh! We want a list of plugin aliases.
+	my @aliases = keys %{ $irc->plugin_list() };
+
+	# Ah, we want to remove the plugin
+	$plugin = $irc->plugin_del( 'ExamplePlugin' );
+
+The plugins themselves will conform to the standard API described here:
+
+	# Import the constants
+	use POE::Component::Server::IRC::Plugin qw( :ALL );
+
+	# Our constructor
+	sub new {
+		...
+	}
+
+	# Required entry point for POE::Component::Server::IRC
+	sub PCSI_register {
+		my( $self, $irc ) = @_;
+
+		# Register events we are interested in
+		$irc->plugin_register( $self, 'SERVER', qw(all) );
+
+		# Return success
+		return 1;
+	}
+
+	# Required exit point for POE::Component::Server::IRC
+	sub PCSI_unregister {
+		my( $self, $irc ) = @_;
+
+		# PCSI will automatically unregister events for the plugin
+
+		# Do some cleanup...
+
+		# Return success
+		return 1;
+	}
+
+	# Registered events will be sent to methods starting with IRC_
+	# If the plugin registered for SERVER - daemon_join
+	sub IRCD_daemon_join {
+		my( $self, $irc, @args ) = @_;
+		
+		# @args will be an array of scalar references.
+
+		# Return an exit code
+		return PCSI_EAT_NONE;
+	}
+
+	# Default handler for events that do not have a corresponding plugin method defined.
+	sub _default {
+		my( $self, $irc, $event ) = splice @_, 0, 3;
+
+		print "Default called for $event\n";
+
+		# Return an exit code
+		return PCSI_EAT_NONE;
+	}
+
+Available methods to use on the POE::Component::Server::IRC object:
+
+=over
+
+=item plugin_add
+
+Accepts two arguments:
+
+  The alias for the plugin
+  The actual plugin object
+
+The alias is there for the user to refer to it, as it is possible to have multiple
+plugins of the same kind active in one PCSI object.
+
+This method will call $plugin->PCSI_register( $ircd )
+
+Returns 1 if plugin was initialized, undef if not.
+
+=item plugin_get
+
+Accepts one argument:
+  The alias for the plugin
+
+Returns the plugin object if it was found, undef if not.
+
+=item plugin_del
+
+Accepts one argument:
+  The alias for the plugin or the plugin object itself
+
+This method will call $plugin->PCSI_unregister( $ircd )
+
+Returns the plugin object if the plugin was removed, undef if not.
+
+=item plugin_list
+
+Has no arguments.
+
+Returns a hashref of plugin objects, keyed on alias, or an empty list if there are no
+plugins loaded.
+
+=back
+
+The following methods are called on the PCSI object from within the plugin object:
+
+=item plugin_register
+
+Accepts the following arguments:
+  The plugin object
+  The type of the hook ( 'SERVER' )
+  The event name(s) to watch
+
+The event names can be as many as possible, or an arrayref. They correspond
+to the ircd_* events listed in POE::Component::Server::IRC, 
+and naturally, arbitrary events too.
+
+You do not need to supply events with ircd_ in front of them, just the names.
+
+It is possible to register for all events by specifying 'all' as an event.
+
+Returns 1 if everything checked out fine, undef if something's seriously wrong
+
+=item plugin_unregister
+
+Accepts the following arguments:
+  The plugin object
+  The type of the hook ( 'SERVER' )
+  The event name(s) to unwatch
+
+The event names can be as many as possible, or an arrayref. They correspond
+to the ircd_* events listed in POE::Component::Server::IRC, and naturally, 
+arbitrary events too.
+
+You do not need to supply events with ircd_ in front of them, just the names.
+
+Returns 1 if all the event name(s) was unregistered, undef if some was not found
+
+=back
+
+The following two OUTPUT events are generated on plugin registration/unregistration:
+
+=over
+
+=item ircd_plugin_add
+
+This event will be triggered after a plugin is added. It receives two arguments, the first being
+the plugin name, and the second being the plugin object.
+
+=item ircd_plugin_del
+
+This event will be triggered after a plugin is deleted. It receives two arguments, the first being
+the plugin name, and the second being the plugin object.
+
+=back
+
+Plugin handler methods receive the PCSI object as their first argument. The remaining 
+arguments are scalar references to the event arguments.
+
+The exit code of plugin handlers is important. Your handlers *must* return one of the
+following:
+
+=over
+
+=item PCSI_EAT_NONE
+
+	This means the event will continue to be processed by remaining plugins and
+	finally, sent to interested sessions that registered for it.
+
+=item PCSI_EAT_CLIENT
+
+	This means the event will continue to be processed by remaining plugins but
+	it will not be sent to any sessions that registered for it.
+
+=item PCSI_EAT_PLUGIN
+
+	This means the event will not be processed by remaining plugins, it will go
+	straight to interested sessions.
+
+=item PCSI_EAT_ALL
+
+	This means the event will be completely discarded, no plugin or session will see it.
+
+=back
+
+The above constants can be included in your plugin packages by importing the :ALL tag
+from POE::Component::Server::IRC::Plugin as so:
+
+  use POE::Component::Server::IRC::Plugin qw(:ALL);
 
 =head1 AUTHOR
 
