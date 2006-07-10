@@ -8,7 +8,9 @@ use Data::Dumper;
 $Data::Dumper::Indent = 1;
 $|=1;
 
-my $pocosi = POE::Component::Server::IRC->spawn( auth => 1, options => { trace => 0 }, plugin_debug => 0, debug => 0, config => { servername => 'logserv.gumbynet.org.uk' }, raw_events => 0 );
+my $debug = 0;
+
+my $pocosi = POE::Component::Server::IRC->spawn( auth => 1, options => { trace => 0 }, plugin_debug => 0, debug => $debug, config => { servername => 'logserv.gumbynet.org.uk' }, raw_events => 0 );
 
 POE::Session->create(
 		package_states => [ 
@@ -78,6 +80,7 @@ sub sig_hup {
 
 sub ircd_daemon_join {
   my ($kernel,$heap) = @_[KERNEL,HEAP];
+  $kernel->call( $_[SESSION], '_default', $_[STATE], [ @_[ARG0..$#_] ] );
   my $nick = ( split /!/, $_[ARG0] )[0];
   #return if $nick eq 'OperServ';
   return unless $heap->{ircd}->state_user_is_operator($nick);
@@ -89,15 +92,21 @@ sub ircd_daemon_join {
 
 sub ircd_daemon_privmsg {
   my ($kernel,$heap) = @_[KERNEL,HEAP];
+  $kernel->call( $_[SESSION], '_default', $_[STATE], [ @_[ARG0..$#_] ] );
   my $nick = ( split /!/, $_[ARG0] )[0];
   return unless $heap->{ircd}->state_user_is_operator($nick);
   my $target = $_[ARG1];
   $heap->{ircd}->yield( 'daemon_cmd_privmsg', $target, $nick, $_[ARG2] );
+  if ( my ($chan) = $_[ARG2] =~ /^clear (.*)$/i ) {
+    $chan =~ s/\s+$//g;
+    $heap->{ircd}->yield( 'daemon_cmd_sjoin', $target, $chan );
+  }
   undef;
 }
 
 sub ircd_daemon_invite {
   my ($kernel,$heap,$who,$channel) = @_[KERNEL,HEAP,ARG1,ARG2];
+  $kernel->call( $_[SESSION], '_default', $_[STATE], [ @_[ARG0..$#_] ] );
   $heap->{ircd}->yield( 'daemon_cmd_join', $who, $channel );
   undef;
 }
