@@ -152,8 +152,8 @@ sub _default {
 }
 
 sub _auth_finished {
-  my ($self) = shift;
-  my ($conn_id) = shift || return undef;
+  my $self = shift;
+  my $conn_id = shift || return undef;
   return unless $self->_connection_exists( $conn_id );
   return $self->{state}->{conns}->{ $conn_id }->{auth};
 }
@@ -1039,7 +1039,6 @@ sub _daemon_cmd_kill {
      }
   }
   return @{ $ref } if wantarray();
-  return @{ $ref } if wantarray();
   return $ref;
 }
 
@@ -1208,7 +1207,7 @@ sub _daemon_cmd_summon {
   my $nick = shift || return;
   my $server = $self->server_name();
   my $ref = [ ];
-  push ( @{ $ref }, '445' );
+  push @{ $ref }, '445';
   return @{ $ref } if wantarray();
   return $ref;
 }
@@ -1407,21 +1406,21 @@ sub _daemon_cmd_list {
 	@chans = map { $self->_state_chan_name($_) } keys %{ $self->{state}->{chans} };
     }
     my $last = pop @{ $args };
-    if ( $count and $last !~ /^(\x23|\x26|\x2B)/ and !$self->state_peer_exists( $last ) ) {
+    if ( $count and $last !~ /^(\x23|\x26)/ and !$self->state_peer_exists( $last ) ) {
         push @{ $ref }, [ '401', $last ];
         last SWITCH;
     }
-    if ( $count and $last !~ /^(\x23|\x26|\x2B)/ and ( uc $last ne uc $server ) ) {
+    if ( $count and $last !~ /^(\x23|\x26)/ and ( uc $last ne uc $server ) ) {
         $self->{ircd}->send_output( { prefix => $self->state_user_full( $nick ), command => 'LIST', params => [ @{ $args }, $self->_state_peer_name( $last ) ] }, $self->_state_peer_route( $last ) );
         last SWITCH;
     }
-    if ( $count and $last !~ /^(\x23|\x26|\x2B)/ and scalar @{ $args } == 0 ) {
+    if ( $count and $last !~ /^(\x23|\x26)/ and scalar @{ $args } == 0 ) {
 	@chans = map { $self->_state_chan_name($_) } keys %{ $self->{state}->{chans} };
     }
-    if ( $count and $last !~ /^(\x23|\x26|\x2B)/ and scalar @{ $args } == 1 ) {
+    if ( $count and $last !~ /^(\x23|\x26)/ and scalar @{ $args } == 1 ) {
         $last = pop @{ $args };
     }
-    if ( $count and $last =~ /^(\x23|\x26|\x2B)/ ) {
+    if ( $count and $last =~ /^(\x23|\x26)/ ) {
 	@chans = split /,/, $last;
     }
     push @{ $ref }, { prefix => $server, command => '321', params => [ $nick, 'Channel', 'Users  Name' ] };
@@ -1458,22 +1457,22 @@ sub _daemon_cmd_names {
 	$query = '*';
     }
     my $last = pop @{ $args };
-    if ( $count and $last !~ /^(\x23|\x26|\x2B)/ and !$self->state_peer_exists( $last ) ) {
+    if ( $count and $last !~ /^(\x23|\x26)/ and !$self->state_peer_exists( $last ) ) {
 	push @{ $ref }, [ '401', $last ];
 	last SWITCH;
     }
-    if ( $count and $last !~ /^(\x23|\x26|\x2B)/ and ( uc $last ne uc $server ) ) {
+    if ( $count and $last !~ /^(\x23|\x26)/ and ( uc $last ne uc $server ) ) {
 	$self->{ircd}->send_output( { prefix => $nick, command => 'NAMES', params => [ @{ $args }, $self->_state_peer_name( $last ) ] }, $self->_state_peer_route( $last ) );
 	last SWITCH;
     }
-    if ( $count and $last !~ /^(\x23|\x26|\x2B)/ and scalar @{ $args } == 0 ) {
+    if ( $count and $last !~ /^(\x23|\x26)/ and scalar @{ $args } == 0 ) {
 	@chans = $self->state_user_chans( $nick );
 	$query = '*';
     }
-    if ( $count and $last !~ /^(\x23|\x26|\x2B)/ and scalar @{ $args } == 1 ) {
+    if ( $count and $last !~ /^(\x23|\x26)/ and scalar @{ $args } == 1 ) {
 	$last = pop @{ $args };
     }
-    if ( $count and $last =~ /^(\x23|\x26|\x2B)/ ) {
+    if ( $count and $last =~ /^(\x23|\x26)/ ) {
 	my ($chan) = grep { $_ &&
 			    $self->state_chan_exists( $_ ) && 
 			    $self->state_is_chan_member( $nick, $_ ) 
@@ -1648,6 +1647,7 @@ sub _daemon_cmd_mode {
   my $nick = shift || return;
   my $chan = shift;
   my $server = $self->server_name();
+  my $maxmodes = $self->server_config('MODES');
   my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
   SWITCH: {
     if ( !$self->state_chan_exists( $chan ) ) {
@@ -1656,10 +1656,6 @@ sub _daemon_cmd_mode {
     }
     my $record = $self->{state}->{chans}->{ u_irc $chan };
     $chan = $record->{name};
-    if ( $chan =~ /^\x2B/ ) {
-	push @{ $ref }, [ '477', $chan ];
-	last SWITCH;
-    }
     if ( !$count and !$self->state_is_chan_member( $nick, $chan ) ) {
 	push @{ $ref }, { prefix => $server, command => '324', params => [ $nick, $chan, '+' . $record->{mode} ], colonify => 0 };
 	push @{ $ref }, { prefix => $server, command => '329', params => [ $nick, $chan, $record->{ts} ], colonify => 0 };
@@ -1673,22 +1669,24 @@ sub _daemon_cmd_mode {
     my $unknown = 0;
     my $notop = 0;
     my $nick_is_op = $self->state_is_chan_op( $nick, $chan );
+    my $nick_is_hop = $self->state_is_chan_hop( $nick, $chan );
     my $reply; my @reply_args;
     my $parsed_mode = parse_mode_line( @{ $args } );
-    while( my $mode = shift ( @{ $parsed_mode->{modes} } ) ) {
+    my $mode_count = 0;
+    while( my $mode = shift @{ $parsed_mode->{modes} } ) {
       if ( $mode !~ /[eIbklimnpstohv]/ ) {
 	push @{ $ref }, [ '472', ( split //, $mode )[1] ] unless $unknown;
 	$unknown++;
 	next;
       }
       my $arg;
-      $arg = shift ( @{ $parsed_mode->{args} } ) if ( $mode =~ /^(\+[ohvklbIe]|-[ohvbIe])/ );
+      $arg = shift @{ $parsed_mode->{args} } if $mode =~ /^(\+[ohvklbIe]|-[ohvbIe])/;
       if ( $mode =~ /(\+|-)b/ and !defined $arg ) {
 	push @{ $ref }, { prefix => $server, command => '367', params => [ $nick, $chan, @{ $record->{bans}->{$_} } ] } for keys %{ $record->{bans} };
 	push @{ $ref }, { prefix => $server, command => '368', params => [ $nick, $chan, 'End of Channel Ban List' ] };
 	next;
       }
-      if ( !$nick_is_op ) {
+      unless ( $nick_is_op or $nick_is_hop ) {
 	push @{ $ref }, [ '482', $chan ] unless $notop;
 	$notop++;
 	next;
@@ -1703,22 +1701,35 @@ sub _daemon_cmd_mode {
 	push @{ $ref }, { prefix => $server, command => '349', params => [ $nick, $chan, 'End of Channel Exception List' ] };
 	next;
       }
+      if ( !$nick_is_op and $nick_is_hop and $mode =~ /[op]/ ) {
+	push @{ $ref }, [ '482', $chan ] unless $notop;
+	$notop++;
+	next;
+      }
+      if ( !$nick_is_op and $nick_is_hop and $record->{mode} =~ /p/ and $mode =~ /h/ ) {
+	push @{ $ref }, [ '482', $chan ] unless $notop;
+	$notop++;
+	next;
+      }
       if ( ( $mode =~ /^(\+|-)([ohv])/ or $mode =~ /^\+[lk]/ ) and !defined $arg ) {
 	next;
       }
       if ( $mode =~ /^(\+|-)([ohv])/ and !$self->state_nick_exists($arg) ) {
+	next if ++$mode_count > $maxmodes;
 	push @{ $ref }, [ '401', $arg ];
 	next;
       }
       if ( $mode =~ /^(\+|-)([ohv])/ and !$self->state_is_chan_member( $arg, $chan ) ) {
+	next if ++$mode_count > $maxmodes;
 	push @{ $ref }, [ '441', $chan, (split /!/, $self->state_user_full( $arg ))[0] ];
 	next;
       }
       if ( my ($flag,$char) = $mode =~ /^(\+|-)([ohv])/ ) {
+	next if ++$mode_count > $maxmodes;
 	if ( $flag eq '+' and $record->{users}->{ u_irc $arg } !~ /$char/ ) {
 	  # Update user and chan record
 	  $arg = u_irc $arg;
-	  next if ( $mode eq '+h' and $record->{users}->{ $arg } =~ /o/ );
+	  next if $mode eq '+h' and $record->{users}->{ $arg } =~ /o/;
 	  if ( $char eq 'h' and $record->{users}->{ $arg } =~ /v/ ) {
 	     $record->{users}->{ $arg } =~ s/v//g;
 	     $reply .= '-v';
@@ -1745,6 +1756,7 @@ sub _daemon_cmd_mode {
 	next;
       }
       if ( $mode eq '+l' and $arg =~ /^\d+$/ and $arg > 0 ) {
+	next if ++$mode_count > $maxmodes;
 	$reply .= $mode;
 	push @reply_args, $arg;
 	$record->{mode} = join('', sort split //, $record->{mode} . 'l' ) unless $record->{mode} =~ /l/;
@@ -1758,6 +1770,7 @@ sub _daemon_cmd_mode {
 	next;
       }
       if ( $mode eq '+k' and $arg ) {
+	next if ++$mode_count > $maxmodes;
 	$reply .= $mode;
 	push @reply_args, $arg;
 	$record->{mode} = join('', sort split //, $record->{mode} . 'k' ) unless $record->{mode} =~ /k/;
@@ -1773,6 +1786,7 @@ sub _daemon_cmd_mode {
       }
       # Bans
       if ( my ($flag) = $mode =~ /(\+|-)b/ ) {
+	next if ++$mode_count > $maxmodes;
 	my $mask = parse_ban_mask( $arg );
 	my $umask = u_irc $mask;
 	if ( $flag eq '+' and !$record->{bans}->{ $umask } ) {
@@ -1789,6 +1803,7 @@ sub _daemon_cmd_mode {
       }
       # Invex
       if ( my ($flag) = $mode =~ /(\+|-)I/ ) {
+	next if ++$mode_count > $maxmodes;
 	my $mask = parse_ban_mask( $arg );
 	my $umask = u_irc $mask;
 	if ( $flag eq '+' and !$record->{invex}->{ $umask } ) {
@@ -1805,6 +1820,7 @@ sub _daemon_cmd_mode {
       }
       # Exceptions
       if ( my ($flag) = $mode =~ /(\+|-)e/ ) {
+	next if ++$mode_count > $maxmodes;
 	my $mask = parse_ban_mask( $arg );
 	my $umask = u_irc $mask;
 	if ( $flag eq '+' and !$record->{excepts}->{ $umask } ) {
@@ -2921,9 +2937,6 @@ sub _daemon_peer_mode {
     }
     my $record = $self->{state}->{chans}->{ u_irc $chan };
     $chan = $record->{name};
-    if ( $chan =~ /^\x2B/ ) {
-	last SWITCH;
-    }
     my $full;
     $full = $self->state_user_full( $nick ) if $self->state_nick_exists( $nick );
     my $reply; my @reply_args;
@@ -3946,6 +3959,7 @@ sub configure {
   $self->{config}->{PASSWDLEN} = 20 unless ( defined ( $self->{config}->{PASSWDLEN} ) and $self->{config}->{PASSWDLEN} > 20 );
   $self->{config}->{KEYLEN} = 23 unless ( defined ( $self->{config}->{KEYLEN} ) and $self->{config}->{KEYLEN} > 23 );
   $self->{config}->{MAXCHANNELS} = 15 unless ( defined ( $self->{config}->{MAXCHANNELS} ) and $self->{config}->{MAXCHANNELS} > 15 );
+  $self->{config}->{MODES} = 4 unless ( defined ( $self->{config}->{MODES} ) and $self->{config}->{MODES} > 4 );
   $self->{config}->{MAXTARGETS} = 4 unless ( defined ( $self->{config}->{MAXTARGETS} ) and $self->{config}->{MAXTARGETS} > 4 );
   $self->{config}->{MAXBANS} = 30 unless ( defined ( $self->{config}->{MAXBANS} ) and $self->{config}->{MAXBANS} > 30 );
   $self->{config}->{MAXBANLENGTH} = 1024 unless ( defined ( $self->{config}->{MAXBANLENGTH} ) and $self->{config}->{MAXBANLENGTH} < 1024 );
@@ -4033,7 +4047,7 @@ sub configure {
     CHANTYPES => '#&',
     PREFIX => '(ohv)@%+',
     CHANMODES => 'eIb,k,l,imnpst',
-    map { ( uc $_, $self->{config}->{$_} ) } qw(MAXCHANNELS MAXTARGETS MAXBANS NICKLEN TOPICLEN KICKLEN CASEMAPPING NETWORK),
+    map { ( uc $_, $self->{config}->{$_} ) } qw(MAXCHANNELS MAXTARGETS MAXBANS NICKLEN TOPICLEN KICKLEN CASEMAPPING NETWORK MODES),
   };
 
   $self->{config}->{capab} = [ qw(QS EX IE HOPS UNKLN KLN GLN EOB) ];
@@ -4245,9 +4259,6 @@ sub daemon_server_mode {
     }
     my $record = $self->{state}->{chans}->{ u_irc $chan };
     $chan = $record->{name};
-    if ( $chan =~ /^\x2B/ ) {
-	last SWITCH;
-    }
     my $full = $server;
     my $parsed_mode = parse_mode_line( @{ $args } );
     while( my $mode = shift ( @{ $parsed_mode->{modes} } ) ) {
@@ -4973,6 +4984,13 @@ To set a temporary 10 minute RKLINE on all servers:
 		     '*',
 		     $reason,
   );
+
+=item daemon_cmd_sjoin
+
+Takes two arguments a spoofed nickname and an existing channel name. This command will then
+manipulate the channel timestamp to clear all modes on that channel, including existing
+channel operators, reset the channel mode to '+nt', the spoofed nick will then join the 
+channel and gain channel ops.
 
 =back
 
