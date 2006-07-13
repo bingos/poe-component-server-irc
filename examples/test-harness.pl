@@ -8,7 +8,7 @@ use Data::Dumper;
 $Data::Dumper::Indent = 1;
 $|=1;
 
-my $debug = 0;
+my $debug = 1;
 
 my $pocosi = POE::Component::Server::IRC->spawn( auth => 1, options => { trace => 0 }, plugin_debug => 0, debug => $debug, config => { servername => 'logserv.gumbynet.org.uk' }, raw_events => 0 );
 

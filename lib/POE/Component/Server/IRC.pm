@@ -2757,11 +2757,11 @@ sub _daemon_peer_sjoin {
 	push @{ $args }, $nicks;
 	my $uchan = u_irc $chanrec->{name};
 	foreach my $nick ( split /\s+/, $nicks ) {
-	  my $unick = u_irc $nick;
 	  my $umode = '';
 	  $umode .= 'o' if $nick =~ s/\@//g;
 	  $umode = 'h' if $nick =~ s/\%//g;
 	  $umode .= 'v' if $nick =~ s/\+//g;
+	  my $unick = u_irc $nick;
 	  $chanrec->{users}->{ $unick } = $umode;
 	  $self->{state}->{users}->{ $unick }->{chans}->{ $uchan } = $umode;
 	  $self->{ircd}->send_event( "daemon_join", $self->state_user_full( $nick ), $chan );
