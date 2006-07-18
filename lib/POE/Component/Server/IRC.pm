@@ -112,7 +112,7 @@ sub IRCD_disconnected {
     }
     if ( $self->_connection_is_peer( $conn_id ) ) {
 	my $peer = $self->{state}->{conns}->{ $conn_id }->{name};
-	$self->{ircd}->send_output( @{ $self->_daemon_peer_squit( $conn_id, $peer, $self->server_name() ) } );
+	$self->{ircd}->send_output( @{ $self->_daemon_peer_squit( $conn_id, $peer, $errstr ) } );
 	delete $self->{state}->{conns}->{ $conn_id };
 	last SWITCH;
     }
@@ -338,10 +338,7 @@ sub _cmd_from_peer {
     my $method = '_daemon_peer_' . lc $cmd;
     if ( $cmd eq 'SQUIT' and !$prefix ) {
 	$self->_daemon_peer_squit( $conn_id, @{ $params } );
-	$self->_send_output_to_client( $conn_id => $prefix => ( ref $_ eq 'ARRAY' ? @{ $_ } : $_ ) ) for $self->_daemon_cmd_squit( $prefix, @{ $params } );
-	last SWITCH;
-    }
-    if ( $cmd eq 'SQUIT' and !$prefix ) {
+	#$self->_send_output_to_client( $conn_id => $prefix => ( ref $_ eq 'ARRAY' ? @{ $_ } : $_ ) ) for $self->_daemon_cmd_squit( $prefix, @{ $params } );
 	last SWITCH;
     }
     if ( $cmd =~ /\d{3}/ ) {
@@ -356,7 +353,7 @@ sub _cmd_from_peer {
 	$self->_daemon_peer_message( $conn_id, $prefix, $cmd, @{ $params } );
 	last SWITCH;
     }
-    if ( $cmd =~ /^(WHOIS|VERSION|TIME|NAMES|LINKS|ADMIN|INFO|MOTD)$/i ) {
+    if ( $cmd =~ /^(WHOIS|VERSION|TIME|NAMES|LINKS|ADMIN|INFO|MOTD|SQUIT)$/i ) {
 	my $client_method = '_daemon_cmd_' . lc $cmd;
 	$self->_send_output_to_client( $conn_id => $prefix => ( ref $_ eq 'ARRAY' ? @{ $_ } : $_ ) ) for $self->$client_method( $prefix, @{ $params } );
 	last SWITCH;
@@ -741,13 +738,15 @@ sub _daemon_cmd_squit {
 	last SWITCH;
      }
      my $peer = uc $args->[0];
+     my $reason = $args->[1] || 'No Reason';
      $args->[0] = $self->_state_peer_name( $peer );
+     $args->[1] = $reason;
      unless ( scalar grep { $_ eq $peer } keys %{ $self->{state}->{peers}->{ uc $server }->{peers} } ) {
 	$self->{ircd}->send_output( { prefix => $nick, command => 'SQUIT', params => $args }, $self->_state_peer_route( $args->[0] ) );
 	last SWITCH;
      }
      my $conn_id = $self->_state_peer_route( $peer );
-     $self->{ircd}->disconnect( $conn_id );
+     $self->{ircd}->disconnect( $conn_id, $reason );
      $self->{ircd}->send_output( { command => 'ERROR', params => [ join ' ', 'Closing Link:', $self->client_ip( $conn_id ), $args->[0], "($nick)" ] }, $conn_id );
   }
   return @{ $ref } if wantarray();
@@ -2251,27 +2250,37 @@ sub _daemon_peer_squit {
   my $peer_id = shift || return;
   my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
   return unless $self->state_peer_exists( $args->[0] );
-  $self->{ircd}->send_output( { command => 'SQUIT', params => [ $self->_state_peer_name( $args->[0] ), $self->server_name() ] }, grep { $_ ne $peer_id } $self->_state_connected_peers() );
-  $self->{ircd}->send_event( "daemon_squit", $self->_state_peer_name( $args->[0] ) );
-  foreach my $nick ( $self->_state_server_squit( $args->[0] ) ) {
-    my $output = { prefix => $self->state_user_full( $nick ), command => 'QUIT', params => [ join ' ', reverse @{ $args } ] };
-    my $common = { };
-    foreach my $uchan ( $self->state_user_chans( $nick ) ) {
-      $uchan = u_irc $uchan;
-      delete $self->{state}->{chans}->{ $uchan }->{users}->{ $nick };
-      foreach my $user ( $self->state_chan_list( $uchan ) ) {
-	next unless $self->_state_is_local_user( $user );
-	$common->{ $user } = $self->_state_user_route( $user );
-      }
-      unless ( scalar keys %{ $self->{state}->{chans}->{ $uchan  }->{users} } ) {
-	delete $self->{state}->{chans}->{ $uchan  };
-      }
+  SWITCH: {
+    if ( $peer_id ne $self->_state_peer_route( $args->[0] ) ) {
+      $self->{ircd}->send_output( { command => 'SQUIT', params => $args }, $self->_state_peer_route( $args->[0] ) );
+      last SWITCH;
     }
-    $self->{ircd}->send_output( $output, values %{ $common } );
-    $self->{ircd}->send_event( "daemon_quit", $output->{prefix}, $output->{params}->[0] );
-    my $record = delete $self->{state}->{users}->{ $nick };
-    $self->{state}->{stats}->{ops_online}-- if $record->{umode} =~ /o/;
-    $self->{state}->{stats}->{invisible}-- if $record->{umode} =~ /i/;
+    if ( $peer_id eq $self->_state_peer_route( $args->[0] ) ) {
+      $self->{ircd}->send_output( { command => 'SQUIT', params => $args }, grep { $_ ne $peer_id } $self->_state_connected_peers() );
+      $self->{ircd}->send_event( "daemon_squit", @{ $args } );
+      my $quit_msg = join ' ', $self->_state_peer_for_peer( $args->[0] ), $args->[0];
+      foreach my $nick ( $self->_state_server_squit( $args->[0] ) ) {
+        my $output = { prefix => $self->state_user_full( $nick ), command => 'QUIT', params => [ $quit_msg ] };
+        my $common = { };
+        foreach my $uchan ( $self->state_user_chans( $nick ) ) {
+          $uchan = u_irc $uchan;
+          delete $self->{state}->{chans}->{ $uchan }->{users}->{ $nick };
+          foreach my $user ( $self->state_chan_list( $uchan ) ) {
+	    next unless $self->_state_is_local_user( $user );
+	    $common->{ $user } = $self->_state_user_route( $user );
+          }
+          unless ( scalar keys %{ $self->{state}->{chans}->{ $uchan  }->{users} } ) {
+	    delete $self->{state}->{chans}->{ $uchan  };
+          }
+        }
+        $self->{ircd}->send_output( $output, values %{ $common } );
+        $self->{ircd}->send_event( "daemon_quit", $output->{prefix}, $output->{params}->[0] );
+        my $record = delete $self->{state}->{users}->{ $nick };
+        $self->{state}->{stats}->{ops_online}-- if $record->{umode} =~ /o/;
+        $self->{state}->{stats}->{invisible}-- if $record->{umode} =~ /i/;
+      }
+      last SWITCH;
+    }
   }
   return @{ $ref } if wantarray();
   return $ref;
@@ -2516,6 +2525,7 @@ sub _daemon_peer_server {
 		   desc => ( $args->[2] || '' ),
 		   route_id => $peer_id,
 		   type => 'r',
+		   peer => $prefix,
 		   peers => { },
 		   users => { },
     		 };
@@ -3495,7 +3505,7 @@ sub _state_send_burst {
 	  $buffer[1] = $thing;
 	}
       }
-      push @output_modes, { prefix => $server, command => 'MODE', params => [ $chanrec->{name}, $buffer[0], split /\s+/, $buffer[1] ], colonify => 0 };
+      push @output_modes, { prefix => $server, command => 'MODE', params => [ $chanrec->{name}, $buffer[0], split /\s+/, $buffer[1] ], colonify => 0 } if $buffer[0];
     } 
     $self->{ircd}->send_output( $_, $conn_id ) for @output_modes;
   }
@@ -3540,6 +3550,14 @@ sub _state_server_links {
   return $ref;
 }
 
+sub _state_peer_for_peer {
+  my $self = shift;
+  my $peer = shift || return;
+  return unless $self->state_peer_exists( $peer );
+  $peer = uc $peer;
+  return $self->{state}->{peers}->{ $peer }->{peer};
+}
+
 sub _state_server_squit {
   my $self = shift;
   my $peer = shift || return;
@@ -3560,17 +3578,20 @@ sub _state_register_peer {
   my $self = shift;
   my $conn_id = shift || return;
   return unless $self->_connection_exists( $conn_id );
+  my $server = $self->server_name();
   my $record = $self->{state}->{conns}->{ $conn_id };
   $self->_state_send_credentials( $conn_id, $record->{name} ) unless $record->{cntr};
   $record->{burst} = $record->{registered} = 1;
   $record->{type} = 'p';
   $record->{route_id} = $conn_id;
+  $record->{peer} = $server;
   $record->{users} = { };
-  $self->{state}->{peers}->{ uc $self->server_name() }->{peers}->{ uc $record->{name} } = $record;
+  $record->{peers} = { };
+  $self->{state}->{peers}->{ uc $server }->{peers}->{ uc $record->{name} } = $record;
   $self->{state}->{peers}->{ uc $record->{name} } = $record;
   $self->{ircd}->antiflood( $conn_id => 0 );
-  $self->{ircd}->send_output( { prefix => $self->server_name(), command => 'SERVER', params => [ $record->{name}, $record->{hops} + 1, $record->{desc} ] }, grep { $_ ne $conn_id } $self->_state_connected_peers() );
-  $self->{ircd}->send_event( "daemon_server", $record->{name}, $self->server_name(), $record->{hops}, $record->{desc} );
+  $self->{ircd}->send_output( { prefix => $server, command => 'SERVER', params => [ $record->{name}, $record->{hops} + 1, $record->{desc} ] }, grep { $_ ne $conn_id } $self->_state_connected_peers() );
+  $self->{ircd}->send_event( "daemon_server", $record->{name}, $server, $record->{hops}, $record->{desc} );
   return 1;
 }
 
@@ -4656,6 +4677,7 @@ Adds peer servers that we will allow to connect to us and who we will connect to
   'type', the type of server, 'c' for a connecting server, 'r' for one
 	  that we will connect to;
   'raddress', the remote address to connect to, implies 'type' eq 'r';
+  'rport', the remote port to connect to, default is 6667;
   'ipmask', either a scalar ipmask or an arrayref of Net::Netmask objects;
   'auto', if set to true value will automatically connect to remote server if type is 'r';
 

@@ -138,11 +138,7 @@ sub irc_public {
 sub irc_join {
   my ($kernel, $sender, $who, $where) = @_[KERNEL, SENDER, ARG0, ARG1];
   my $nick = (split /!/, $who)[0];
-  my ($botcount) = $ARGV[2] || 10;
-
-  if ( $nick =~ /$botcount$/ ) {
-	$kernel->post ( $sender, 'privmsg', [ $where ], "Hi, $nick!" );
-  }
+  $kernel->post ( $sender, 'privmsg', $where, "Hi, $nick!" );
   undef;
 }
 

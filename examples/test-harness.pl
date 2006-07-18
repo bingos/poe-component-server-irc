@@ -44,6 +44,7 @@ sub _start {
   $heap->{ircd}->add_listener( port => 7667 );
   $heap->{ircd}->add_listener( port => 7668, auth => 0, antiflood => 0 );
   $heap->{ircd}->add_peer( name => 'irc2.gumbynet.org.uk', pass => 'op3rs3rv', rpass => 'op3rs3rv', type => 'r', raddress => '127.0.0.12', rport => 7666, auto => 1 );
+  $heap->{ircd}->add_peer( name => 'canker.gumbynet.org.uk', pass => 'op3rs3rv', rpass => 'op3rs3rv', type => 'c', ipmask => '192.168.1.87' );
   $heap->{ircd}->add_operator( { username => 'moo', password => 'fishdont' } );
   $heap->{ircd}->yield( 'add_spoofed_nick', { nick => 'OperServ', umode => 'oi', ircname => 'The OperServ bot' } );
   $heap->{ircd}->yield( 'add_spoofed_nick', { nick => 'ChanServ', umode => 'oi', ircname => 'The ChanServ bot' } );
