@@ -13,7 +13,6 @@ use POE;
 use POE::Component::Server::IRC::Common qw(:ALL);
 use POE::Component::Server::IRC::Plugin qw(:ALL);
 use Date::Format;
-use Data::Dumper;
 use vars qw($VERSION $REVISION);
 
 $VERSION = '0.99';
@@ -2142,6 +2141,7 @@ sub _daemon_cmd_umode {
   } else {
     my $set = ''; my $peer_ignore;
     my $parsed_mode = parse_mode_line( $umode );
+    my $route_id = $self->_state_user_route( $nick );
     while ( my $mode = shift ( @{ $parsed_mode->{modes} } ) ) {
 	next if $mode eq '+o';
 	my ($action,$char) = split //, $mode;
@@ -2152,6 +2152,9 @@ sub _daemon_cmd_umode {
 	    $self->{state}->{stats}->{invisible}++;
 	    $peer_ignore = delete $record->{_ignore_i_umode};
 	  }
+	  if ( $char eq 'w' ) {
+	    $self->{state}->{wallops}->{ $route_id } = time();
+	  }
 	}
 	if ( $action eq '-' and $record->{umode} =~ /$char/ ) {
 	  $record->{umode} =~ s/$char//g;
@@ -2159,10 +2162,12 @@ sub _daemon_cmd_umode {
 	  $self->{state}->{stats}->{invisible}-- if $char eq 'i';
           if ( $char eq 'o' ) {
     	    $self->{state}->{stats}->{ops_online}--;
-	    my $route_id = $self->_state_user_route( $nick );
 	    delete $self->{state}->{localops}->{ $route_id };
             $self->{ircd}->antiflood( $route_id, 1 );
           }
+	  if ( $char eq 'w' ) {
+	    delete $self->{state}->{wallops}->{ $route_id };
+	  }
 	}
     }
     if ( $set ) {
@@ -2782,6 +2787,7 @@ sub _daemon_peer_sjoin {
 	last SWITCH;
     }
     my $chanrec = $self->{state}->{chans}->{ u_irc $chan };
+    my @local_users = map { $self->_state_user_route($_) } grep { $self->_state_is_local_user($_) } keys %{ $chanrec->{users} };
     if ( $ts < $chanrec->{ts} ) {
 	  # Incoming is older
 	  if ( $nicks =~ /^\@/ ) {
@@ -2860,10 +2866,14 @@ sub _daemon_peer_sjoin {
 		delete $chanrec->{climit} if $origmode and $origmode =~ /l/;
 		$self->{ircd}->send_output( { prefix => $self->server_name(), command => 'MODE', params => [ $chanrec->{name}, unparse_mode_line( $reply ), @reply_args ], colonify => 0 }, values %{ $common } ) if $reply;
 	     }
+	     # NOTICE HERE
+	     $self->{ircd}->send_output( { prefix => $self->server_name(), command => 'NOTICE', params => [ $chanrec->{name}, "*** Notice -- TS for " . $chanrec->{name} . " changed from " . $chanrec->{ts} . " to $ts" ] }, @local_users );
 	     $chanrec->{ts} = $ts;
 	  } elsif ( scalar grep { /^\@/ } $self->state_chan_list_prefixed( $chan ) ) {
 	     $args->[0] = $chanrec->{ts};
 	  } else {
+	     # NOTICE HERE
+	     $self->{ircd}->send_output( { prefix => $self->server_name(), command => 'NOTICE', params => [ $chanrec->{name}, "*** Notice -- TS for " . $chanrec->{name} . " changed from " . $chanrec->{ts} . " to $ts" ] }, @local_users );
 	     $chanrec->{ts} = $ts;
 	  }
     } elsif ( $ts > $chanrec->{ts} ) {
@@ -2884,7 +2894,7 @@ sub _daemon_peer_sjoin {
     $self->{ircd}->send_output( { prefix => $prefix, command => 'SJOIN', params => $args }, grep { $_ ne $peer_id } $self->_state_connected_peers() );
     # Generate appropriate JOIN messages for all local channel members
     my $uchan = u_irc $chanrec->{name};
-    my @local_users = map { $self->_state_user_route($_) } grep { $self->_state_is_local_user($_) } keys %{ $chanrec->{users} };
+    #my @local_users = map { $self->_state_user_route($_) } grep { $self->_state_is_local_user($_) } keys %{ $chanrec->{users} };
     my $modes; my @mode_parms;
     foreach my $nick ( split /\s+/, $nicks ) {
 	  my $proper = $nick;
@@ -4630,7 +4640,8 @@ Takes a number of parameters:
   'servername', a name to bless your shiny new IRCd with, default 'poco.server.irc';
   'serverdesc', a description for your IRCd, default 'Poco? POCO? POCO!';
   'network', the name of the IRC network you will be creating, default 'poconet';
-  'nicklen', the max length of nicknames to support, default is 9;
+  'nicklen', the max length of nicknames to support, default is 9.
+	     NB: the nicklen must be the same on all servers on your IRC network;
   'maxtargets', max number of targets a user can send PRIVMSG/NOTICE's to, default 4;
   'maxchannels', max number of channels users may join, default 15;
   'version', change the server version that is reported;
@@ -5013,6 +5024,16 @@ Takes two arguments a spoofed nickname and an existing channel name. This comman
 manipulate the channel timestamp to clear all modes on that channel, including existing
 channel operators, reset the channel mode to '+nt', the spoofed nick will then join the 
 channel and gain channel ops.
+
+=item daemon_cmd_privmsg
+
+Takes three arguments, a spoofed nickname, a target ( which can be a nickname or a channel name )
+and whatever text you wish to send. 
+
+=item daemon_cmd_notice
+
+Takes three arguments, a spoofed nickname, a target ( which can be a nickname or a channel name )
+and whatever text you wish to send. 
 
 =back
 

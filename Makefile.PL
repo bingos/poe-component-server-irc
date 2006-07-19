@@ -33,17 +33,18 @@ NOTICE
 WriteMakefile(
 			  'NAME'	=> 'POE::Component::Server::IRC',
 			  'PREREQ_PM' => {
-							  'POE'    => 0.3202,
-							  'Carp'   => 0,
-							  'Net::Netmask' => 1.9012,
-							  'Socket' => 0,
-							  'Date::Format' => 0,
-							  'POE::Filter::IRCD' => 1.7,
-							  'POE::Filter::Zlib' => 0,
-							  'POE::Component::Client::Ident' => 1.00,
-							  'POE::Component::Client::DNS' => 0.99,
-							  'POE::Component::IRC' => 4.95
-							 },
-			  'VERSION_FROM' => 'lib/POE/Component/Server/IRC.pm', # finds $VERSION
+					  'warnings' => 0,
+					  'POE'    => 0.3202,
+					  'Carp'   => 0,
+					  'Net::Netmask' => 1.9012,
+					  'Socket' => 0,
+					  'Date::Format' => 0,
+					  'POE::Filter::IRCD' => 1.7,
+					  'POE::Filter::Zlib' => 0,
+					  'POE::Component::Client::Ident' => 1.00,
+					  'POE::Component::Client::DNS' => 0.99,
+					  'POE::Component::IRC' => 4.95
+					 },
+			  'VERSION_FROM' => 'lib/POE/Component/Server/IRC.pm',
 			  'dist' => { 'COMPRESS' => 'gzip --best' },
 			 );
