@@ -349,7 +349,8 @@ sub _cmd_from_peer {
 	last SWITCH;
     }
     if ( $cmd =~ /^(PRIVMSG|NOTICE)$/ ) {
-	$self->_daemon_peer_message( $conn_id, $prefix, $cmd, @{ $params } );
+	print STDERR $input->{raw_line}, "\n";
+	$self->_send_output_to_client( $conn_id => $prefix => ( ref $_ eq 'ARRAY' ? @{ $_ } : $_ ) ) for $self->_daemon_cmd_message( $prefix, $cmd, @{ $params } );
 	last SWITCH;
     }
     if ( $cmd =~ /^(WHOIS|VERSION|TIME|NAMES|LINKS|ADMIN|INFO|MOTD|SQUIT)$/i ) {
@@ -443,20 +444,134 @@ sub _daemon_cmd_message {
     my $targets = 0;
     my $max_targets = $self->server_config('MAXTARGETS');
     my $full = $self->state_user_full( $nick );
-    LOOP: foreach my $target ( split /,/, $args->[0] ) {
-	my $runt = $target;
-	$target = ( split /!/, $target )[0] if $target =~ /\x21/;
-	$target = ( split /\x40/, $target )[0] if $target =~ /\x40/;
-	unless ( $self->state_chan_exists( $target ) or $self->state_nick_exists( $target ) ) {
-	   push @{ $ref }, [ '401', $runt ];
+    my $targs = $self->_state_parse_msg_targets( $args->[0] );
+    LOOP: foreach my $target ( keys %{ $targs } ) {
+	my $targ_type = shift @{ $targs->{$target} };
+	if ( $targ_type =~ /(server|host)mask/ and !$self->state_user_is_operator( $nick ) ) {
+	   push @{ $ref }, [ '481' ];
+	   next LOOP;
+	}
+	if ( $targ_type =~ /(server|host)mask/ and $targs->{$target}->[0] !~ /\./ ) {
+	  push @{ $ref }, [ '413', $target ];
+	  next LOOP;
+	}
+	if ( $targ_type =~ /(server|host)mask/ and $targs->{$target}->[0] !~ /\x2E.*[\x2A\x3F]+.*$/ ) {
+	  push @{ $ref }, [ '414', $target ];
+	  next LOOP;
+	}
+	if ( $targ_type eq 'channel_ext' and !$self->state_chan_exists( $targs->{$target}->[1] ) ) {
+	   push @{ $ref }, [ '401', $targs->{$target}->[1] ];
+	   next LOOP;
+	}
+	if ( $targ_type eq 'channel' and !$self->state_chan_exists( $target ) ) {
+	   push @{ $ref }, [ '401', $target ];
+	   next LOOP;
+	}
+	if ( $targ_type eq 'nick' and !$self->state_nick_exists( $target ) ) {
+	   push @{ $ref }, [ '401', $target ];
+	   next LOOP;
+	}
+	if ( $targ_type eq 'nick_ext' and !$self->state_peer_exists( $targs->{$target}->[1] ) ) {
+	   push @{ $ref }, [ '402', $targs->{$target}->[1] ];
 	   next LOOP;
 	}
 	$targets++;
         if ( $targets > $max_targets ) {
-	  push @{ $ref }, [ '407', $runt ];
+	  push @{ $ref }, [ '407', $target ];
 	  last SWITCH;
         }
-	my $channel = $self->_state_chan_name( $target );
+	# $$whatever
+	if ( $targ_type eq 'servermask' ) {
+	  my $us = 0;
+          my %targets;
+	  my $ucserver = uc $self->server_name();
+          foreach my $peer ( keys %{ $self->{state}->{peers} } ) {
+	    if ( matches_mask( $targs->{$target}->[0], $peer ) ) {
+	      if ( $ucserver eq $peer ) {
+		$us = 1;
+	      } else {
+		$targets{ $self->_state_peer_route( $peer ) }++;
+	      }
+	    }
+          }
+	  $self->{ircd}->send_output( { prefix => $nick, command => $type, params => [ $target, $args->[1] ] }, keys %targets );
+	  if ( $us ) {
+	    my $local = $self->{state}->{peers}->{ uc $self->server_name() }->{users};
+	    my @local; my $spoofed = 0;
+	    foreach my $luser ( values %{ $local } ) {
+		if ( $luser->{route_id} eq 'spoofed' ) {
+		  $spoofed = 1;
+		} else {
+		  push @local, $luser->{route_id};
+		}
+	    }
+	    $self->{ircd}->send_output( { prefix => $full, command => $type, params => [ $target, $args->[1] ] }, @local );
+  	    $self->{ircd}->send_event( "daemon_" . lc $type, $full, $target, $args->[1] ) if $spoofed;
+	  }
+	  next LOOP;
+	}
+	# $#whatever
+	if ( $targ_type eq 'hostmask' ) {
+	  my $spoofed = 0;
+	  my %targets; my @local;
+	  HOST: foreach my $luser ( values %{ $self->{state}->{users} } ) {
+	     next HOST unless matches_mask( $targs->{$target}->[0], $luser->{auth}->{hostname} );
+	     if ( $luser->{route_id} eq 'spoofed' ) {
+		$spoofed = 1;
+	     } elsif ( $luser->{type} eq 'r' ) { 
+		$targets{ $luser->{route_id} }++;
+	     } else {
+		push @local, $luser->{route_id};
+	     }
+	  }
+	  $self->{ircd}->send_output( { prefix => $nick, command => $type, params => [ $target, $args->[1] ] }, keys %targets );
+	  $self->{ircd}->send_output( { prefix => $full, command => $type, params => [ $target, $args->[1] ] }, @local );
+  	  $self->{ircd}->send_event( "daemon_" . lc $type, $full, $target, $args->[1] ) if $spoofed;
+	  next LOOP;
+	}
+	if ( $targ_type eq 'nick_ext' ) {
+	  $targs->{$target}->[1] = $self->_state_peer_name( $targs->{$target}->[1] );
+	  if ( $targs->{$target}->[2] and !$self->state_user_is_operator( $nick ) ) {
+	    push @{ $ref }, [ '481' ];
+	    next LOOP;
+	  }
+	  if ( $targs->{$target}->[1] ne $self->server_name() ) {
+	    $self->{ircd}->send_output( { prefix => $nick, command => $type, params => [ $target, $args->[1] ] }, $self->_state_peer_route( $targs->{$target}->[1] ) );
+	    next LOOP;
+	  }
+	  if ( uc ( $targs->{$target}->[0] ) eq 'OPERS' ) {
+	    unless ( $self->state_user_is_operator( $nick ) ) {
+	      push @{ $ref }, [ '481' ];
+	      next LOOP;
+	    }
+	    $self->{ircd}->send_output( { prefix => $full, command => $type, params => [ $target, $args->[1] ] }, keys %{ $self->{state}->{localops} } );
+	    next LOOP;
+	  }
+	  my @local = $self->_state_find_user_host( $targs->{$target}->[0], $targs->{$target}->[2] );
+	  if ( scalar @local == 1 ) {
+	      my $ref = shift @local;
+	      if ( $ref->[0] eq 'spoofed' ) {
+	        $self->{ircd}->send_event( "daemon_" . lc $type, $full, $ref->[1], $args->[1] );
+	      } else {
+	        $self->{ircd}->send_output( { prefix => $full, command => $type, params => [ $target, $args->[1] ] }, $ref->[0] );
+	      }
+	  } else {
+	      push @{ $ref }, [ '407', $target ];
+	      next LOOP;
+	  }
+	}
+	my $channel; my $status_msg;
+	if ( $targ_type eq 'channel' ) {
+	  $channel = $self->_state_chan_name( $target );
+	}
+	if ( $targ_type eq 'channel_ext' ) {
+	  $channel = $self->_state_chan_name( $targs->{target}->[1] );
+	  $status_msg = $targs->{target}->[0];
+	}
+	if ( $channel and $status_msg and !$self->state_user_chan_mode( $nick, $channel ) ) {
+	  push @{ $ref }, [ '482', $target ];
+	  next LOOP;
+	}
 	if ( $channel and $self->state_chan_mode_set( $channel, 'n' ) and !$self->state_is_chan_member( $nick, $channel ) ) {
 	  push @{ $ref }, [ '404', $channel ];
 	  next LOOP;
@@ -465,7 +580,7 @@ sub _daemon_cmd_message {
 	  push @{ $ref }, [ '404', $channel ];
 	  next LOOP;
 	}
-	if ( $channel and $self->_state_user_banned( $nick, $channel ) and $self->state_user_chan_mode( $nick, $channel ) !~ /[ohv]/ ) {
+	if ( $channel and $self->_state_user_banned( $nick, $channel ) and !$self->state_user_chan_mode( $nick, $channel ) ) {
 	  push @{ $ref }, [ '404', $channel ];
 	  next LOOP;
 	}
@@ -1894,7 +2009,7 @@ sub _daemon_cmd_join {
 	$self->{state}->{chans}->{ $uchannel } = $record;
 	$self->{state}->{users}->{ $unick }->{chans}->{ $uchannel } = 'o';
 	my @peers = $self->_state_connected_peers();
-	$self->{ircd}->send_output( { command => 'SJOIN', params => [ $record->{ts}, $channel, '+' . $record->{mode}, '@' . $nick ] }, @peers );
+	$self->{ircd}->send_output( { command => 'SJOIN', params => [ $record->{ts}, $channel, '+' . $record->{mode}, '@' . $nick ] }, @peers ) unless $channel =~ /^\&/;
 	my $output = { prefix => $self->state_user_full( $nick ), command => 'JOIN', params => [ $channel ] };
 	$self->{ircd}->send_output( $output, $route_id );
 	$self->{ircd}->send_event( "daemon_join", $output->{prefix}, $channel );
@@ -1936,7 +2051,7 @@ sub _daemon_cmd_join {
       $self->{state}->{users}->{ $unick }->{chans}->{ $uchannel } = '';
       $self->{state}->{chans}->{ $uchannel }->{users}->{ $unick } = '';
       # Send JOIN message to peers and local users.
-      $self->{ircd}->send_output( { prefix => $server, command => 'SJOIN', params => [ $chanrec->{ts}, $channel, '+', $nick ] }, $self->_state_connected_peers() );
+      $self->{ircd}->send_output( { prefix => $server, command => 'SJOIN', params => [ $chanrec->{ts}, $channel, '+', $nick ] }, $self->_state_connected_peers() ) unless $channel =~ /^\&/;
       my $output = { prefix => $self->state_user_full( $nick ), command => 'JOIN', params => [ $channel ] };
       $self->_send_output_to_client( $route_id => $output );
       $self->_send_output_to_channel( $channel, $output, $route_id );
@@ -3320,6 +3435,18 @@ sub _state_cmd_stat {
   return 1;
 }
 
+sub _state_find_user_host {
+  my $self = shift;
+  my $luser = shift || return;
+  my $host = shift || '*';
+  my $local = $self->{state}->{peers}->{ uc $self->server_name() }->{users};
+  my @conns;
+  foreach my $user ( values %{ $local } ) {
+    push @conns, [ $user->{route_id}, $user->{nick} ] if matches_mask( $host, $user->{auth}->{hostname} ) and matches_mask( $luser, $user->{auth}->{ident} );
+  }
+  return @conns;
+}
+
 sub _state_local_users_match_rkline {
   my $self = shift;
   my $luser = shift || return;
@@ -3486,6 +3613,7 @@ sub _state_send_burst {
   }
   # Send SJOIN+MODE burst
   foreach my $chan ( keys %{ $self->{state}->{chans} } ) {
+    next if $chan =~ /^\&/;
     my $chanrec = $self->{state}->{chans}->{ $chan };
     my @nicks = map { $_->[1] }
 		sort { $a->[0] cmp $b->[0] } 
@@ -3928,6 +4056,39 @@ sub _state_o_line {
   return 0;
 }
 
+sub _state_parse_msg_targets {
+  my $self = shift;
+  my $targets = shift || return;
+  my %results;
+  foreach my $target ( split /,/, $targets ) {
+    if ( $target =~ /^(\x23|\x26)/ ) {
+	$results{$target} = [ 'channel' ];
+	next;
+    }
+    if ( $target =~ /^([\x40\x25\x2B]+)([\x23\x26].+)$/ ) {
+	$results{$target} = [ 'channel_ext', $1, $2 ];
+	next;
+    }
+    if ( $target =~ /^\x24{2}(.+)$/ ) {
+	$results{$target} = [ 'servermask', $1 ];
+	next;
+    }
+    if ( $target =~ /^\x24\x23(.+)$/ ) {
+	$results{$target} = [ 'hostmask', $1 ];
+	next;
+    }
+    if ( $target =~ /\x40/ ) {
+	my ($nick,$server) = split /\x40/, $target, 2;
+	my $host;
+	($nick,$host) = split ( /\x25/, $nick, 2 ) if $nick =~ /\x25/;
+	$results{$target} = [ 'nick_ext', $nick, $server, $host ];
+	next;
+    }
+    $results{$target} = [ 'nick' ];
+  }
+  return \%results;
+}
+
 sub server_name {
   return $_[0]->server_config('ServerName');
 }
@@ -4024,6 +4185,7 @@ sub configure {
 			404 => [ 1, "Cannot send to channel" ],
 			405 => [ 1, "You have joined too many channels" ],
 			406 => [ 1, "There was no such nickname" ],
+			407 => [ 1, "Too many targets" ],
 			408 => [ 1, "No such service" ],
 			409 => [ 1, "No origin specified" ],
 			411 => [ 0, "No recipient given (%s)" ],
@@ -4128,7 +4290,7 @@ sub _send_output_to_channel {
   delete $peers->{ $conn_id } if $conn_id;
   push @{ $ref }, $self->_state_user_route( $_ ) for grep { $self->_state_is_local_user( $_ ) } $self->state_chan_list( $channel );
   @{ $ref } = grep { $_ ne $conn_id } @{ $ref };
-  if ( scalar( keys %{ $peers} ) and $output->{command} ne 'JOIN' ) {
+  if ( $channel !~ /^\&/ and scalar( keys %{ $peers} ) and $output->{command} ne 'JOIN' ) {
     my $full = $output->{prefix};
     my $nick = ( split /!/, $full )[0];
     my $output2 = { %{ $output } }; 
@@ -4465,8 +4627,13 @@ sub daemon_server_remove {
 }
 
 sub add_spoofed_nick {
-  my ($kernel,$self,$ref) = @_[KERNEL,OBJECT,ARG0];
-  return unless ref $ref eq 'HASH';
+  my ($kernel,$self) = @_[KERNEL,OBJECT];
+  my $ref;
+  if ( ref $_[ARG0] eq 'HASH' ) {
+	$ref = $_[ARG0];
+  } else {
+	$ref = { @_[ARG0..$#_] };
+  }
   $ref->{ lc $_ } = delete $ref->{$_} for keys %{ $ref };
   return unless $ref->{nick};
   return if $self->state_nick_exists( $ref->{nick} );
