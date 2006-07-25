@@ -25,4 +25,5 @@ examples/test-ircd.pl
 examples/test-oper.pl
 examples/test-harness.pl
 examples/simpleclient.pl
+examples/multi-client.pl
 META.yml                                 Module meta-data (added by MakeMaker)

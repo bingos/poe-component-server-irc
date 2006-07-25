@@ -1,4 +1,4 @@
-use Test::More tests => 17;
+use Test::More tests => 20;
 BEGIN { use_ok('POE::Component::Server::IRC::Common', qw(:ALL)) }
 ok( 'SIMPLE' eq u_irc( 'simple' ), "Upper simple test" );
 ok( 'simple' eq l_irc( 'SIMPLE' ), "Lower simple test" );
@@ -18,3 +18,6 @@ ok( matches_mask( '**', '127.0.0.1' ), "Mask matches Test" );
 ok( !matches_mask( '127.0.0.2', '127.0.0.1' ), "Mask not matches Test" );
 ok( matches_mask( $banmask, 'stalin!joe@kremlin.ru'), "Mask matches Test 2" );
 ok( !matches_mask( $banmask, 'BinGOs!joe@kremlin.ru'), "Mask not matches Test 2" );
+ok( gen_mode_change('ailowz','i') eq '-alowz', "Gen mode changes 1");
+ok( gen_mode_change('i','ailowz') eq '+alowz', "Gen mode changes 2");
+ok( gen_mode_change('i','alowz') eq '-i+alowz', "Gen mode changes 3");

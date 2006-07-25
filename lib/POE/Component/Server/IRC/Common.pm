@@ -2,17 +2,18 @@ package POE::Component::Server::IRC::Common;
 
 use strict;
 use warnings;
+use Algorithm::Diff qw(diff);
 
 our $VERSION = '1.00';
 
 # We export some stuff
 require Exporter;
 our @ISA = qw( Exporter );
-our %EXPORT_TAGS = ( 'ALL' => [ qw(u_irc l_irc parse_mode_line unparse_mode_line parse_ban_mask validate_nick_name validate_chan_name matches_mask_array matches_mask) ] );
+our %EXPORT_TAGS = ( 'ALL' => [ qw(u_irc l_irc gen_mode_change parse_mode_line unparse_mode_line parse_ban_mask validate_nick_name validate_chan_name matches_mask_array matches_mask) ] );
 Exporter::export_ok_tags( 'ALL' );
 
 sub u_irc {
-  my ($value) = shift || return undef;
+  my $value = shift || return;
 
   $value =~ tr/a-z{}|^/A-Z[]\\~/;
   return $value;
@@ -30,16 +31,16 @@ sub parse_mode_line {
   my $count = 0;
   foreach my $arg ( @_ ) {
         if ( $arg =~ /^(\+|-)/ or $count == 0 ) {
-           my ($action) = '+';
+           my $action = '+';
            foreach my $char ( split (//,$arg) ) {
                 if ( $char eq '+' or $char eq '-' ) {
                    $action = $char;
                 } else {
-                   push ( @{ $hashref->{modes} }, $action . $char );
+                   push @{ $hashref->{modes} }, $action . $char;
                 }
            }
          } else {
-                push ( @{ $hashref->{args} }, $arg );
+                push @{ $hashref->{args} }, $arg;
          }
          $count++;
   }
@@ -60,7 +61,7 @@ sub parse_ban_mask {
   @ban[1..2] = split (/\x40/,$remainder,2) if ( defined ( $remainder ) );
   $ban[2] =~ s/\x40//g if ( defined ( $ban[2] ) );
   for ( my $i = 0; $i <= 2; $i++ ) {
-    if ( ( not defined ( $ban[$i] ) ) or $ban[$i] eq '' ) {
+    if ( !defined ( $ban[$i] ) or $ban[$i] eq '' ) {
        $ban[$i] = '*';
     }
   }
@@ -68,7 +69,7 @@ sub parse_ban_mask {
 }
 
 sub unparse_mode_line {
-  my $line = $_[0] || return undef;
+  my $line = $_[0] || return;
 
   my $action; my $return;
   foreach my $mode ( split(//,$line) ) {
@@ -119,6 +120,19 @@ sub matches_mask {
   $umask =~ s/\\\?/[\x01-\xFF]{1,1}/g;
   return 1 if $match =~ /^$umask$/;
   return 0;
+}
+
+sub gen_mode_change {
+  my $before = shift || '';
+  my $after  = shift || '';
+  my @before = split //, $before;
+  my @after  = split //, $after;
+  my $string = '';
+  my @hunks = diff( \@before, \@after );
+  foreach my $h ( @hunks ) {
+	$string .= $_->[0] . $_->[2] for @{ $h };
+  }
+  return unparse_mode_line( $string );
 }
 
 1;

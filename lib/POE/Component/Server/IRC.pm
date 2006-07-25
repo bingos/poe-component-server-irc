@@ -33,7 +33,7 @@ sub _load_our_plugins {
   my $self = shift;
   $poe_kernel->state( 'add_spoofed_nick', $self );
   $poe_kernel->state( 'del_spoofed_nick', $self );
-  $poe_kernel->state( "daemon_cmd_$_", $self, '_spoofed_command' ) for qw(join part mode kick topic nick privmsg notice gline kline unkline rkline sjoin);
+  $poe_kernel->state( "daemon_cmd_$_", $self, '_spoofed_command' ) for qw(join part mode kick topic nick privmsg notice gline kline unkline rkline sjoin locops wallops operwall);
 }
 
 sub IRCD_connection {
@@ -368,6 +368,7 @@ sub _cmd_from_peer {
 	last SWITCH;
     }
     $invalid = 1;
+    print STDERR $input->{raw_line}, "\n";
   }
   return 1 if $invalid;
   $self->_state_cmd_stat( $cmd, $input->{raw_line}, 1 );
@@ -787,6 +788,74 @@ sub _daemon_cmd_rehash {
      }
      $self->{ircd}->send_event( "daemon_rehash", $nick );
      push @{ $ref }, { prefix => $server, command => '383', params => [ $nick, 'ircd.conf', 'Rehashing' ] };
+  }
+  return @{ $ref } if wantarray();
+  return $ref;
+}
+
+sub _daemon_cmd_locops {
+  my $self = shift;
+  my $nick = shift || return;
+  my $server = $self->server_name();
+  my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
+  SWITCH: {
+     if ( !$self->state_user_is_operator( $nick ) ) {
+	push @{ $ref }, [ '481' ];
+	last SWITCH;
+     }
+     if ( !$count ) {
+	push @{ $ref }, [ '461', 'LOCOPS' ];
+	last SWITCH;
+     }
+     my $full = $self->state_user_full( $nick );
+     $self->{ircd}->send_output( { prefix => $full, command => 'WALLOPS', params => [ 'LOCOPS - ' . $args->[0] ] }, keys %{ $self->{state}->{locops} } );
+     $self->{ircd}->send_event( "daemon_locops", $full, $args->[0] );
+  }
+  return @{ $ref } if wantarray();
+  return $ref;
+}
+
+sub _daemon_cmd_wallops {
+  my $self = shift;
+  my $nick = shift || return;
+  my $server = $self->server_name();
+  my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
+  SWITCH: {
+     if ( !$self->state_user_is_operator( $nick ) ) {
+	push @{ $ref }, [ '481' ];
+	last SWITCH;
+     }
+     if ( !$count ) {
+	push @{ $ref }, [ '461', 'WALLOPS' ];
+	last SWITCH;
+     }
+     my $full = $self->state_user_full( $nick );
+     $self->{ircd}->send_output( { prefix => $nick, command => 'WALLOPS', params => [ $args->[0] ] }, $self->_state_connected_peers() );
+     $self->{ircd}->send_output( { prefix => $full, command => 'WALLOPS', params => [ 'OPERWALL - ' . $args->[0] ] }, keys %{ $self->{state}->{operwall} } );
+     $self->{ircd}->send_event( "daemon_operwall", $full, $args->[0] );
+  }
+  return @{ $ref } if wantarray();
+  return $ref;
+}
+
+sub _daemon_cmd_operwall {
+  my $self = shift;
+  my $nick = shift || return;
+  my $server = $self->server_name();
+  my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
+  SWITCH: {
+     if ( !$self->state_user_is_operator( $nick ) ) {
+	push @{ $ref }, [ '481' ];
+	last SWITCH;
+     }
+     if ( !$count ) {
+	push @{ $ref }, [ '461', 'OPERWALL' ];
+	last SWITCH;
+     }
+     my $full = $self->state_user_full( $nick );
+     $self->{ircd}->send_output( { prefix => $nick, command => 'WALLOPS', params => [ $args->[0] ] }, $self->_state_connected_peers() );
+     $self->{ircd}->send_output( { prefix => $full, command => 'WALLOPS', params => [ 'OPERWALL - ' . $args->[0] ] }, keys %{ $self->{state}->{operwall} } );
+     $self->{ircd}->send_event( "daemon_operwall", $full, $args->[0] );
   }
   return @{ $ref } if wantarray();
   return $ref;
@@ -2254,15 +2323,16 @@ sub _daemon_cmd_umode {
   unless ( $umode ) {
     push @{ $ref }, { prefix => $server, command => '422', params => [ $nick, '+' . $record->{umode} ] };
   } else {
-    my $set = ''; my $peer_ignore;
+    my $peer_ignore;
     my $parsed_mode = parse_mode_line( $umode );
     my $route_id = $self->_state_user_route( $nick );
-    while ( my $mode = shift ( @{ $parsed_mode->{modes} } ) ) {
+    my $previous = $record->{umode};
+    while ( my $mode = shift @{ $parsed_mode->{modes} } ) {
 	next if $mode eq '+o';
 	my ($action,$char) = split //, $mode;
 	if ( $action eq '+' and $record->{umode} !~ /$char/ ) {
+	  next if $char =~ /[wzl]/ and $record->{umode} !~ /o/;
 	  $record->{umode} .= $char;
-	  $set .= $mode;
 	  if ( $char eq 'i' ) {
 	    $self->{state}->{stats}->{invisible}++;
 	    $peer_ignore = delete $record->{_ignore_i_umode};
@@ -2270,10 +2340,15 @@ sub _daemon_cmd_umode {
 	  if ( $char eq 'w' ) {
 	    $self->{state}->{wallops}->{ $route_id } = time();
 	  }
+	  if ( $char eq 'z' ) {
+	    $self->{state}->{operwall}->{ $route_id } = time();
+	  }
+	  if ( $char eq 'l' ) {
+	    $self->{state}->{locops}->{ $route_id } = time();
+	  }
 	}
 	if ( $action eq '-' and $record->{umode} =~ /$char/ ) {
 	  $record->{umode} =~ s/$char//g;
-	  $set .= $mode;
 	  $self->{state}->{stats}->{invisible}-- if $char eq 'i';
           if ( $char eq 'o' ) {
     	    $self->{state}->{stats}->{ops_online}--;
@@ -2283,8 +2358,16 @@ sub _daemon_cmd_umode {
 	  if ( $char eq 'w' ) {
 	    delete $self->{state}->{wallops}->{ $route_id };
 	  }
+	  if ( $char eq 'z' ) {
+	    delete $self->{state}->{operwall}->{ $route_id };
+	  }
+	  if ( $char eq 'l' ) {
+	    delete $self->{state}->{locops}->{ $route_id };
+	  }
 	}
     }
+    $record->{umode} = join '', sort split //, $record->{umode};
+    my $set = gen_mode_change( $previous, $record->{umode} );
     if ( $set ) {
       my $hashref = { prefix => $nick, command => 'MODE', params => [ $nick, $set ] };
       $self->{ircd}->send_output( $hashref, $self->_state_connected_peers() ) unless $peer_ignore;
@@ -2537,6 +2620,56 @@ sub _daemon_peer_gline {
      $self->{ircd}->send_event( "daemon_gline", $full, @{ $args } );
      $self->terminate_conn_error( $_, 'G-Lined' ) for $self->_state_local_users_match_gline( $args->[0], $args->[1] );
   }
+  return @{ $ref } if wantarray();
+  return $ref;
+}
+
+sub _daemon_peer_wallops {
+  my $self = shift;
+  my $peer_id = shift || return;
+  my $prefix = shift || return;
+  my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
+  SWITCH: {
+     my $full = $self->state_user_full( $prefix ) || $prefix;
+     $self->{ircd}->send_output( { prefix => $prefix, command => 'WALLOPS', params => [ $args->[0] ] }, grep { $_ ne $peer_id } $self->_state_connected_peers() );
+     if ( $self->state_peer_exists( $full ) ) {
+       $self->{ircd}->send_output( { prefix => $full, command => 'WALLOPS', params => [ 'OPERWALL - ' . $args->[0] ] }, keys %{ $self->{state}->{wallops} } );
+       $self->{ircd}->send_event( "daemon_wallops", $full, $args->[0] );
+     } else {
+       $self->{ircd}->send_output( { prefix => $full, command => 'WALLOPS', params => [ 'OPERWALL - ' . $args->[0] ] }, keys %{ $self->{state}->{operwall} } );
+       $self->{ircd}->send_event( "daemon_operwall", $full, $args->[0] );
+     }
+  }
+  return @{ $ref } if wantarray();
+  return $ref;
+}
+
+sub _daemon_peer_operwall {
+  my $self = shift;
+  my $peer_id = shift || return;
+  my $prefix = shift || return;
+  my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
+  SWITCH: {
+     my $full = $self->state_user_full( $prefix ) || $prefix;
+     $self->{ircd}->send_output( { prefix => $prefix, command => 'WALLOPS', params => [ $args->[0] ] }, grep { $_ ne $peer_id } $self->_state_connected_peers() );
+     if ( $self->state_peer_exists( $full ) ) {
+       $self->{ircd}->send_output( { prefix => $full, command => 'WALLOPS', params => [ 'OPERWALL - ' . $args->[0] ] }, keys %{ $self->{state}->{wallops} } );
+       $self->{ircd}->send_event( "daemon_wallops", $full, $args->[0] );
+     } else {
+       $self->{ircd}->send_output( { prefix => $full, command => 'WALLOPS', params => [ 'OPERWALL - ' . $args->[0] ] }, keys %{ $self->{state}->{operwall} } );
+       $self->{ircd}->send_event( "daemon_operwall", $full, $args->[0] );
+     }
+  }
+  return @{ $ref } if wantarray();
+  return $ref;
+}
+
+sub _daemon_peer_eob {
+  my $self = shift;
+  my $peer_id = shift || return;
+  my $peer = shift || return;
+  my $ref = [ ];
+  $self->{ircd}->send_event( "daemon_eob", $peer );
   return @{ $ref } if wantarray();
   return $ref;
 }
@@ -4626,6 +4759,21 @@ sub daemon_server_remove {
   return $ref;
 }
 
+sub daemon_server_wallops {
+  my $self = shift;
+  my $server = $self->server_name();
+  my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
+  SWITCH: {
+    if ( !$count ) {
+	last SWITCH;
+    }
+    $self->{ircd}->send_output( { prefix => $server, command => 'WALLOPS', params => [ $args->[0] ] }, $self->_state_connected_peers(), keys %{ $self->{state}->{operwall} } );
+    $self->{ircd}->send_event( "daemon_wallops", $server, $args->[0] );
+  }
+  return @{ $ref } if wantarray();
+  return $ref;
+}
+
 sub add_spoofed_nick {
   my ($kernel,$self) = @_[KERNEL,OBJECT];
   my $ref;
@@ -5000,6 +5148,10 @@ First argument is a channel name, remaining arguments are channel modes and thei
 
 Takes two arguments that are mandatory and an optional one: channel name, nickname of the user to kick and a pithy comment.
 
+=item daemon_server_wallops
+
+Takes one argument, the message text to send.
+
 =back
 
 =head1 INPUT EVENTS
@@ -5201,6 +5353,18 @@ and whatever text you wish to send.
 
 Takes three arguments, a spoofed nickname, a target ( which can be a nickname or a channel name )
 and whatever text you wish to send. 
+
+=item daemon_cmd_locops
+
+Takes two arguments, a spoofed nickname and the text message to send to local operators.
+
+=item daemon_cmd_wallops
+
+Takes two arguments, a spoofed nickname and the text message to send to all operators.
+
+=item daemon_cmd_operwall
+
+Takes two arguments, a spoofed nickname and the text message to send to all operators.
 
 =back
 
@@ -5430,6 +5594,30 @@ Args:
 	ARG1, target for the UNKLINE;
 	ARG2, user mask;
 	ARG3, host mask;
+
+=item ircd_daemon_locops
+
+Emitted: when an oper issues a LOCOPS;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the full user (nick!ident@host);
+	ARG1, the locops message;
+
+=item ircd_daemon_operwall
+
+Emitted: when an oper issues a WALLOPS or OPERWALL;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the full user (nick!ident@host);
+	ARG1, the wallops or operwall message;
+
+=item ircd_daemon_wallops
+
+Emitted: when a server issues a WALLOPS;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the server name;
+	ARG1, the wallops message;
 
 =back
 
