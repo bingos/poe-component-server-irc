@@ -11,6 +11,7 @@ t/4_test_plugin.t
 t/ts_01_subclass.t
 t/ts_02_multi.t
 t/ts_03_serverlink.t
+t/ts_04_compresslink.t
 t/ts_04_sslify.t
 t/ts_05_oper.t
 t/ts_06_spoofs.t

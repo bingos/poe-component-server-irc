@@ -40,7 +40,7 @@ WriteMakefile(
 					  'Socket' => 0,
 					  'Date::Format' => 0,
 					  'POE::Filter::IRCD' => 1.7,
-					  'POE::Filter::Zlib' => 0,
+					  'POE::Filter::Zlib' => 1.2,
 					  'POE::Component::Client::Ident' => 1.00,
 					  'POE::Component::Client::DNS' => 0.99,
 					  'POE::Component::IRC' => 4.95,

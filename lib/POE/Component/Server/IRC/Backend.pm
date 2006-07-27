@@ -2,7 +2,7 @@ package POE::Component::Server::IRC::Backend;
 
 use strict;
 use warnings;
-use POE qw(Wheel::SocketFactory Wheel::ReadWrite Filter::Stackable Filter::Line Filter::IRCD);
+use POE qw(Wheel::SocketFactory Wheel::ReadWrite Filter::Stackable Filter::Zlib Filter::Line Filter::IRCD);
 use POE::Component::Server::IRC::Plugin qw( :ALL );
 use POE::Component::Server::IRC::Pipeline;
 use Socket;
@@ -422,7 +422,8 @@ sub _sock_up {
 
   my $wheel = POE::Wheel::ReadWrite->new(
 	Handle => $socket,
-	Filter => $self->{filter},
+	#Filter => $self->{filter},
+	Filter => POE::Filter::Stackable->new( Filters => [ $self->{filter} ] ),
 	InputEvent => '_conn_input',
 	ErrorEvent => '_conn_error',
 	FlushedEvent => '_conn_flushed',
@@ -512,6 +513,13 @@ sub _conn_flushed {
   return unless $self->_wheel_exists( $wheel_id );
   if ( $self->{wheels}->{ $wheel_id }->{disconnecting} ) {
 	$self->_disconnected( $wheel_id, $self->{wheels}->{ $wheel_id }->{disconnecting} );
+	return;
+  }
+  if ( $self->{wheels}->{ $wheel_id }->{compress_pending} ) {
+	delete $self->{wheels}->{ $wheel_id }->{compress_pending};
+	$self->{wheels}->{ $wheel_id }->{wheel}->get_input_filter()->unshift( POE::Filter::Zlib->new() );
+	$self->_send_event( $self->{prefix} . 'compressed_conn' => $wheel_id );
+	return;
   }
   undef;
 }
@@ -770,11 +778,35 @@ sub antiflood {
 }
 
 sub compressed_link {
-  my ($self,$wheel_id,$value) = splice @_, 0, 3;
+  my ($self,$wheel_id,$value,$cntr) = splice @_, 0, 4;
   return unless $self->_wheel_exists( $wheel_id );
   return $self->{wheels}->{ $wheel_id }->{compress} unless defined $value;
   if ( $value ) {
-	$self->{wheels}->{ $wheel_id }->{wheel}->set_filter( POE::Filter::Stackable->new( Filters => [ POE::Filter::Zlib->new(), $self->{line_filter}, $self->{ircd_filter} ] ) );
+	if ( $cntr ) {
+	  $self->{wheels}->{ $wheel_id }->{wheel}->get_input_filter()->unshift( POE::Filter::Zlib->new() );
+	$self->_send_event( $self->{prefix} . 'compressed_conn' => $wheel_id );
+	} else {
+	  $self->{wheels}->{ $wheel_id }->{compress_pending} = 1;
+	}
+  } else {
+	$self->{wheels}->{ $wheel_id }->{wheel}->get_input_filter()->shift();
+  }
+  $self->{wheels}->{ $wheel_id }->{compress} = $value;
+}
+
+sub compressed_link_old {
+  my ($self,$wheel_id,$value,$cntr) = splice @_, 0, 4;
+  return unless $self->_wheel_exists( $wheel_id );
+  return $self->{wheels}->{ $wheel_id }->{compress} unless defined $value;
+  if ( $value ) {
+	$self->{wheels}->{ $wheel_id }->{compress_pending} = 1;
+	$self->{wheels}->{ $wheel_id }->{wheel}->set_input_filter( POE::Filter::Stackable->new( Filters => [ POE::Filter::Zlib->new(), $self->{line_filter}, $self->{ircd_filter} ] ) );
+	$self->_send_event( $self->{prefix} . 'compressed_input' => $wheel_id );
+	if ( $cntr ) {
+	  delete $self->{wheels}->{ $wheel_id }->{compress_pending};
+	  $self->{wheels}->{ $wheel_id }->{wheel}->set_output_filter( POE::Filter::Stackable->new( Filters => [ POE::Filter::Zlib->new(), $self->{line_filter}, $self->{ircd_filter} ] ) );
+	  $self->_send_event( $self->{prefix} . 'compressed_output' => $wheel_id );
+	}
   } else {
 	$self->{wheels}->{ $wheel_id }->{wheel}->set_filter( $self->{filter} );
   }
@@ -1312,6 +1344,14 @@ Emitted: when a client connection is flooded;
 Target: all plugins and registered sessions;
 Args:
 	ARG0, the conn id;
+
+=item connection_idle
+
+Emitted: when a client connection has not sent any data for a set period;
+Target: all plugins and registered sessions;
+Args:
+	ARG0, the conn id;
+	ARG1, the number of seconds period we consider as idle;
 
 =item disconnected
 
