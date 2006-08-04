@@ -2,7 +2,7 @@ package POE::Component::Server::IRC::Backend;
 
 use strict;
 use warnings;
-use POE qw(Wheel::SocketFactory Wheel::ReadWrite Filter::Stackable Filter::Zlib Filter::Line Filter::IRCD);
+use POE qw(Wheel::SocketFactory Wheel::ReadWrite Filter::Stackable Filter::Zlib::Stream Filter::Line Filter::IRCD);
 use POE::Component::Server::IRC::Plugin qw( :ALL );
 use POE::Component::Server::IRC::Pipeline;
 use Socket;
@@ -458,7 +458,7 @@ sub _add_filter {
   return unless $self->_wheel_exists( $wheel_id );
   my $stackable = POE::Filter::Stackable->new( Filters => [ $self->{line_filter}, $self->{ircd_filter}, $filter ] );
   if ( $self->compressed_link( $wheel_id ) ) {
-	$stackable->unshift( POE::Filter::Zlib->new() );
+	$stackable->unshift( POE::Filter::Zlib::Stream->new() );
   }
   $self->{wheels}->{ $wheel_id }->{wheel}->set_filter( $stackable );
   $self->_send_event( $self->{prefix} . 'filter_add' => $wheel_id => $filter );
@@ -517,7 +517,7 @@ sub _conn_flushed {
   }
   if ( $self->{wheels}->{ $wheel_id }->{compress_pending} ) {
 	delete $self->{wheels}->{ $wheel_id }->{compress_pending};
-	$self->{wheels}->{ $wheel_id }->{wheel}->get_input_filter()->unshift( POE::Filter::Zlib->new() );
+	$self->{wheels}->{ $wheel_id }->{wheel}->get_input_filter()->unshift( POE::Filter::Zlib::Stream->new() );
 	$self->_send_event( $self->{prefix} . 'compressed_conn' => $wheel_id );
 	return;
   }
@@ -783,7 +783,7 @@ sub compressed_link {
   return $self->{wheels}->{ $wheel_id }->{compress} unless defined $value;
   if ( $value ) {
 	if ( $cntr ) {
-	  $self->{wheels}->{ $wheel_id }->{wheel}->get_input_filter()->unshift( POE::Filter::Zlib->new() );
+	  $self->{wheels}->{ $wheel_id }->{wheel}->get_input_filter()->unshift( POE::Filter::Zlib::Stream->new() );
 	$self->_send_event( $self->{prefix} . 'compressed_conn' => $wheel_id );
 	} else {
 	  $self->{wheels}->{ $wheel_id }->{compress_pending} = 1;

@@ -301,6 +301,7 @@ sub _cmd_from_unknown {
 	} else {
 	   $self->_state_send_burst( $wheel_id );
 	}
+  	$self->{ircd}->send_event( "daemon_capab", $conn->{name}, @{ $conn->{capab} } );
 	last SWITCH;
     }
     if ( $cmd eq 'NICK' and $pcount ) {
@@ -368,8 +369,14 @@ sub _cmd_from_peer {
 	$self->_send_output_to_client( $conn_id => $prefix => ( ref $_ eq 'ARRAY' ? @{ $_ } : $_ ) ) for $self->$client_method( $prefix, @{ $params } );
 	last SWITCH;
     }
-    if ( $cmd =~ /^(PING|PONG|SVINFO)$/i and $self->can($method) ) {
+    if ( $cmd =~ /^(PING|PONG)$/i and $self->can($method) ) {
 	$self->$method( $conn_id, @{ $params } );
+	last SWITCH;
+    }
+    if ( $cmd =~ /^SVINFO$/i and $self->can($method) ) {
+	$self->$method( $conn_id, @{ $params } );
+	my $conn = $self->{state}->{conns}->{ $conn_id };
+  	$self->{ircd}->send_event( "daemon_svinfo", $conn->{name}, @{ $params } );
 	last SWITCH;
     }
     $method = '_daemon_peer_umode' if $cmd eq 'MODE' and $self->state_nick_exists( $params->[0] );
@@ -5173,6 +5180,11 @@ Adds peer servers that we will allow to connect to us and who we will connect to
   'rport', the remote port to connect to, default is 6667;
   'ipmask', either a scalar ipmask or an arrayref of Net::Netmask objects;
   'auto', if set to true value will automatically connect to remote server if type is 'r';
+
+Additionally, if L<POE::Filter::Zlib::Stream> is installed, ziplinks between L<POE::Component::Server::IRC> ircds are
+supported: 
+
+  'zip', set to a true value to enable ziplink support. This must be done on both ends of the connection;
 
 =item del_peer
 
