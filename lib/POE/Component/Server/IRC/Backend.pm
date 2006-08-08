@@ -1274,22 +1274,22 @@ Once registered your session will receive these states, which will have the appl
 
 =item registered
 
-Emitted: when a session registers with the component;
-Target:	the registering session;
-Args: 
+  Emitted: when a session registers with the component;
+  Target:	the registering session;
+  Args: 
 	ARG0, the component's object;
 
 =item unregistered
 
-Emitted: when a session unregisters with the component;
-Target: the unregistering session;
-Args: none
+  Emitted: when a session unregisters with the component;
+  Target: the unregistering session;
+  Args: none
 
 =item connection
 
-Emitted: when a client connects to one of the component's listeners;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: when a client connects to one of the component's listeners;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the conn id;
 	ARG1, their ip address;
 	ARG2, their tcp port;
@@ -1298,40 +1298,40 @@ Args:
 
 =item auth_done
 
-Emitted: after a client has connected and the component has validated hostname and ident;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: after a client has connected and the component has validated hostname and ident;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the conn id;
 	ARG1, a HASHREF with the following keys: 'ident' and 'hostname';
 
 =item listener_add
 
-Emitted: on a successful add_listener() call;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: on a successful add_listener() call;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the listening port;
 	ARG1, the listener id;
 
 =item listener_del
 
-Emitted: on a successful del_listener() call;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: on a successful del_listener() call;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the listening port;
 	ARG1, the listener id;
 
 =item socketerr
 
-Emitted: on the failure of an add_connector()
-Target: all plugins and registered sessions;
-Args:
+  Emitted: on the failure of an add_connector()
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, a HASHREF containing the params that add_connector() was called with;
 
 =item connected
 
-Emitted: when the component establishes a connection with a peer;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: when the component establishes a connection with a peer;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the conn id;
 	ARG1, their ip address;
 	ARG2, their tcp port;
@@ -1340,32 +1340,32 @@ Args:
 
 =item connection_flood
 
-Emitted: when a client connection is flooded;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: when a client connection is flooded;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the conn id;
 
 =item connection_idle
 
-Emitted: when a client connection has not sent any data for a set period;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: when a client connection has not sent any data for a set period;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the conn id;
 	ARG1, the number of seconds period we consider as idle;
 
 =item disconnected
 
-Emitted: when a client disconnects;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: when a client disconnects;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the conn id;
 	ARG1, the error or reason for disconnection;
 
 =item cmd_*
 
-Emitted: when a client or peer sends a valid IRC line to us;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: when a client or peer sends a valid IRC line to us;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the conn id;
 	ARG1, a HASHREF containing the output record from POE::Filter::IRCD:
 	{ prefix => 'blah!~blah@blah.blah.blah',
@@ -1426,17 +1426,17 @@ And plugin related states, prefixed with the appropriate prefix or the default, 
 
 =item plugin_add
 
-Emitted: when the component successfully adds a new plugin;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: when the component successfully adds a new plugin;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, plugin alias;
 	ARG1, plugin object;
 
 =item plugin_del
 
-Emitted: when the component successfully removes a plugin;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: when the component successfully removes a plugin;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, plugin alias;
 	ARG1, plugin object;
 

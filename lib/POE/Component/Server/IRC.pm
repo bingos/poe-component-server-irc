@@ -13,6 +13,7 @@ use POE;
 use POE::Component::Server::IRC::Common qw(:ALL);
 use POE::Component::Server::IRC::Plugin qw(:ALL);
 use Date::Format;
+use Data::Dumper;
 use vars qw($VERSION $REVISION);
 
 $VERSION = '0.99';
@@ -206,7 +207,7 @@ sub _client_register {
   $self->_send_output_to_client( $conn_id => { prefix => $server, command => '001', params => [ $nick, "Welcome to the $network Internet Relay Chat network $nick" ] } );
   $self->_send_output_to_client( $conn_id => { prefix => $server, command => '002', params => [ $nick, "Your host is ${server}[${server}/${port}], running version $version" ] } );
   $self->_send_output_to_client( $conn_id => { prefix => $server, command => '003', params => [ $nick, $self->server_created() ] } );
-  $self->_send_output_to_client( $conn_id => { prefix => $server, command => '004', params => [ $nick, $server, $version, 'oiw', 'biklmnopstveIh', 'bkloveIh' ], colonify => 0 } );
+  $self->_send_output_to_client( $conn_id => { prefix => $server, command => '004', params => [ $nick, $server, $version, 'Dilowz', 'biklmnopstveIh', 'bkloveIh' ], colonify => 0 } );
   $self->_send_output_to_client( $conn_id => $_ ) for @{ $self->_daemon_cmd_isupport( $nick ) };
   $self->{state}->{conns}->{ $conn_id }->{registered} = 1;
   $self->{state}->{conns}->{ $conn_id }->{type} = 'c';
@@ -344,6 +345,7 @@ sub _cmd_from_peer {
   my $cmd = $input->{command};
   my $params = $input->{params};
   my $prefix = $input->{prefix};
+  print STDERR $input->{raw_line}, "\n";
   my $invalid = 0;
   SWITCH: {
     my $method = '_daemon_peer_' . lc $cmd;
@@ -606,6 +608,7 @@ sub _daemon_cmd_message {
 	  my $common = { };
 	  my $msg  = { command => $type, params => [ ( $status_msg ? $target : $channel ), $args->[1] ] };
 	  foreach my $member ( $self->state_chan_list( $channel, $status_msg ) ) {
+		next if $self->state_user_is_deaf( $member );
 		$common->{ $self->_state_user_route( $member ) }++;
 	  }
 	  delete $common->{ $self->_state_user_route( $nick ) };
@@ -2384,10 +2387,17 @@ sub _daemon_cmd_umode {
 	}
     }
     $record->{umode} = join '', sort split //, $record->{umode};
+    my $peerprev = $previous;
+    my $peerumode = $record->{umode};
+    $peerprev =~ s/[^aiow]//g; $peerumode =~ s/[^aiow]//g;
+    my $pset = gen_mode_change( $peerprev, $peerumode );
     my $set = gen_mode_change( $previous, $record->{umode} );
+    if ( $pset and !$peer_ignore ) {
+      my $hashref = { prefix => $nick, command => 'MODE', params => [ $nick, $pset ] };
+      $self->{ircd}->send_output( $hashref, $self->_state_connected_peers() );
+    }
     if ( $set ) {
       my $hashref = { prefix => $nick, command => 'MODE', params => [ $nick, $set ] };
-      $self->{ircd}->send_output( $hashref, $self->_state_connected_peers() ) unless $peer_ignore;
       $self->{ircd}->send_event( "daemon_umode", $self->state_user_full( $nick ), $set ) unless $peer_ignore;
       push @{ $ref }, $hashref;
     }
@@ -2851,7 +2861,7 @@ sub _daemon_peer_nick {
   my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
   my $peer = $self->{state}->{conns}->{ $peer_id }->{name};
   SWITCH: {
-    if ( !$count or ( $prefix and $count < 2 ) or $count < 8 ) {
+    if ( !$count or ( $count < 8 and !$prefix ) ) {
 	$self->terminate_conn_error( $peer_id, 'Not enough arguments to server command.' );
 	last SWITCH;
     }
@@ -2862,7 +2872,7 @@ sub _daemon_peer_nick {
 	my $full = $self->state_user_full( $prefix );
 	my $unick = u_irc $prefix;
 	my $new = $args->[0]; my $unew = u_irc $new;
-	my $ts = $args->[1];
+	my $ts = $args->[1] || time();
 	my $record = $self->{state}->{users}->{ $unick };
 	my $server = uc $record->{server};
         if ( $unick eq $unew ) {
@@ -3555,6 +3565,7 @@ sub _daemon_peer_message {
 	  my $common = { };
 	  my $msg  = { command => $type, params => [ ( $status_msg ? $target : $channel ), $args->[1] ] };
 	  foreach my $member ( $self->state_chan_list( $channel, $status_msg ) ) {
+		next if $self->state_user_is_deaf( $member );
 		$common->{ $self->_state_user_route( $member ) }++;
 	  }
 	  delete $common->{ $peer_id };
@@ -3905,7 +3916,9 @@ sub _state_send_burst {
   foreach my $nick ( keys %{ $self->{state}->{users} } ) {
     my $record = $self->{state}->{users}->{ $nick };
     next if $record->{route_id} eq $conn_id;
-    my $arrayref = [ $record->{nick}, $record->{hops} + 1, $record->{ts}, ( '+' . $record->{umode} ), $record->{auth}->{ident}, $record->{auth}->{hostname}, $record->{server}, $record->{ircname} ];
+    my $umode_fixed = $record->{umode};
+    $umode_fixed =~ s/[^aiow]//g;
+    my $arrayref = [ $record->{nick}, $record->{hops} + 1, $record->{ts}, ( '+' . $umode_fixed ), $record->{auth}->{ident}, $record->{auth}->{hostname}, $record->{server}, $record->{ircname} ];
     $self->{ircd}->send_output( { command => 'NICK', params => $arrayref }, $conn_id );
   }
   # Send SJOIN+MODE burst
@@ -4134,6 +4147,14 @@ sub state_user_is_operator {
   my $nick = shift || return;
   return unless $self->state_nick_exists( $nick );
   return 0 unless $self->{state}->{users}->{ u_irc $nick }->{umode} =~ /o/;
+  return 1;
+}
+
+sub state_user_is_deaf {
+  my $self = shift;
+  my $nick = shift || return;
+  return unless $self->state_nick_exists( $nick );
+  return 0 unless $self->{state}->{users}->{ u_irc $nick }->{umode} =~ /D/;
   return 1;
 }
 
@@ -4453,13 +4474,14 @@ sub configure {
   $self->{config}->{USERLEN} = 10 unless ( defined ( $self->{config}->{USERLEN} ) and $self->{config}->{USERLEN} > 10 );
   $self->{config}->{REALLEN} = 50 unless ( defined ( $self->{config}->{REALLEN} ) and $self->{config}->{REALLEN} > 50 );
   $self->{config}->{TOPICLEN} = 80 unless ( defined ( $self->{config}->{TOPICLEN} ) and $self->{config}->{TOPICLEN} > 80 );
+  $self->{config}->{AWAYLEN} = 160 unless ( defined ( $self->{config}->{AWAYLEN} ) and $self->{config}->{AWAYLEN} < 160 );
   $self->{config}->{CHANNELLEN} = 50 unless ( defined ( $self->{config}->{CHANNELLEN} ) and $self->{config}->{CHANNELLEN} > 50 );
   $self->{config}->{PASSWDLEN} = 20 unless ( defined ( $self->{config}->{PASSWDLEN} ) and $self->{config}->{PASSWDLEN} > 20 );
   $self->{config}->{KEYLEN} = 23 unless ( defined ( $self->{config}->{KEYLEN} ) and $self->{config}->{KEYLEN} > 23 );
   $self->{config}->{MAXCHANNELS} = 15 unless ( defined ( $self->{config}->{MAXCHANNELS} ) and $self->{config}->{MAXCHANNELS} > 15 );
   $self->{config}->{MODES} = 4 unless ( defined ( $self->{config}->{MODES} ) and $self->{config}->{MODES} > 4 );
   $self->{config}->{MAXTARGETS} = 4 unless ( defined ( $self->{config}->{MAXTARGETS} ) and $self->{config}->{MAXTARGETS} > 4 );
-  $self->{config}->{MAXBANS} = 30 unless ( defined ( $self->{config}->{MAXBANS} ) and $self->{config}->{MAXBANS} > 30 );
+  $self->{config}->{MAXBANS} = 25 unless ( defined ( $self->{config}->{MAXBANS} ) and $self->{config}->{MAXBANS} > 30 );
   $self->{config}->{MAXBANLENGTH} = 1024 unless ( defined ( $self->{config}->{MAXBANLENGTH} ) and $self->{config}->{MAXBANLENGTH} < 1024 );
   $self->{config}->{BANLEN} = $self->{config}->{USERLEN} + $self->{config}->{NICKLEN} + $self->{config}->{HOSTLEN} + 3;
   $self->{config}->{USERHOST_REPLYLEN} = $self->{config}->{USERLEN} + $self->{config}->{NICKLEN} + $self->{config}->{HOSTLEN} + 5;
@@ -4546,10 +4568,13 @@ sub configure {
     CHANTYPES => '#&',
     PREFIX => '(ohv)@%+',
     CHANMODES => 'eIb,k,l,imnpst',
-    map { ( uc $_, $self->{config}->{$_} ) } qw(MAXCHANNELS MAXTARGETS MAXBANS NICKLEN TOPICLEN KICKLEN CASEMAPPING NETWORK MODES),
+    STATUSMSG => '@%+',
+    DEAF => 'D',
+    MAXLIST => 'beI:' . $self->{config}->{MAXBANS},
+    map { ( uc $_, $self->{config}->{$_} ) } qw(MAXCHANNELS MAXTARGETS NICKLEN TOPICLEN KICKLEN CASEMAPPING NETWORK MODES AWAYLEN),
   };
 
-  $self->{config}->{capab} = [ qw(QS EX IE HOPS UNKLN KLN GLN EOB) ];
+  $self->{config}->{capab} = [ qw(QS EX CHW IE HOPS UNKLN KLN GLN EOB) ];
 
   return 1;
 }
