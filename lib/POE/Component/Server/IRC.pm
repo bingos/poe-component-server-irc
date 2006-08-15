@@ -13,7 +13,6 @@ use POE;
 use POE::Component::Server::IRC::Common qw(:ALL);
 use POE::Component::Server::IRC::Plugin qw(:ALL);
 use Date::Format;
-use Data::Dumper;
 use vars qw($VERSION $REVISION);
 
 $VERSION = '0.99';
@@ -345,7 +344,6 @@ sub _cmd_from_peer {
   my $cmd = $input->{command};
   my $params = $input->{params};
   my $prefix = $input->{prefix};
-  print STDERR $input->{raw_line}, "\n";
   my $invalid = 0;
   SWITCH: {
     my $method = '_daemon_peer_' . lc $cmd;
@@ -387,7 +385,6 @@ sub _cmd_from_peer {
 	last SWITCH;
     }
     $invalid = 1;
-    print STDERR $input->{raw_line}, "\n";
   }
   return 1 if $invalid;
   $self->_state_cmd_stat( $cmd, $input->{raw_line}, 1 );
@@ -430,7 +427,7 @@ sub _cmd_from_client {
 	my $modestring = join('', @{ $params }[1..$#{ $params }] );
 	$modestring =~ s/\s+//g;
 	$modestring =~ s/[^a-zA-Z+-]+//g;
-	$modestring =~ s/[^wio+-]+//g;
+	$modestring =~ s/[^Dlwiozl+-]+//g;
 	$modestring = unparse_mode_line $modestring;
 	$self->_send_output_to_client( $wheel_id => $_ ) for $self->_daemon_cmd_umode( $nick, $modestring );
 	last SWITCH;
@@ -475,7 +472,7 @@ sub _daemon_cmd_message {
 	  push @{ $ref }, [ '413', $target ];
 	  next LOOP;
 	}
-	if ( $targ_type =~ /(server|host)mask/ and $targs->{$target}->[0] !~ /\x2E.*[\x2A\x3F]+.*$/ ) {
+	if ( $targ_type =~ /(server|host)mask/ and $targs->{$target}->[0] =~ /\x2E.*[\x2A\x3F]+.*$/ ) {
 	  push @{ $ref }, [ '414', $target ];
 	  next LOOP;
 	}
@@ -4380,6 +4377,19 @@ sub _state_o_line {
     }
   } 
   return 1 if matches_mask( $ops->{ $user }->{ipmask}, $client_ip );
+  return 0;
+}
+
+sub _state_users_share_chan {
+  my $self = shift;
+  my $nick1 = shift || return;
+  my $nick2 = shift || return;
+  return unless $self->state_nick_exists( $nick1 ) and $self->state_nick_exists( $nick2 );
+  my $rec1 = $self->{state}->{users}->{ u_irc $nick1 };
+  my $rec2 = $self->{state}->{users}->{ u_irc $nick2 };
+  foreach my $chan ( keys %{ $rec1->{chans} } ) {
+	return 1 if $rec2->{chans}->{ $chan };
+  }
   return 0;
 }
 
