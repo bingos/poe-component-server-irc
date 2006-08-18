@@ -19,7 +19,7 @@ unless ( $GOT_SSL ) {
 
 plan tests => 18;
 
-my $pocosi = POE::Component::Server::IRC->spawn( auth => 0, options => { trace => 0 }, antiflood => 0, plugin_debug => 0, debug => 0, sslify_options => [ 'ircd.key', 'ircd.crt' ] );
+my $pocosi = POE::Component::Server::IRC->spawn( auth => 0, options => { trace => 1 }, antiflood => 0, plugin_debug => 0, debug => 0, sslify_options => [ 'ircd.key', 'ircd.crt' ] );
 my $pocoirc = POE::Component::IRC->spawn( flood => 1, UseSSL => 1, options => { trace => 0 } );
 
 if ( $pocosi and $pocoirc ) {

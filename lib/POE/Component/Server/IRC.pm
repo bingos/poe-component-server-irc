@@ -622,7 +622,7 @@ sub _daemon_cmd_message {
 	  next LOOP;
 	}
 	if ( $self->state_nick_exists( $target ) ) {
-	  $target = ( split /!/, $self->state_user_full( $target ) )[0];
+	  $target = $self->state_user_nick( $target );
 	  my $msg = { prefix => $nick, command => $type, params => [ $target, $args->[1] ] };
 	  my $route_id = $self->_state_user_route( $target );
 	  if ( $route_id eq 'spoofed' ) {
@@ -635,6 +635,61 @@ sub _daemon_cmd_message {
 	  next LOOP;
 	}
      }
+  }
+  return @{ $ref } if wantarray();
+  return $ref;
+}
+
+sub _daemon_cmd_accept {
+  my $self = shift;
+  my $nick = shift || return;
+  my $server = $self->server_name();
+  my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
+  SWITCH: {
+    if ( !$count or $args->[0] eq '*' ) {
+	my $record = $self->{state}->{users}->{ u_irc $nick };
+	my @list;
+	foreach my $accept ( keys %{ $record->{accepts} } ) {
+	  unless ( $self->state_nick_exists( $accept ) ) {
+	     delete $record->{accepts}->{ $accept };
+	     next;
+	  }
+	  push @list, $self->state_user_nick( $accept );
+	}
+	push @{ $ref }, { prefix => $server, command => '281', params => [ $nick, join( ' ', @list ) ] } if @list;
+	push @{ $ref }, { prefix => $server, command => '282', params => [ $nick, 'End of /ACCEPT list' ] };
+	last SWITCH;
+    }
+  }
+  my $record = $self->{state}->{users}->{ u_irc $nick };
+  for ( keys %{ $record->{accepts} } ) {
+    delete $record->{accepts}->{$_} unless $self->state_nick_exists( $_ );
+  }
+  OUTER: foreach my $target ( split /,/, $args->[0] ) {
+    if ( my ($foo) = $target =~ /^\-(.+)$/ ) {
+	my $dfoo = delete $record->{accepts}->{ u_irc $foo };
+	unless ( $dfoo ) {
+	  push @{ $ref }, { prefix => $server, command => '458', params => [ $nick, $foo, "doesn\'t exist" ] };
+	}
+	next OUTER;
+    }
+    unless ( $self->state_nick_exists( $target ) ) {
+	push @{ $ref }, [ '401', $target ];
+	next OUTER;
+    }
+    # 457 ERR_ACCEPTEXIST
+    if ( $record->{accepts}->{ u_irc $target } ) {
+	push @{ $ref }, { prefix => $server, command => '457', params => [ $nick, $self->state_user_nick( $target ), 'already exists' ] };
+	next OUTER;
+    }
+    if ( $record->{umode} and $record->{umode} =~ /G/ and $self->_state_users_share_chan( $nick, $target ) ) {
+	push @{ $ref }, { prefix => $server, command => '457', params => [ $nick, $self->state_user_nick( $target ), 'already exists' ] };
+	next OUTER;
+    }
+    $record->{accepts}->{ u_irc $target } = time();
+    my @list = map { $self->state_user_nick( $_ ) } keys %{ $record->{accepts} };
+    push @{ $ref }, { prefix => $server, command => '281', params => [ $nick, join( ' ', @list ) ] } if @list;
+    push @{ $ref }, { prefix => $server, command => '282', params => [ $nick, 'End of /ACCEPT list' ] };
   }
   return @{ $ref } if wantarray();
   return $ref;
@@ -1113,7 +1168,7 @@ sub _daemon_cmd_unkline {
      }
      my ($user,$host);
      if ( $args->[0] !~ /\@/ ) {
-	if ( my $rogue = $self->_state_user_full( $args->[0] ) ) {
+	if ( my $rogue = $self->state_user_full( $args->[0] ) ) {
 	  ($user,$host) = ( split /[!\@]/, $rogue )[1..2]
 	} else {
 	  push @{ $ref }, [ '401', $args->[0] ];
@@ -1219,7 +1274,7 @@ sub _daemon_cmd_kill {
 	push @{ $ref }, [ '401', $args->[0] ];
 	last SWITCH;
      }
-     my $target = ( split /!/, $self->state_user_full( $args->[0] ) )[0];
+     my $target = $self->state_user_nick( $args->[0] );
      my $comment = $args->[1] || '<No reason given>';
      if ( $self->_state_is_local_user( $target ) ) {
 	my $route_id = $self->_state_user_route( $target );
@@ -1920,7 +1975,7 @@ sub _daemon_cmd_mode {
       }
       if ( $mode =~ /^(\+|-)([ohv])/ and !$self->state_is_chan_member( $arg, $chan ) ) {
 	next if ++$mode_count > $maxmodes;
-	push @{ $ref }, [ '441', $chan, (split /!/, $self->state_user_full( $arg ))[0] ];
+	push @{ $ref }, [ '441', $chan, $self->state_user_nick( $arg ) ];
 	next;
       }
       if ( my ($flag,$char) = $mode =~ /^(\+|-)([ohv])/ ) {
@@ -1932,17 +1987,17 @@ sub _daemon_cmd_mode {
 	  if ( $char eq 'h' and $record->{users}->{ $arg } =~ /v/ ) {
 	     $record->{users}->{ $arg } =~ s/v//g;
 	     $reply .= '-v';
-	     push @reply_args, (split /!/, $self->state_user_full( $arg ))[0];
+	     push @reply_args, $self->state_user_nick( $arg );
 	  }
 	  if ( $char eq 'o' and $record->{users}->{ $arg } =~ /h/ ) {
 	     $record->{users}->{ $arg } =~ s/h//g;
 	     $reply .= '-h';
-	     push @reply_args, (split /!/, $self->state_user_full( $arg ))[0];
+	     push @reply_args, $self->state_user_nick( $arg );
 	  }
 	  $record->{users}->{ $arg }  = join('', sort split //, $record->{users}->{ $arg } . $char );
 	  $self->{state}->{users}->{ $arg }->{chans}->{ u_irc $chan } = $record->{users}->{ $arg };
 	  $reply .= $mode;
-	  push @reply_args, (split /!/, $self->state_user_full( $arg ))[0];
+	  push @reply_args, $self->state_user_nick( $arg );
         }
 	if ( $flag eq '-' and $record->{users}->{ u_irc $arg } =~ /$char/ ) {
 	  # Update user and chan record
@@ -1950,7 +2005,7 @@ sub _daemon_cmd_mode {
 	  $record->{users}->{ $arg } =~ s/$char//g;
 	  $self->{state}->{users}->{ $arg }->{chans}->{ u_irc $chan } = $record->{users}->{ $arg };
 	  $reply .= $mode;
-	  push @reply_args, (split /!/, $self->state_user_full( $arg ))[0];
+	  push @reply_args, $self->state_user_nick( $arg );
         }
 	next;
       }
@@ -2203,7 +2258,7 @@ sub _daemon_cmd_kick {
 	push @{ $ref }, [ '401', $who ];
 	last SWITCH;
     }
-    $who = ( split /!/, $self->state_user_full( $who ) )[0];
+    $who = $self->state_user_nick( $who );
     if ( !$self->state_is_chan_op( $nick, $chan ) ) {
 	push @{ $ref }, [ '482', $chan ];
 	last SWITCH;
@@ -2285,7 +2340,7 @@ sub _daemon_cmd_invite {
 	push @{ $ref }, [ '401', $who ];
 	last SWITCH;
     }
-    $who = ( split /!/, $self->state_user_full( $who ) )[0];
+    $who = $self->state_user_nick( $who );
     if ( !$self->state_chan_exists( $chan ) ) {
 	push @{ $ref }, [ '403', $chan ];
 	last SWITCH;
@@ -2711,7 +2766,7 @@ sub _daemon_peer_kill {
      if ( !$self->state_nick_exists( $args->[0] ) ) {
 	last SWITCH;
      }
-     my $target = ( split /!/, $self->state_user_full( $args->[0] ) )[0];
+     my $target = $self->state_user_nick( $args->[0] );
      my $comment = $args->[1];
      if ( $self->_state_is_local_user( $target ) ) {
 	my $route_id = $self->_state_user_route( $target );
@@ -2994,7 +3049,7 @@ sub _daemon_peer_kick {
     if ( !$self->state_nick_exists( $who ) ) {
 	last SWITCH;
     }
-    $who = ( split /!/, $self->state_user_full( $who ) )[0];
+    $who = $self->state_user_nick( $who );
     if ( !$self->state_is_chan_op( $nick, $chan ) ) {
 	last SWITCH;
     }
@@ -3071,7 +3126,7 @@ sub _daemon_peer_sjoin {
 		$common->{ $user } = $self->_state_user_route( $user ) if $self->_state_is_local_user( $user );
 		next unless $chanrec->{users}->{ $user };
 		my $current = $chanrec->{users}->{ $user };
-		my $proper = ( split /!/, $self->state_user_full( $user ) )[0];
+		my $proper = $self->state_user_nick( $user );
 		$chanrec->{users}->{ $user } = '';
 		$self->{state}->{users}->{ $user }->{chans}->{ u_irc $chanrec->{name} } = '';
 		push @deop, "-$current"; 
@@ -3244,17 +3299,17 @@ sub _daemon_peer_mode {
 	  if ( $char eq 'h' and $record->{users}->{ $arg } =~ /v/ ) {
 	     $record->{users}->{ $arg } =~ s/v//g;
 	     $reply .= '-v';
-	     push @reply_args, ( split /!/, $self->state_user_full( $arg ) )[0];
+	     push @reply_args, $self->state_user_nick( $arg );
 	  }
 	  if ( $char eq 'o' and $record->{users}->{ $arg } =~ /h/ ) {
 	     $record->{users}->{ $arg } =~ s/h//g;
 	     $reply .= '-h';
-	     push @reply_args, ( split /!/, $self->state_user_full( $arg ) )[0];
+	     push @reply_args, $self->state_user_nick( $arg );
 	  }
 	  $record->{users}->{ $arg }  = join('', sort split //, $record->{users}->{ $arg } . $char );
 	  $self->{state}->{users}->{ $arg }->{chans}->{ u_irc $chan } = $record->{users}->{ $arg };
 	  $reply .= "+$char";
-	  push @reply_args, ( split /!/, $self->state_user_full( $arg ) )[0];
+	  push @reply_args, $self->state_user_nick( $arg );
         }
 	if ( $flag eq '-' and $record->{users}->{ u_irc $arg } =~ /$char/ ) {
 	  # Update user and chan record
@@ -3262,7 +3317,7 @@ sub _daemon_peer_mode {
 	  $record->{users}->{ $arg } =~ s/$char//g;
 	  $self->{state}->{users}->{ $arg }->{chans}->{ u_irc $chan } = $record->{users}->{ $arg };
 	  $reply .= "-$char";
-	  push @reply_args, ( split /!/, $self->state_user_full( $arg ) )[0];
+	  push @reply_args, $self->state_user_nick( $arg );
         }
 	next;
       }
@@ -3579,7 +3634,7 @@ sub _daemon_peer_message {
 	  next LOOP;
 	}
 	if ( $self->state_nick_exists( $target ) ) {
-	  $target = ( split /!/, $self->state_user_full( $target ) )[0];
+	  $target = $self->state_user_nick( $target );
 	  my $msg = { prefix => $nick, command => $type, params => [ $target, $args->[1] ] };
 	  my $route_id = $self->_state_user_route( $target );
 	  if ( $route_id eq 'spoofed' ) {
@@ -3630,7 +3685,7 @@ sub _daemon_peer_invite {
 	last SWITCH;
     }
     my ($who,$chan) = @{ $args };
-    $who = ( split /!/, $self->state_user_full( $who ) )[0];
+    $who = $self->state_user_nick( $who );
     $chan = $self->_state_chan_name( $chan );
     my $local;
     if ( $self->_state_is_local_user( $who ) ) {
@@ -4116,6 +4171,13 @@ sub state_user_full {
   return $record->{nick} . '!' . $record->{auth}->{ident} . '@' . $record->{auth}->{hostname};
 }
 
+sub state_user_nick {
+  my $self = shift;
+  my $nick = shift || return;
+  return unless $self->state_nick_exists( $nick );
+  return $self->{state}->{users}->{ u_irc $nick }->{nick};
+}
+
 sub _state_user_ip {
   my $self = shift;
   my $nick = shift || return;
@@ -4489,6 +4551,7 @@ sub configure {
   $self->{config}->{PASSWDLEN} = 20 unless ( defined ( $self->{config}->{PASSWDLEN} ) and $self->{config}->{PASSWDLEN} > 20 );
   $self->{config}->{KEYLEN} = 23 unless ( defined ( $self->{config}->{KEYLEN} ) and $self->{config}->{KEYLEN} > 23 );
   $self->{config}->{MAXCHANNELS} = 15 unless ( defined ( $self->{config}->{MAXCHANNELS} ) and $self->{config}->{MAXCHANNELS} > 15 );
+  $self->{config}->{MAXACCEPT} = 20 unless ( defined ( $self->{config}->{MAXACCEPT} ) and $self->{config}->{MAXACCEPT} > 20 );
   $self->{config}->{MODES} = 4 unless ( defined ( $self->{config}->{MODES} ) and $self->{config}->{MODES} > 4 );
   $self->{config}->{MAXTARGETS} = 4 unless ( defined ( $self->{config}->{MAXTARGETS} ) and $self->{config}->{MAXTARGETS} > 4 );
   $self->{config}->{MAXBANS} = 25 unless ( defined ( $self->{config}->{MAXBANS} ) and $self->{config}->{MAXBANS} > 30 );
@@ -4760,7 +4823,7 @@ sub daemon_server_kill {
      if ( !$self->state_nick_exists( $args->[0] ) ) {
 	last SWITCH;
      }
-     my $target = ( split /!/, $self->state_user_full( $args->[0] ) )[0];
+     my $target = $self->state_user_nick( $args->[0] );
      my $comment = $args->[1] || '<No reason given>';
      my $conn_id = ( $args->[2] and $self->_connection_exists( $args->[2] ) ? $args->[2] : '' );
      if ( $self->_state_is_local_user( $target ) ) {
@@ -4915,7 +4978,7 @@ sub daemon_server_kick {
     if ( !$self->state_nick_exists( $who ) ) {
 	last SWITCH;
     }
-    $who = ( split /!/, $self->state_user_full( $who ) )[0];
+    $who = $self->state_user_nick( $who );
     if ( !$self->state_is_chan_member( $who, $chan ) ) {
 	last SWITCH;
     }
@@ -5028,7 +5091,7 @@ sub _spoofed_command {
   my ($kernel,$self,$state,$nick) = @_[KERNEL,OBJECT,STATE,ARG0];
   return unless $self->state_nick_exists( $nick );
   return unless $self->_state_user_route( $nick ) eq 'spoofed';
-  $nick = ( split /!/, $self->state_user_full( $nick ) )[0];
+  $nick = $self->state_user_nick( $nick );
   $state =~ s/daemon_cmd_//;
   my $command = "_daemon_cmd_" . $state;
   if ( $state =~ /^(privmsg|notice)$/ ) {
