@@ -68,8 +68,9 @@ sub create {
 	import POE::Component::SSLify qw(SSLify_Options Server_SSLify Client_SSLify);
 	$self->{got_ssl} = 1;
     };
-    unless ($@) {
-	eval { SSLify_Options( @{ $sslify_options } ) };
+    warn "$@\n" if $@;
+    if ( $self->{got_ssl} ) {
+	eval { SSLify_Options( @{ $sslify_options } ); };
         $self->{got_server_ssl} = 1 unless $@;
 	warn "$@\n" if $@;
     }
@@ -238,7 +239,7 @@ sub _accept_connection {
   my $listener = $self->{listeners}->{ $listener_id };
 
   if ( $self->{got_server_ssl} and $listener->{usessl} ) {
-	eval { $socket = Server_SSLify( $socket ); };
+	eval { $socket = POE::Component::SSLify::Server_SSLify( $socket ); };
 	warn "$@\n" if $@;
   }
 
@@ -415,7 +416,7 @@ sub _sock_up {
   my $cntr = delete $self->{connectors}->{ $connector_id };
   if ( $self->{got_ssl} and $cntr->{usessl} ) {
     eval {
-      $socket = Client_SSLify( $socket );
+      $socket = POE::Component::SSLify::Client_SSLify( $socket );
     };
     warn "Couldn't use an SSL socket: $@ \n" if $@;
   }

@@ -3,15 +3,16 @@ use POE;
 use POE::Component::Server::IRC;
 use POE::Component::IRC;
 
-my $GOT_SSL;
+my $GOT_SSL = 1;
 
-BEGIN: {
-  $GOT_SSL = 0;
-  eval {
-        require POE::Component::SSLify;
-        $GOT_SSL = 0;
-  };
-}
+#BEGIN: {
+#  $GOT_SSL = 0;
+#  eval {
+#        require POE::Component::SSLify;
+#	import POE::Component::SSLify qw( Server_SSLify SSLify_Options Client_SSLify );
+#        $GOT_SSL = 1;
+#  };
+#}
 
 unless ( $GOT_SSL ) {
   plan skip_all => "Not done yet";
@@ -19,7 +20,7 @@ unless ( $GOT_SSL ) {
 
 plan tests => 18;
 
-my $pocosi = POE::Component::Server::IRC->spawn( auth => 0, options => { trace => 1 }, antiflood => 0, plugin_debug => 0, debug => 0, sslify_options => [ 'ircd.key', 'ircd.crt' ] );
+my $pocosi = POE::Component::Server::IRC->spawn( auth => 0, options => { trace => 0 }, antiflood => 0, plugin_debug => 0, debug => 0, sslify_options => [ 'ircd.key', 'ircd.crt' ] );
 my $pocoirc = POE::Component::IRC->spawn( flood => 1, UseSSL => 1, options => { trace => 0 } );
 
 if ( $pocosi and $pocoirc ) {
