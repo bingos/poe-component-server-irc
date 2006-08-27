@@ -1,9 +1,18 @@
-use Test::More tests => 16;
-BEGIN { use_ok('POE::Component::Server::IRC') };
-BEGIN { use_ok('POE') };
-use IO::Handle;
-STDOUT->autoflush(1);
-STDERR->autoflush(1);
+use Test::More; # tests => 16;
+use POE qw(Component::Server::IRC);
+
+my $GOT_ZLIB = 0;
+
+BEGIN: {
+  eval { 
+	require POE::Filter::Zlib::Stream;
+	$GOT_ZLIB = 1;
+  };
+}
+
+plan skip_all => "POE::Filter::Zlib::Stream not found" unless $GOT_ZLIB;
+
+plan tests => 14;
 
 my $listener = POE::Component::Server::IRC->spawn( auth => 0, options => { trace => 0 }, antiflood => 0, plugin_debug => 0, debug => 0, config => { servername => 'listen.server.irc' } );
 my $connector = POE::Component::Server::IRC->spawn( auth => 0, options => { trace => 0 }, antiflood => 0, plugin_debug => 0, debug => 0, config => { servername => 'connect.server.irc' } );

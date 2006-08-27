@@ -2,7 +2,7 @@ package POE::Component::Server::IRC::Backend;
 
 use strict;
 use warnings;
-use POE qw(Wheel::SocketFactory Wheel::ReadWrite Filter::Stackable Filter::Zlib::Stream Filter::Line Filter::IRCD);
+use POE qw(Wheel::SocketFactory Wheel::ReadWrite Filter::Stackable Filter::Line Filter::IRCD);
 use POE::Component::Server::IRC::Plugin qw( :ALL );
 use POE::Component::Server::IRC::Pipeline;
 use Socket;
@@ -60,6 +60,11 @@ sub create {
 	heap => $self,
 	( ref($options) eq 'HASH' ? ( options => $options ) : () ),
   )->ID();
+  $self->{got_zlib} = 0;
+  eval { 
+	require POE::Filter::Zlib::Stream; 
+	$self->{got_zlib} = 1;
+  };
 
   if ( $sslify_options and ref $sslify_options eq 'ARRAY' ) {
     $self->{got_ssl} = $self->{got_server_ssl} = 0;
@@ -780,6 +785,7 @@ sub antiflood {
 
 sub compressed_link {
   my ($self,$wheel_id,$value,$cntr) = splice @_, 0, 4;
+  return unless $self->{got_zlib};
   return unless $self->_wheel_exists( $wheel_id );
   return $self->{wheels}->{ $wheel_id }->{compress} unless defined $value;
   if ( $value ) {
@@ -791,25 +797,6 @@ sub compressed_link {
 	}
   } else {
 	$self->{wheels}->{ $wheel_id }->{wheel}->get_input_filter()->shift();
-  }
-  $self->{wheels}->{ $wheel_id }->{compress} = $value;
-}
-
-sub compressed_link_old {
-  my ($self,$wheel_id,$value,$cntr) = splice @_, 0, 4;
-  return unless $self->_wheel_exists( $wheel_id );
-  return $self->{wheels}->{ $wheel_id }->{compress} unless defined $value;
-  if ( $value ) {
-	$self->{wheels}->{ $wheel_id }->{compress_pending} = 1;
-	$self->{wheels}->{ $wheel_id }->{wheel}->set_input_filter( POE::Filter::Stackable->new( Filters => [ POE::Filter::Zlib->new(), $self->{line_filter}, $self->{ircd_filter} ] ) );
-	$self->_send_event( $self->{prefix} . 'compressed_input' => $wheel_id );
-	if ( $cntr ) {
-	  delete $self->{wheels}->{ $wheel_id }->{compress_pending};
-	  $self->{wheels}->{ $wheel_id }->{wheel}->set_output_filter( POE::Filter::Stackable->new( Filters => [ POE::Filter::Zlib->new(), $self->{line_filter}, $self->{ircd_filter} ] ) );
-	  $self->_send_event( $self->{prefix} . 'compressed_output' => $wheel_id );
-	}
-  } else {
-	$self->{wheels}->{ $wheel_id }->{wheel}->set_filter( $self->{filter} );
   }
   $self->{wheels}->{ $wheel_id }->{compress} = $value;
 }

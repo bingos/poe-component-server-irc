@@ -427,7 +427,7 @@ sub _cmd_from_client {
 	my $modestring = join('', @{ $params }[1..$#{ $params }] );
 	$modestring =~ s/\s+//g;
 	$modestring =~ s/[^a-zA-Z+-]+//g;
-	$modestring =~ s/[^Dlwiozl+-]+//g;
+	$modestring =~ s/[^DGglwiozl+-]+//g;
 	$modestring = unparse_mode_line $modestring;
 	$self->_send_output_to_client( $wheel_id => $_ ) for $self->_daemon_cmd_umode( $nick, $modestring );
 	last SWITCH;
@@ -621,8 +621,27 @@ sub _daemon_cmd_message {
 	  }
 	  next LOOP;
 	}
+	my $server = $self->server_name();
 	if ( $self->state_nick_exists( $target ) ) {
 	  $target = $self->state_user_nick( $target );
+	  if ( my $away = $self->_state_user_away_msg( $target ) ) {
+	     push @{ $ref }, { prefix => $server, command => '301', params => [ $nick, $target, $away ] };
+	  }
+	  my $targ_umode = $self->state_user_umode( $target );
+	  # Target user has CALLERID on
+	  if ( $targ_umode and $targ_umode =~ /[Gg]/ ) {
+	     my $targ_rec = $self->{state}->{users}->{ u_irc $target };
+	     if ( ( $targ_umode =~ /G/ and ( !$self->state_users_share_chan( $target, $nick ) or !$targ_rec->{accepts}->{ u_irc $nick } ) ) or ( $targ_umode =~ /g/ and !$targ_rec->{accepts}->{ u_irc $nick } ) ) {
+		push @{ $ref }, { prefix => $server, command => '716', params => [ $nick, $target, 'is in +g mode (server side ignore)' ] };
+		unless ( $targ_rec->{last_caller} and time() - $targ_rec->{last_caller} >= 60 ) {
+		   my ($n,$uh) = split /!/, $self->state_user_full( $nick );
+		   $self->{ircd}->send_output( { prefix => $server, command => '718', params => [ $target, "$n\[$uh\]", 'is messaging you, and you are umode +g.'] }, $targ_rec->{route_id} ) unless $targ_rec->{route_id} eq 'spoofed';
+		   push @{ $ref }, { prefix => $server, command => '717', params => [ $nick, $target, 'has been informed that you messaged them.' ] };
+		}
+		$targ_rec->{last_caller} = time();
+		next LOOP;
+	     }
+	  }
 	  my $msg = { prefix => $nick, command => $type, params => [ $target, $args->[1] ] };
 	  my $route_id = $self->_state_user_route( $target );
 	  if ( $route_id eq 'spoofed' ) {
@@ -671,6 +690,8 @@ sub _daemon_cmd_accept {
 	unless ( $dfoo ) {
 	  push @{ $ref }, { prefix => $server, command => '458', params => [ $nick, $foo, "doesn\'t exist" ] };
 	}
+	delete $self->{state}->{accepts}->{ u_irc $foo }->{ u_irc $nick };
+	delete $self->{state}->{accepts}->{ u_irc $foo } unless keys %{ $self->{state}->{accepts}->{ u_irc $foo } };
 	next OUTER;
     }
     unless ( $self->state_nick_exists( $target ) ) {
@@ -686,7 +707,7 @@ sub _daemon_cmd_accept {
 	push @{ $ref }, { prefix => $server, command => '457', params => [ $nick, $self->state_user_nick( $target ), 'already exists' ] };
 	next OUTER;
     }
-    $record->{accepts}->{ u_irc $target } = time();
+    $self->{state}->{accepts}->{ u_irc $target }->{ u_irc $nick } = $record->{accepts}->{ u_irc $target } = time();
     my @list = map { $self->state_user_nick( $_ ) } keys %{ $record->{accepts} };
     push @{ $ref }, { prefix => $server, command => '281', params => [ $nick, join( ' ', @list ) ] } if @list;
     push @{ $ref }, { prefix => $server, command => '282', params => [ $nick, 'End of /ACCEPT list' ] };
@@ -707,6 +728,8 @@ sub _daemon_cmd_quit {
   $self->{ircd}->send_output( { prefix => $record->{nick}, command => 'QUIT', params => [ $qmsg ] }, $self->_state_connected_peers() ) unless $record->{killed};
   push @{ $ref }, { prefix => $full, command => 'QUIT', params => [ $qmsg ] };
   $self->{ircd}->send_event( "daemon_quit", $full, $qmsg );
+  # Remove for peoples accept lists
+  delete $self->{state}->{users}->{$_}->{accepts}->{ u_irc $nick } for keys %{ $record->{accepts} };
   # Okay, all 'local' users who share a common channel with user.
   my $common = { };
   foreach my $uchan ( keys %{ $record->{chans} } ) {
@@ -1330,6 +1353,9 @@ sub _daemon_cmd_nick {
     } else {
 	$record->{nick} = $new;
 	$record->{ts} = time();
+  	# Remove from peoples accept lists
+  	delete $self->{state}->{users}->{$_}->{accepts}->{ $unick } for keys %{ $record->{accepts} };
+	delete $record->{accepts};
 	delete $self->{state}->{users}->{ $unick };
 	$self->{state}->{users}->{ $unew } = $record;
 	delete $self->{state}->{peers}->{ $server }->{users}->{ $unick };
@@ -2885,6 +2911,8 @@ sub _daemon_peer_quit {
   $self->{ircd}->send_output( { prefix => $record->{nick}, command => 'QUIT', params => [ $qmsg ] }, grep { !$conn_id or $_ ne $conn_id } $self->_state_connected_peers() ) unless $record->{killed};
   push @{ $ref }, { prefix => $full, command => 'QUIT', params => [ $qmsg ] };
   $self->{ircd}->send_event( "daemon_quit", $full, $qmsg );
+  # Remove for peoples accept lists
+  delete $self->{state}->{users}->{$_}->{accepts}->{ u_irc $nick } for keys %{ $record->{accepts} };
   # Okay, all 'local' users who share a common channel with user.
   my $common = { };
   foreach my $uchan ( keys %{ $record->{chans} } ) {
@@ -2933,6 +2961,9 @@ sub _daemon_peer_nick {
     	} else {
 	  $record->{nick} = $new;
 	  $record->{ts} = $ts;
+  	  # Remove from peoples accept lists
+  	  delete $self->{state}->{users}->{$_}->{accepts}->{ $unick } for keys %{ $record->{accepts} };
+	  delete $record->{accepts};
 	  delete $self->{state}->{users}->{ $unick };
 	  $self->{state}->{users}->{ $unew } = $record;
 	  delete $self->{state}->{peers}->{ $server }->{users}->{ $unick };
@@ -3633,8 +3664,27 @@ sub _daemon_peer_message {
 	  }
 	  next LOOP;
 	}
+	my $server = $self->server_name();
 	if ( $self->state_nick_exists( $target ) ) {
 	  $target = $self->state_user_nick( $target );
+	  if ( my $away = $self->_state_user_away_msg( $target ) ) {
+	     push @{ $ref }, { prefix => $server, command => '301', params => [ $nick, $target, $away ] };
+	  }
+	  my $targ_umode = $self->state_user_umode( $target );
+	  # Target user has CALLERID on
+	  if ( $targ_umode and $targ_umode =~ /[Gg]/ ) {
+	     my $targ_rec = $self->{state}->{users}->{ u_irc $target };
+	     if ( ( $targ_umode =~ /G/ and ( !$self->state_users_share_chan( $target, $nick ) or !$targ_rec->{accepts}->{ u_irc $nick } ) ) or ( $targ_umode =~ /g/ and !$targ_rec->{accepts}->{ u_irc $nick } ) ) {
+		push @{ $ref }, { prefix => $server, command => '716', params => [ $nick, $target, 'is in +g mode (server side ignore)' ] };
+		unless ( $targ_rec->{last_caller} and time() - $targ_rec->{last_caller} >= 60 ) {
+		   my ($n,$uh) = split /!/, $self->state_user_full( $nick );
+		   $self->{ircd}->send_output( { prefix => $server, command => '718', params => [ $target, "$n\[$uh\]", 'is messaging you, and you are umode +g.'] }, $targ_rec->{route_id} ) unless $targ_rec->{route_id} eq 'spoofed';
+		   push @{ $ref }, { prefix => $server, command => '717', params => [ $nick, $target, 'has been informed that you messaged them.' ] };
+		}
+		$targ_rec->{last_caller} = time();
+		next LOOP;
+	     }
+	  }
 	  my $msg = { prefix => $nick, command => $type, params => [ $target, $args->[1] ] };
 	  my $route_id = $self->_state_user_route( $target );
 	  if ( $route_id eq 'spoofed' ) {
@@ -4199,6 +4249,13 @@ sub _state_user_away_msg {
   my $nick = shift || return;
   return unless $self->state_nick_exists( $nick );
   return $self->{state}->{users}->{ u_irc $nick }->{away};
+}
+
+sub state_user_umode {
+  my $self = shift;
+  my $nick = shift || return;
+  return unless $self->state_nick_exists( $nick );
+  return $self->{state}->{users}->{ u_irc $nick }->{umode};
 }
 
 sub state_user_is_operator {
@@ -5364,6 +5421,10 @@ Takes one argument, a peer server name, returns true or false dependent on wheth
 =item state_user_full
 
 Takes one argument, a nickname, returns that users full nick!user@host if they exist, undef if they don't.
+
+=item state_user_umode
+
+Takes one argument, a nickname, returns that users mode setting.
 
 =item state_user_is_operator
 

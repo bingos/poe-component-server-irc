@@ -3,16 +3,16 @@ use POE;
 use POE::Component::Server::IRC;
 use POE::Component::IRC;
 
-my $GOT_SSL = 1;
+my $GOT_SSL;
 
-#BEGIN: {
-#  $GOT_SSL = 0;
-#  eval {
-#        require POE::Component::SSLify;
-#	import POE::Component::SSLify qw( Server_SSLify SSLify_Options Client_SSLify );
-#        $GOT_SSL = 1;
-#  };
-#}
+BEGIN: {
+  $GOT_SSL = 0;
+  eval {
+        require POE::Component::SSLify;
+	import POE::Component::SSLify qw( Server_SSLify SSLify_Options Client_SSLify );
+        $GOT_SSL = 0;
+  };
+}
 
 unless ( $GOT_SSL ) {
   plan skip_all => "Not done yet";
