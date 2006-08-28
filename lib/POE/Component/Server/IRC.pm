@@ -633,7 +633,7 @@ sub _daemon_cmd_message {
 	     my $targ_rec = $self->{state}->{users}->{ u_irc $target };
 	     if ( ( $targ_umode =~ /G/ and ( !$self->state_users_share_chan( $target, $nick ) or !$targ_rec->{accepts}->{ u_irc $nick } ) ) or ( $targ_umode =~ /g/ and !$targ_rec->{accepts}->{ u_irc $nick } ) ) {
 		push @{ $ref }, { prefix => $server, command => '716', params => [ $nick, $target, 'is in +g mode (server side ignore)' ] };
-		unless ( $targ_rec->{last_caller} and time() - $targ_rec->{last_caller} >= 60 ) {
+		if ( !$targ_rec->{last_caller} or ( time() - $targ_rec->{last_caller} ) >= 60 ) {
 		   my ($n,$uh) = split /!/, $self->state_user_full( $nick );
 		   $self->{ircd}->send_output( { prefix => $server, command => '718', params => [ $target, "$n\[$uh\]", 'is messaging you, and you are umode +g.'] }, $targ_rec->{route_id} ) unless $targ_rec->{route_id} eq 'spoofed';
 		   push @{ $ref }, { prefix => $server, command => '717', params => [ $nick, $target, 'has been informed that you messaged them.' ] };
@@ -665,7 +665,7 @@ sub _daemon_cmd_accept {
   my $server = $self->server_name();
   my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
   SWITCH: {
-    if ( !$count or $args->[0] eq '*' ) {
+    if ( !$count or !$args->[0] or $args->[0] eq '*' ) {
 	my $record = $self->{state}->{users}->{ u_irc $nick };
 	my @list;
 	foreach my $accept ( keys %{ $record->{accepts} } ) {
@@ -1408,8 +1408,8 @@ sub _daemon_cmd_isupport {
   my $nick = shift || return;
   my $server = $self->server_name();
   my $ref = [ ];
-  push @{ $ref }, { prefix => $server, command => '005', params => [ $nick, join(' ', map { ( defined ( $self->{config}->{isupport}->{$_} ) ? join('=', $_, $self->{config}->{isupport}->{$_} ) : $_ ) } qw(EXCEPTS INVEX MAXCHANNELS MAXBANS MAXTARGETS NICKLEN TOPICLEN KICKLEN) ), 'are supported by this server' ] };
-  push @{ $ref }, { prefix => $server, command => '005', params => [ $nick, join(' ', map { ( defined ( $self->{config}->{isupport}->{$_} ) ? join('=', $_, $self->{config}->{isupport}->{$_} ) : $_ ) } qw(CHANTYPES PREFIX CHANMODES NETWORK CASEMAPPING) ), 'are supported by this server' ] };
+  push @{ $ref }, { prefix => $server, command => '005', params => [ $nick, join(' ', map { ( defined ( $self->{config}->{isupport}->{$_} ) ? join('=', $_, $self->{config}->{isupport}->{$_} ) : $_ ) } qw(CALLERID EXCEPTS INVEX MAXCHANNELS MAXBANS MAXTARGETS NICKLEN TOPICLEN KICKLEN) ), 'are supported by this server' ] };
+  push @{ $ref }, { prefix => $server, command => '005', params => [ $nick, join(' ', map { ( defined ( $self->{config}->{isupport}->{$_} ) ? join('=', $_, $self->{config}->{isupport}->{$_} ) : $_ ) } qw(CHANTYPES PREFIX CHANMODES NETWORK CASEMAPPING DEAF) ), 'are supported by this server' ] };
   return @{ $ref } if wantarray();
   return $ref;
 }
@@ -3676,7 +3676,7 @@ sub _daemon_peer_message {
 	     my $targ_rec = $self->{state}->{users}->{ u_irc $target };
 	     if ( ( $targ_umode =~ /G/ and ( !$self->state_users_share_chan( $target, $nick ) or !$targ_rec->{accepts}->{ u_irc $nick } ) ) or ( $targ_umode =~ /g/ and !$targ_rec->{accepts}->{ u_irc $nick } ) ) {
 		push @{ $ref }, { prefix => $server, command => '716', params => [ $nick, $target, 'is in +g mode (server side ignore)' ] };
-		unless ( $targ_rec->{last_caller} and time() - $targ_rec->{last_caller} >= 60 ) {
+		if ( !$targ_rec->{last_caller} or ( time() - $targ_rec->{last_caller} ) >= 60 ) {
 		   my ($n,$uh) = split /!/, $self->state_user_full( $nick );
 		   $self->{ircd}->send_output( { prefix => $server, command => '718', params => [ $target, "$n\[$uh\]", 'is messaging you, and you are umode +g.'] }, $targ_rec->{route_id} ) unless $targ_rec->{route_id} eq 'spoofed';
 		   push @{ $ref }, { prefix => $server, command => '717', params => [ $nick, $target, 'has been informed that you messaged them.' ] };
@@ -4695,6 +4695,7 @@ sub configure {
   $self->{config}->{isupport} = {
     INVEX => undef,
     EXCEPT => undef,
+    CALLERID => undef,
     CHANTYPES => '#&',
     PREFIX => '(ohv)@%+',
     CHANMODES => 'eIb,k,l,imnpst',
