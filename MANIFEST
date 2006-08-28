@@ -1,6 +1,7 @@
 MANIFEST
 MANIFEST.SKIP
 Makefile.PL
+README
 ircd.key
 ircd.crt
 t/1_common.t
