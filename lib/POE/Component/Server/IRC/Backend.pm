@@ -451,11 +451,11 @@ sub _sock_up {
 # Generic Connection Handler #
 ##############################
 
-sub add_filter {
-  my $self = shift;
-  croak "add_filter requires an even number of parameters" if @_ & 1;
-  $self->call( 'add_filter' => @_ );
-}
+#sub add_filter {
+#  my $self = shift;
+#  croak "add_filter requires an even number of parameters" if @_ & 1;
+#  $self->call( 'add_filter' => @_ );
+#}
 
 sub _add_filter {
   my ($kernel,$self,$sender) = @_[KERNEL,OBJECT,SENDER];
@@ -547,10 +547,10 @@ sub _conn_input {
   undef;
 }
 
-sub del_filter {
-  my $self = shift;
-  $self->call( 'del_filter' => @_ );
-}
+#sub del_filter {
+#  my $self = shift;
+#  $self->call( 'del_filter' => @_ );
+#}
 
 sub _del_filter {
   my ($kernel,$self,$sender) = @_[KERNEL,OBJECT,SENDER];
@@ -1184,6 +1184,10 @@ Takes one mandatory argument and one optional. The first mandatory argument is a
 
 Takes one mandatory argument, a L<Net::Netmask> object to remove from the current denial list.
 
+=item denied
+
+Takes one argument, an IP address. Returns true or false depending on whether that IP is denied or not.
+
 =item add_exemption
 
 Takes one mandatory argument, a L<Net::Netmask> object that will be checked against connecting IP addresses for exemption from denials.
@@ -1191,6 +1195,10 @@ Takes one mandatory argument, a L<Net::Netmask> object that will be checked agai
 =item del_exemption
 
 Takes one mandatory argument, a L<Net::Netmask> object to remove from the current exemption list.
+
+=item exempted
+
+Takes one argument, an IP address. Returns true or false depending on whether that IP is exempt from denial or not.
 
 =item yield
 
@@ -1371,6 +1379,10 @@ These are plugin related methods:
 
 =over
 
+=item pipeline
+
+Returns the L<POE::Component::Server::IRC::Pipeline> object used internally by the component.
+
 =item plugin_add 
 
 Accepts two arguments:
@@ -1400,11 +1412,17 @@ Accepts one argument:
 Returns the plugin object if it was found, undef if not.
 
 =item plugin_list
+=item plugin_order
 
 Has no arguments.
 
 Returns a hashref of plugin objects, keyed on alias, or an empty list if there are no
 plugins loaded.
+
+=item plugin_register
+=item plugin_unregister
+
+See L<POE::Component::Server::IRC::Plugin> for details on these methods.
 
 =back
 

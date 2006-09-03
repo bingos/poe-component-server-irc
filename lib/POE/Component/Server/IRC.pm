@@ -67,7 +67,7 @@ sub IRCD_connected {
 sub IRCD_connection_flood {
   my ($self,$ircd) = splice @_,0 ,2;
   my ($conn_id) = map { ${ $_ } } @_;
-  $self->terminate_conn_error( $conn_id, 'Excess Flood' );
+  $self->_terminate_conn_error( $conn_id, 'Excess Flood' );
   return PCSI_EAT_ALL;
 }
 
@@ -77,12 +77,12 @@ sub IRCD_connection_idle {
   return PCSI_EAT_NONE unless $self->_connection_exists( $conn_id );
   my $conn = $self->{state}->{conns}->{ $conn_id };
   if ( $conn->{type} eq 'u' ) {
-  	$self->terminate_conn_error( $conn_id, 'Connection Timeout' );
+  	$self->_terminate_conn_error( $conn_id, 'Connection Timeout' );
   	return PCSI_EAT_ALL;
   }
   if ( $conn->{pinged} ) {
 	my $msg = 'Ping timeout: ' . ( time() - $conn->{seen} ) . ' seconds';
-  	$self->terminate_conn_error( $conn_id, $msg );
+  	$self->_terminate_conn_error( $conn_id, $msg );
   	return PCSI_EAT_ALL;
   }
   $conn->{pinged} = 1;
@@ -116,7 +116,7 @@ sub IRCD_disconnected {
 	last SWITCH;
     }
     if ( $self->_connection_is_client( $conn_id ) ) {
-	$self->{ircd}->send_output( @{ $self->_daemon_cmd_quit( $self->client_nickname( $conn_id, $errstr ), $errstr ) } );
+	$self->{ircd}->send_output( @{ $self->_daemon_cmd_quit( $self->_client_nickname( $conn_id, $errstr ), $errstr ) } );
 	delete $self->{state}->{conns}->{ $conn_id };
 	last SWITCH;
     }
@@ -181,25 +181,25 @@ sub _client_register {
   return unless $auth;
   # pass required for link
   unless ( $self->_state_auth_client_conn( $conn_id ) ) {
-    $self->terminate_conn_error( $conn_id, 'You are not authorized to use this server' );
+    $self->_terminate_conn_error( $conn_id, 'You are not authorized to use this server' );
     return;
   }
   if ( $self->_state_user_matches_gline( $conn_id ) ) {
-    $self->terminate_conn_error( $conn_id, 'G-Lined' );
+    $self->_terminate_conn_error( $conn_id, 'G-Lined' );
     return;
   }
   if ( $self->_state_user_matches_kline( $conn_id ) ) {
-    $self->terminate_conn_error( $conn_id, 'K-Lined' );
+    $self->_terminate_conn_error( $conn_id, 'K-Lined' );
     return;
   }
   if ( $self->_state_user_matches_rkline( $conn_id ) ) {
-    $self->terminate_conn_error( $conn_id, 'K-Lined' );
+    $self->_terminate_conn_error( $conn_id, 'K-Lined' );
     return;
   }
   # Add new nick
   $self->_state_register_client( $conn_id );
   my $server = $self->server_name();
-  my $nick = $self->client_nickname( $conn_id );
+  my $nick = $self->_client_nickname( $conn_id );
   my $port = $self->{state}->{conns}->{ $conn_id }->{socket}->[3];
   my $version = $self->server_version();
   my $network = $self->server_config('NETWORK');
@@ -252,7 +252,7 @@ sub _cmd_from_unknown {
   my $invalid = 0;
   SWITCH: {
     if ( $cmd eq 'QUIT' ) {
-	$self->terminate_conn_error( $wheel_id, 'Client Quit' );
+	$self->_terminate_conn_error( $wheel_id, 'Client Quit' );
 	last SWITCH;
     }
     # PASS or NICK cmd but no parameters.
@@ -284,15 +284,15 @@ sub _cmd_from_unknown {
 	$conn->{hops} = $params->[1] || 1;
 	$conn->{desc} = $params->[2] || '';
 	if ( !$conn->{ts_server} ) {
-	   $self->terminate_conn_error( $wheel_id, 'Non-TS server.' );
+	   $self->_terminate_conn_error( $wheel_id, 'Non-TS server.' );
 	   last SWITCH;
 	}
 	if ( !$self->_state_auth_peer_conn( $wheel_id, $conn->{name}, $conn->{pass} ) ) {
-	   $self->terminate_conn_error( $wheel_id, 'Unauthorised server.' );
+	   $self->_terminate_conn_error( $wheel_id, 'Unauthorised server.' );
 	   last SWITCH;
 	}
 	if ( $self->state_peer_exists( $conn->{name} ) ) {
-	   $self->terminate_conn_error( $wheel_id, 'Server exists.' );
+	   $self->_terminate_conn_error( $wheel_id, 'Server exists.' );
 	   last SWITCH;
 	}
 	$self->_state_register_peer( $wheel_id );
@@ -398,12 +398,12 @@ sub _cmd_from_client {
   my $params = $input->{params} || [ ];
   my $pcount = scalar @{ $params };
   my $server = $self->server_name();
-  my $nick = $self->client_nickname( $wheel_id );
+  my $nick = $self->_client_nickname( $wheel_id );
   my $invalid = 0;
   SWITCH: {
     my $method = '_daemon_cmd_' . lc $cmd;
     if ( $cmd eq 'QUIT' ) {
-	$self->terminate_conn_error( $wheel_id, ( $pcount ? qq{"$params->[0]"} : 'Client Quit' ) );
+	$self->_terminate_conn_error( $wheel_id, ( $pcount ? qq{"$params->[0]"} : 'Client Quit' ) );
 	last SWITCH;
     }
     if ( $cmd =~ /^(USERHOST|MODE)$/ and !$pcount ) {
@@ -605,7 +605,7 @@ sub _daemon_cmd_message {
 	  my $common = { };
 	  my $msg  = { command => $type, params => [ ( $status_msg ? $target : $channel ), $args->[1] ] };
 	  foreach my $member ( $self->state_chan_list( $channel, $status_msg ) ) {
-		next if $self->state_user_is_deaf( $member );
+		next if $self->_state_user_is_deaf( $member );
 		$common->{ $self->_state_user_route( $member ) }++;
 	  }
 	  delete $common->{ $self->_state_user_route( $nick ) };
@@ -1025,7 +1025,7 @@ sub _daemon_cmd_squit {
      }
      my $conn_id = $self->_state_peer_route( $peer );
      $self->{ircd}->disconnect( $conn_id, $reason );
-     $self->{ircd}->send_output( { command => 'ERROR', params => [ join ' ', 'Closing Link:', $self->client_ip( $conn_id ), $args->[0], "($nick)" ] }, $conn_id );
+     $self->{ircd}->send_output( { command => 'ERROR', params => [ join ' ', 'Closing Link:', $self->_client_ip( $conn_id ), $args->[0], "($nick)" ] }, $conn_id );
   }
   return @{ $ref } if wantarray();
   return $ref;
@@ -1092,7 +1092,7 @@ sub _daemon_cmd_rkline {
 	}
      	$self->{ircd}->send_event( "daemon_rkline", $full, $target, $duration, $user, $host, $reason );
 	push @{ $self->{state}->{rklines} }, { setby => $full, setat => time(), target => $target, duration => $duration, user => $user, host => $host, reason => $reason };
-	$self->terminate_conn_error( $_, 'K-Lined' ) for $self->_state_local_users_match_rkline( $user, $host );
+	$self->_terminate_conn_error( $_, 'K-Lined' ) for $self->_state_local_users_match_rkline( $user, $host );
      }
   }
   return @{ $ref } if wantarray();
@@ -1167,7 +1167,7 @@ sub _daemon_cmd_kline {
 	}
      	$self->{ircd}->send_event( "daemon_kline", $full, $target, $duration, $user, $host, $reason );
 	push @{ $self->{state}->{klines} }, { setby => $full, setat => time(), target => $target, duration => $duration, user => $user, host => $host, reason => $reason };
-	$self->terminate_conn_error( $_, 'K-Lined' ) for $self->_state_local_users_match_gline( $user, $host );
+	$self->_terminate_conn_error( $_, 'K-Lined' ) for $self->_state_local_users_match_gline( $user, $host );
      }
   }
   return @{ $ref } if wantarray();
@@ -1269,7 +1269,7 @@ sub _daemon_cmd_gline {
      push @{ $self->{state}->{glines} }, { setby => $full, setat => time(), user => $user_part, host => $host_part, reason => $reason };
      $self->{ircd}->send_output( { prefix => $nick, command => 'GLINE', params => [ $user_part, $host_part, $reason ], colonify => 0 }, grep { $self->_state_peer_capab( $_, 'GLN' ) } $self->_state_connected_peers() );
      $self->{ircd}->send_event( "daemon_gline", $full, $user_part, $host_part, $reason );
-     $self->terminate_conn_error( $_, 'G-Lined' ) for $self->_state_local_users_match_gline( $user_part, $host_part );
+     $self->_terminate_conn_error( $_, 'G-Lined' ) for $self->_state_local_users_match_gline( $user_part, $host_part );
   }
   return @{ $ref } if wantarray();
   return $ref;
@@ -1307,7 +1307,7 @@ sub _daemon_cmd_kill {
 	  $self->call( 'del_spoofed_nick', $target, "Killed ($comment)" );
 	} else {
 	  $self->{state}->{conns}->{ $route_id }->{killed} = 1;
-	  $self->terminate_conn_error( $route_id, "Killed ($comment)" );
+	  $self->_terminate_conn_error( $route_id, "Killed ($comment)" );
 	}
      } else {
 	$self->{state}->{users}->{ u_irc $target }->{killed} = 1;
@@ -1625,7 +1625,7 @@ sub _daemon_cmd_stats {
 	  last SWITCH2;
 	}
 	if ( $char eq 'p' ) {
-	  my @ops = map { $self->client_nickname( $_ ) } keys %{ $self->{state}->{localops} };
+	  my @ops = map { $self->_client_nickname( $_ ) } keys %{ $self->{state}->{localops} };
 	  foreach my $op ( sort @ops ) {
 	    my $record = $self->{state}->{users}->{ u_irc $op };
 	    push @{ $ref }, { prefix => $server, command => '249', params => [ $nick, sprintf("[O] %s (%s\@%s) Idle: %u", $record->{nick}, $record->{auth}->{ident}, $record->{auth}->{hostname}, time() - $record->{idle_time} ) ] };
@@ -2624,7 +2624,7 @@ sub _daemon_peer_rkline {
      if ( $us ) {
      	$self->{ircd}->send_event( "daemon_rkline", $full, @{ $args } );
 	push @{ $self->{state}->{rklines} }, { setby => $full, setat => time(), target => $args->[0], duration => $args->[1], user => $args->[2], host => $args->[3], reason => $args->[4] };
-	$self->terminate_conn_error( $_, 'K-Lined' ) for $self->_state_local_users_match_rkline( $args->[2], $args->[3] );
+	$self->_terminate_conn_error( $_, 'K-Lined' ) for $self->_state_local_users_match_rkline( $args->[2], $args->[3] );
      }
   }
   return @{ $ref } if wantarray();
@@ -2660,7 +2660,7 @@ sub _daemon_peer_kline {
      if ( $us ) {
      	$self->{ircd}->send_event( "daemon_kline", $full, @{ $args } );
 	push @{ $self->{state}->{klines} }, { setby => $full, setat => time(), target => $args->[0], duration => $args->[1], user => $args->[2], host => $args->[3], reason => $args->[4] };
-	$self->terminate_conn_error( $_, 'K-Lined' ) for $self->_state_local_users_match_gline( $args->[2], $args->[3] );
+	$self->_terminate_conn_error( $_, 'K-Lined' ) for $self->_state_local_users_match_gline( $args->[2], $args->[3] );
      }
   }
   return @{ $ref } if wantarray();
@@ -2723,7 +2723,7 @@ sub _daemon_peer_gline {
      push @{ $self->{state}->{glines} }, { setby => $full, setat => time(), user => $args->[0], host => $args->[1], reason => $args->[2] };
      $self->{ircd}->send_output( { prefix => $nick, command => 'GLINE', params => $args, colonify => 0 }, grep { $_ ne $peer_id and $self->_state_peer_capab( $_, 'GLN' ) } $self->_state_connected_peers() );
      $self->{ircd}->send_event( "daemon_gline", $full, @{ $args } );
-     $self->terminate_conn_error( $_, 'G-Lined' ) for $self->_state_local_users_match_gline( $args->[0], $args->[1] );
+     $self->_terminate_conn_error( $_, 'G-Lined' ) for $self->_state_local_users_match_gline( $args->[0], $args->[1] );
   }
   return @{ $ref } if wantarray();
   return $ref;
@@ -2802,7 +2802,7 @@ sub _daemon_peer_kill {
 	  $self->call( 'del_spoofed_nick', $target, "Killed ($comment)" );
 	} else {
 	  $self->{state}->{conns}->{ $route_id }->{killed} = 1;
-	  $self->terminate_conn_error( $route_id, "Killed ($comment)" );
+	  $self->_terminate_conn_error( $route_id, "Killed ($comment)" );
 	}
      } else {
 	$self->{state}->{users}->{ u_irc $target }->{killed} = 1;
@@ -2874,7 +2874,7 @@ sub _daemon_peer_server {
 	last SWITCH;
     }
     if ( $self->state_peer_exists( $args->[0] ) ) {
-	$self->terminate_conn_error( $peer_id, 'Server exists' );
+	$self->_terminate_conn_error( $peer_id, 'Server exists' );
 	last SWITCH;
     }
     my $record = { 
@@ -2940,12 +2940,24 @@ sub _daemon_peer_nick {
   my $server = $self->server_name();
   my $ref = [ ]; my $args = [ @_ ]; my $count = scalar @{ $args };
   my $peer = $self->{state}->{conns}->{ $peer_id }->{name};
+  my $nicklen = $self->server_config('NICKLEN');
   SWITCH: {
     if ( !$count or ( $count < 8 and !$prefix ) ) {
-	$self->terminate_conn_error( $peer_id, 'Not enough arguments to server command.' );
+	$self->_terminate_conn_error( $peer_id, 'Not enough arguments to server command.' );
 	last SWITCH;
     }
     if ( $prefix and $self->state_nick_exists( $args->[0] ) ) {
+        $self->{ircd}->send_output( { prefix => $server, command => 'KILL', params => [ $args->[0], "$server (Nick exists)" ] }, $peer_id );
+	my $unick = u_irc $prefix;
+	$self->{state}->{users}->{ $unick }->{nick_collision} = 1;
+	$self->daemon_server_kill( $prefix, 'Nick Collision', $peer_id );
+	last SWITCH;
+    }
+    if ( $prefix and length( $args->[0] ) > $nicklen ) {
+        $self->{ircd}->send_output( { prefix => $server, command => 'KILL', params => [ $args->[0], "$server (Bad nickname)" ] }, $peer_id );
+	my $unick = u_irc $prefix;
+	$self->{state}->{users}->{ $unick }->{nick_collision} = 1;
+	$self->daemon_server_kill( $prefix, 'Nick Collision', $peer_id );
 	last SWITCH;
     }
     if ( $prefix ) {
@@ -3006,6 +3018,10 @@ sub _daemon_peer_nick {
 	}
     }
     if ( !$self->state_peer_exists( $args->[6] ) ) {
+	last SWITCH;
+    }
+    if ( length( $args->[0] ) > $nicklen ) {
+        $self->{ircd}->send_output( { prefix => $server, command => 'KILL', params => [ $args->[0], "$server (Bad nickname)" ] }, $peer_id );
 	last SWITCH;
     }
     my $unick = u_irc $args->[0];
@@ -3648,7 +3664,7 @@ sub _daemon_peer_message {
 	  my $common = { };
 	  my $msg  = { command => $type, params => [ ( $status_msg ? $target : $channel ), $args->[1] ] };
 	  foreach my $member ( $self->state_chan_list( $channel, $status_msg ) ) {
-		next if $self->state_user_is_deaf( $member );
+		next if $self->_state_user_is_deaf( $member );
 		$common->{ $self->_state_user_route( $member ) }++;
 	  }
 	  delete $common->{ $peer_id };
@@ -4266,7 +4282,7 @@ sub state_user_is_operator {
   return 1;
 }
 
-sub state_user_is_deaf {
+sub _state_user_is_deaf {
   my $self = shift;
   my $nick = shift || return;
   return unless $self->state_nick_exists( $nick );
@@ -4347,7 +4363,7 @@ sub state_chan_list_prefixed {
 	     } keys %{ $record->{users} };
 }
 
-sub state_chan_timestamp {
+sub _state_chan_timestamp {
   my $self = shift;
   my $chan = shift || return;
   return unless $self->state_chan_exists( $chan );
@@ -4557,7 +4573,7 @@ sub server_created {
   return time2str("This server was created %a %h %d %Y at %H:%M:%S %Z",$_[0]->server_config('created'));
 }
 
-sub client_nickname {
+sub _client_nickname {
   my $self = shift;
   my $wheel_id = $_[0] || return undef;
   return '*' unless $self->{state}->{conns}->{ $wheel_id }->{nick};
@@ -4565,7 +4581,7 @@ sub client_nickname {
 }
 
 
-sub client_ip {
+sub _client_ip {
   my $self = shift;
   my $wheel_id = shift || return '';
   return $self->{state}->{conns}->{ $wheel_id }->{socket}->[0];
@@ -4713,7 +4729,7 @@ sub configure {
 sub _send_output_to_client {
   my $self = shift;
   my $wheel_id = shift || return 0;
-  my $nick = $self->client_nickname( $wheel_id );
+  my $nick = $self->_client_nickname( $wheel_id );
   $nick = shift if $self->_connection_is_peer( $wheel_id );
   my $err = shift || return 0;
   return unless $self->_connection_exists( $wheel_id );
@@ -4853,13 +4869,13 @@ sub del_peer {
   delete $self->{config}->{peers}->{ uc $name };
 }
 
-sub terminate_conn_error {
+sub _terminate_conn_error {
   my $self = shift;
   my $conn_id = shift || return;
   return unless $self->_connection_exists( $conn_id );
   my $msg = shift;
   $self->{ircd}->disconnect( $conn_id, $msg );
-  $self->{ircd}->send_output( { command => 'ERROR', params => [ 'Closing Link: ' . $self->client_ip( $conn_id ) . ' (' . $msg . ')' ] }, $conn_id );
+  $self->{ircd}->send_output( { command => 'ERROR', params => [ 'Closing Link: ' . $self->_client_ip( $conn_id ) . ' (' . $msg . ')' ] }, $conn_id );
   return 1;
 }
 
@@ -4887,12 +4903,12 @@ sub daemon_server_kill {
      if ( $self->_state_is_local_user( $target ) ) {
 	my $route_id = $self->_state_user_route( $target );
 	$self->{ircd}->send_output( { prefix => $server, command => 'KILL', params => [ $target, $comment ] }, $route_id );
-	$self->terminate_conn_error( $route_id, "Killed ($server ($comment))" );
+	$self->_terminate_conn_error( $route_id, "Killed ($server ($comment))" );
 	if ( $route_id eq 'spoofed' ) {
 	  $self->call( 'del_spoofed_nick', $target, "Killed ($server ($comment))" );
 	} else {
 	  $self->{state}->{conns}->{ $route_id }->{killed} = 1;
-	  $self->terminate_conn_error( $route_id, "Killed ($server ($comment))" );
+	  $self->_terminate_conn_error( $route_id, "Killed ($server ($comment))" );
 	}
      } else {
 	$self->{state}->{users}->{ u_irc $target }->{killed} = 1;
@@ -5162,7 +5178,7 @@ sub _spoofed_command {
 	return unless $chan and $self->state_chan_exists($chan);
 	return if $self->state_is_chan_member( $nick, $chan );
 	$chan = $self->_state_chan_name( $chan );
-	my $ts = $self->state_chan_timestamp( $chan ) - 10;
+	my $ts = $self->_state_chan_timestamp( $chan ) - 10;
 	$self->_daemon_peer_sjoin( 'spoofed', $self->server_name(), $ts, $chan, '+nt', '@' . $nick );
 	return;
   }
@@ -5423,6 +5439,10 @@ Takes one argument, a peer server name, returns true or false dependent on wheth
 
 Takes one argument, a nickname, returns that users full nick!user@host if they exist, undef if they don't.
 
+=item state_user_nick 
+
+Takes one argument, a nickname, returns the proper nickname for that user. Returns undef if the nick doesn't exist.
+
 =item state_user_umode
 
 Takes one argument, a nickname, returns that users mode setting.
@@ -5486,6 +5506,10 @@ First argument is a channel name, remaining arguments are channel modes and thei
 =item daemon_server_kick
 
 Takes two arguments that are mandatory and an optional one: channel name, nickname of the user to kick and a pithy comment.
+
+=item daemon_server_remove
+
+Takes two arguments that are mandatory and an optional one: channel name, nickname of the user to remove and a pithy comment.
 
 =item daemon_server_wallops
 
@@ -6098,6 +6122,8 @@ plugins loaded.
 =back
 
 The following methods are called on the PCSI object from within the plugin object:
+
+=over
 
 =item plugin_register
 

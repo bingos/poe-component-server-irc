@@ -46,5 +46,8 @@ WriteMakefile(
 					  'Algorithm::Diff' => 1.19,
 					 },
 			  'VERSION_FROM' => 'lib/POE/Component/Server/IRC.pm',
-			  'dist' => { 'COMPRESS' => 'gzip --best' },
+			  'dist' => { 
+					'COMPRESS' => 'gzip --best',
+					'PREOP' => ( './tools/svn-log.perl > ./Changes' ),
+			  },
 			 );

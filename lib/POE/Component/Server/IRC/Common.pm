@@ -14,15 +14,39 @@ Exporter::export_ok_tags( 'ALL' );
 
 sub u_irc {
   my $value = shift || return;
+  my $type = shift || 'rfc1459';
+  $type = lc $type;
 
-  $value =~ tr/a-z{}|^/A-Z[]\\~/;
+  SWITCH: {
+    if ( $type eq 'ascii' ) {
+	$value =~ tr/a-z/A-Z/;
+	last SWITCH;
+    }
+    if ( $type eq 'strict-rfc1459' ) {
+    	$value =~ tr/a-z{}|/A-Z[]\\/;
+	last SWITCH;
+    }
+    $value =~ tr/a-z{}|^/A-Z[]\\~/;
+  }
   return $value;
 }
 
 sub l_irc {
   my $value = shift || return;
+  my $type = shift || 'rfc1459';
+  $type = lc $type;
 
-  $value =~ tr/A-Z[]\\~/a-z{}|^/;
+  SWITCH: {
+    if ( $type eq 'ascii' ) {
+    	$value =~ tr/A-Z/a-z/;
+	last SWITCH;
+    }
+    if ( $type eq 'strict-rfc1459' ) {
+    	$value =~ tr/A-Z[]\\/a-z{}|/;
+	last SWITCH;
+    }
+    $value =~ tr/A-Z[]\\~/a-z{}|^/;
+  }
   return $value;
 }
 
@@ -137,3 +161,117 @@ sub gen_mode_change {
 
 1;
 __END__
+
+=head1 NAME
+
+POE::Component::Server::IRC::Common - provides a set of common functions for the L<POE::Component::Server::IRC> suite.
+
+=head1 SYNOPSIS
+
+  use strict;
+  use warnings;
+
+  use POE::Component::Server::IRC::Common qw( :ALL );
+
+  my $nickname = '^Lame|BOT[moo]';
+
+  my $uppercase_nick = u_irc( $nickname );
+  my $lowercase_nick = l_irc( $nickname );
+
+  my $mode_line = 'ov+b-i Bob sue stalin*!*@*';
+  my $hashref = parse_mode_line( $mode_line );
+
+  my $banmask = 'stalin*';
+  $full_banmask = parse_ban_mask( $banmask );
+
+  if ( matches_mask( $full_banmask, 'stalin!joe@kremlin.ru' ) ) {
+	print "EEK!";
+  }
+
+  my $results_hashref = matches_mask_array( \@masks, \@items_to_match_against );
+
+  my $mode_change = gen_mode_change( 'abcde', 'befmZ' );
+
+
+=head1 DESCRIPTION
+
+POE::Component::IRC::Common provides a set of common functions for the L<POE::Component::Server::IRC> suite. There are included functions for uppercase and lowercase nicknames/channelnames and for parsing mode lines and ban masks.
+
+=head1 FUNCTIONS
+
+=over
+
+=item u_irc
+
+Takes one mandatory parameter, a string to convert to IRC uppercase, and one optional parameter, the casemapping of the ircd ( which can be 'rfc1459', 'strict-rfc1459' or 'ascii'. Default is 'rfc1459' ). Returns the IRC uppercase equivalent of the passed string.
+
+=item l_irc
+
+Takes one mandatory parameter, a string to convert to IRC lowercase, and one optional parameter, the casemapping of the ircd ( which can be 'rfc1459', 'strict-rfc1459' or 'ascii'. Default is 'rfc1459' ). Returns the IRC lowercase equivalent of the passed string.
+
+=item parse_mode_line
+
+Takes a list representing an IRC mode line. Returns a hashref. If the modeline couldn't be parsed the hashref will be empty. On success the following keys will be available in the hashref:
+
+   'modes', an arrayref of normalised modes;
+   'args', an arrayref of applicable arguments to the modes;
+
+Example:
+
+   my $hashref = parse_mode_line( 'ov+b-i', 'Bob', 'sue', 'stalin*!*@*' );
+
+   $hashref will be 
+   {
+	'modes' => [ '+o', '+v', '+b', '-i' ],
+	'args'  => [ 'Bob', 'sue', 'stalin*!*@*' ],
+   };
+
+=item parse_ban_mask
+
+Takes one parameter, a string representing an IRC ban mask. Returns a normalised full banmask.
+
+Example:
+
+   $fullbanmask = parse_ban_mask( 'stalin*' );
+
+   $fullbanmask will be 'stalin*!*@*';
+
+=item matches_mask
+
+Takes two parameters, a string representing an IRC mask ( it'll be processed with parse_ban_mask() to ensure that it is normalised ) and something to match against the IRC mask, such as a nick!user@hostname string. Returns 1 if they match, 0 otherwise. Returns undef if parameters are missing. Optionally, one may pass the casemapping ( see u_irc() ), as this function ises u_irc() internally.
+
+=item matches_mask_array
+
+Takes two array references, the first being a list of strings representing IRC mask, the second a list of somethings to test against the masks. Returns an empty hashref if there are no matches. Matches are returned are arrayrefs keyed on the mask that they matched.
+
+=item gen_mode_change
+
+Takes two arguments, being a strings representing a set of IRC user modes before and after a change. Returns a string representing what changed.
+
+  my $mode_change = gen_mode_change( 'abcde', 'befmZ' );
+  $mode_change is now '-acd+fmZ'
+
+=item unparse_mode_line
+
+Takes one argument a string representing a number of mode changes. Returns a condensed version of the changes.
+
+  my $mode_line = unparse_mode_line('+o+o+o-v+v');
+  $mode_line is now '+ooo-v+v'
+
+=item validate_chan_name
+
+Takes one argument a channel name to validate. Returns true or false if the channel name is valid or not.
+
+=item validate_nick_name
+
+Takes one argument a nickname to validate. Returns true or false if the nickname is valid or not.
+
+=back
+
+=head1 AUTHOR
+
+Chris 'BinGOs' Williams
+
+=head1 SEE ALSO
+
+L<POE::Component::Server::IRC>
