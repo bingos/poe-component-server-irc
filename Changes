@@ -1,0 +1,518 @@
+==============================
+9999-99-99 99:99:99 (untagged)
+==============================
+
+  2006-09-03 17:04:05 (r87) by bingos
+  tools A; lib/POE/Component/Server/IRC/Backend.pm M;
+  lib/POE/Component/Server/IRC/Common.pm M; MANIFEST M;
+  lib/POE/Component/Server/IRC/Test/Plugin.pm M; t/5_pod_coverage.t A;
+  tools/svn-log.perl A; Makefile.PL M; Changes A;
+  lib/POE/Component/Server/IRC.pm M; t/5_pod.t A
+
+    Added pod and pod coverage tests. Fixed documentation accordingly.
+    Adapted svn-log.perl from POE. 
+
+  2006-08-31 07:39:22 (r86) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M;
+  lib/POE/Component/Server/IRC.pm M
+
+    Commit so I can checkout to laptop. 
+
+===========================
+2006-08-28 18:01:25 0.99_02
+===========================
+
+  2006-08-28 18:01:03 (r84) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M;
+  lib/POE/Component/Server/IRC.pm M
+
+    Bumped the version numbers, let's try again
+
+  2006-08-28 17:59:46 (r83) by bingos; t/1_simple.t M
+
+    Fucking test was smurfed, still had PoCo-Server-IRC-OperServ in the
+    simple test. Fucktard. 
+
+===========================
+2006-08-28 17:30:21 0.99_01
+===========================
+
+  2006-08-28 17:23:02 (r81) by bingos
+  README A; lib/POE/Component/Server/IRC/Backend.pm M; MANIFEST M;
+  lib/POE/Component/Server/IRC.pm M
+
+    added a README and bumped version number 
+
+  2006-08-28 16:52:51 (r80) by bingos
+  t/ts_07_callerid.t A; MANIFEST M; lib/POE/Component/Server/IRC.pm M
+
+    Woohoo. CALLERID test added. We may be approaching a CPAN dev
+    release. 
+
+  2006-08-27 17:11:24 (r79) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M; Makefile.PL M;
+  t/ts_04_compresslink.t M; t/ts_04_sslify.t M;
+  lib/POE/Component/Server/IRC.pm M
+
+    Implemented CALLERID (+Gg). 
+
+  2006-08-23 09:22:48 (r78) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M; t/ts_04_sslify.t M; ircd.crt
+  M; ircd.key M
+
+    Believe I have sorted out the SSL issues. Net::SSLeay is fucked on
+    dev box which might explain a lot of things. 
+
+  2006-08-18 15:45:52 (r77) by bingos
+  t/ts_04_sslify.t M; lib/POE/Component/Server/IRC.pm M
+
+    Added ACCEPT command as related to CALLERID. 
+
+  2006-08-15 18:39:45 (r76) by bingos; lib/POE/Component/Server/IRC.pm M
+
+    Some minor bug fixes. 
+
+  2006-08-08 18:59:04 (r75) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M;
+  lib/POE/Component/Server/IRC.pm M
+
+    Fucked if I can remember every change; Implemented +D umode which is
+    channel deafness, ho-hum. 
+
+  2006-08-04 13:59:58 (r74) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M;
+  lib/POE/Component/Server/IRC.pm M
+
+    Ziplinks working for POE::Component::Server::IRC based ircds only.
+    Pesky hybrid. 
+
+  2006-07-27 18:49:55 (r73) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M; MANIFEST M; Makefile.PL M;
+  t/ts_04_compresslink.t A; lib/POE/Component/Server/IRC.pm M
+
+    Finally got ziplinks working. POE::Filter::Zlib was the tosser
+    causing the trouble. Ziplinks will probably only work betweenst PCSI
+    ircd's though for the moment. 
+
+  2006-07-25 11:13:35 (r72) by bingos
+  t/1_common.t M; examples/multi-client.pl A;
+  lib/POE/Component/Server/IRC/Common.pm M; MANIFEST M; Makefile.PL M;
+  lib/POE/Component/Server/IRC.pm M
+
+    Changes to UMODE code; Implemented LOCOPS, WALLOPS and OPERWALL
+    commands for client/peer; Added WALLOPS server API command; 
+
+  2006-07-21 14:31:43 (r71) by bingos; lib/POE/Component/Server/IRC.pm M
+
+    Reimplemented PRIVMSG/NOTICE handling for both client and peer. Now
+    supports exactly the same syntax as Hybrid. 
+
+  2006-07-19 12:12:06 (r70) by bingos
+  Makefile.PL M; examples/test-harness.pl M;
+  lib/POE/Component/Server/IRC.pm M
+
+    Added documentation for daemon_cmd_privmsg|notice input events. 
+
+  2006-07-18 10:49:40 (r69) by bingos
+  examples/load-test.pl M; examples/test-harness.pl M;
+  lib/POE/Component/Server/IRC.pm M
+
+    Fixed SQUIT, it was working fine for a leaf-node, but not as a hub. 
+
+  2006-07-13 17:19:03 (r68) by bingos
+  examples/test-harness.pl M; lib/POE/Component/Server/IRC.pm M
+
+    Fixed a bug in SJOIN code. Tested using 60 flood bots. Favourable
+    results. 
+
+  2006-07-13 16:13:47 (r67) by bingos; lib/POE/Component/Server/IRC.pm M
+
+    Implemented MODES, the maximum number of non-simple chanmodes that
+    can be applied in one go. Numerous tweaks and fixes. Still haven't
+    got to the bottom of the chan desyncs with half-ops. 
+
+  2006-07-10 13:07:05 (r66) by bingos
+  Makefile.PL M; examples/test-harness.pl M;
+  lib/POE/Component/Server/IRC.pm M
+
+    Implemented spoofed SJOIN command, so spoofed nicks can reset
+    channels. All applicable commands should multiline if output lines >
+    510 chars now. Makefile.PL will detect previous poco-server-irc
+    installs and warn of API changes. 
+
+  2006-07-06 16:27:36 (r65) by bingos; lib/POE/Component/Server/IRC.pm M
+
+    Numerous changes. Documentation completed. 
+
+  2006-06-30 16:57:48 (r64) by bingos
+  examples/test-harness.pl M; lib/POE/Component/Server/IRC.pm M
+
+    Documented all output events, nearly all input events and all
+    methods. 
+
+  2006-06-30 11:20:10 (r63) by bingos; lib/POE/Component/Server/IRC.pm M
+
+    Implemented RKLINE ( Regex KLINEs ) peer and oper commands. 
+
+  2006-06-29 17:35:57 (r62) by bingos; lib/POE/Component/Server/IRC.pm M
+
+    GLINE, KLINE and UNKLINE peer and oper commands implemented. Woohoo!
+    Just RKLINE to do. 
+
+  2006-06-27 17:14:50 (r61) by bingos
+  t/ts_02_multi.t M; examples/test-harness.pl M;
+  lib/POE/Component/Server/IRC.pm M
+
+    Slight fix to one of the tests. Added GLINE and KLINE support \o/.
+    Only peer source KLINEs for the moment. RKLINE to do. 
+
+  2006-06-09 15:59:06 (r60) by bingos; lib/POE/Component/Server/IRC.pm M
+
+    Implemented GLINE commands. TODO: ban users connecting based on the
+    glines
+
+  2006-06-08 18:24:49 (r59) by bingos
+  t/ts_03_serverlink.t M; examples/test-harness.pl M;
+  lib/POE/Component/Server/IRC.pm M
+
+    Refactored INVITE code and added handler for peer INVITE messages
+
+  2006-06-02 16:57:52 (r58) by bingos; lib/POE/Component/Server/IRC.pm M
+
+    Spotted a bug with INFO command. Fixed
+
+  2006-06-02 16:39:17 (r57) by bingos
+  t/ts_05_oper.t A; MANIFEST M; examples/test-ircd.pl M;
+  lib/POE/Component/Server/IRC.pm M; t/ts_06_spoofs.t A
+
+    More documentation, including SYNOPSIS. New tests for oper and spoofs
+    functionality. 
+
+  2006-05-31 18:29:09 (r56) by bingos; examples/test-harness.pl M
+
+    Cleaned up the test-harness script
+
+  2006-05-31 18:23:54 (r55) by bingos
+  examples/test-harness.pl M; lib/POE/Component/Server/IRC.pm M
+
+    RPL_WHOISCHANNELS automagically splits on long lines now
+
+  2006-05-31 17:31:19 (r54) by bingos; lib/POE/Component/Server/IRC.pm M
+
+    We now generate multiple RPL_NAMES if the line length exceeds 510
+    characters.
+
+  2006-05-31 15:03:07 (r53) by bingos; lib/POE/Component/Server/IRC.pm M
+
+    More documentation updates
+
+  2006-05-31 13:35:24 (r52) by bingos
+  t/ts_04_sslify.t M; ircd.crt M; ircd.key M
+
+    Set the SSLify tests to skip. Pesky fucking thing is defying all
+    efforts at debuggering
+
+  2006-05-31 13:26:35 (r51) by bingos; t/ts_03_serverlink.t M
+
+    Fixed serverlink test script
+
+  2006-05-31 13:07:15 (r50) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M; MANIFEST M; t/ts_04_sslify.t
+  A; ircd.crt A; ircd.key A
+
+    Added test script for SSLify with associated key/cert combo
+
+  2006-05-31 10:59:41 (r49) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M; t/ts_03_serverlink.t A;
+  MANIFEST M; t/ts_02_multi.t M; Makefile.PL M; examples/test-harness.pl
+  M; lib/POE/Component/Server/IRC.pm M
+
+    Added more tests. Debugged spoofed nicks being killed. Documentation
+    updates. 
+
+  2006-05-26 08:51:01 (r48) by bingos
+  examples/simpleclient.pl M; lib/POE/Component/Server/IRC/Backend.pm M;
+  t/2_pocosi.t M; MANIFEST M; t/ts_02_multi.t A; examples/test-harness.pl
+  M; lib/POE/Component/Server/IRC.pm M; t/ts_01_subclass.t A
+
+    Various fixes to ircd and Backend module. Documentation updates.
+    Started to add more comprehensive tests. 
+
+  2006-05-17 19:15:34 (r47) by bingos
+  examples/test-harness.pl M; lib/POE/Component/Server/IRC.pm M
+
+    Various improvements. Tweaks to s-2-s handling. Implemented STATS
+    command. Documentation underway.
+
+  2006-05-13 10:42:33 (r46) by bingos
+  t/1_common.t M; lib/POE/Component/Server/IRC/Common.pm M;
+  examples/test-harness.pl M; lib/POE/Component/Server/IRC.pm M
+
+    Bug fix to ::Common.pm, more improvements to Services API. Tweaks for
+    server-to-server linking. 
+
+  2006-05-09 19:06:31 (r45) by bingos
+  examples/simpleclient.pl M; examples/test-harness.pl M;
+  lib/POE/Component/Server/IRC.pm M
+
+    All Services API hooks (hopefully) in place.
+
+  2006-05-08 16:36:04 (r44) by bingos
+  t/3_backend.t M; lib/POE/Component/Server/IRC/Backend.pm M;
+  t/2_pocosi.t M; examples/test-harness.pl M;
+  lib/POE/Component/Server/IRC.pm M
+
+    Services API is finally on the go. Hooks are in place to generate
+    ircd_daemon_* events for a lot of irc events. Spoofed nicks are
+    working. And it should all still work with plugins. Yay! 
+
+  2006-05-05 17:11:53 (r43) by bingos; lib/POE/Component/Server/IRC.pm M
+
+    Tweaked REMOVE command to behave properly when a comment is
+    specified. 
+
+  2006-05-04 22:40:19 (r42) by bingos; lib/POE/Component/Server/IRC.pm M
+
+    Added API command for REMOVE. 
+
+  2006-05-04 15:55:42 (r41) by bingos
+  examples/test-harness.pl M; lib/POE/Component/Server/IRC.pm M
+
+    Added REMOVE command a la Freenode hyperion, which is a forced PART. 
+
+  2006-05-04 13:39:42 (r40) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M; t/2_pocosi.t M; MANIFEST M;
+  lib/POE/Component/Server/IRC.pm M;
+  lib/POE/Component/Server/IRC/Daemon.pm D
+
+    Backend changes to _plugin_process so that it operates in a similar
+    way to PoCo-IRC. Daemon code has been moved to IRC.pm and Daemon
+    removed. 
+
+  2006-04-24 10:06:21 (r39) by bingos
+  lib/POE/Component/Server/IRC/Pipeline.pm M;
+  lib/POE/Component/Server/IRC/Backend.pm M
+
+    Ported fixes and amendments from PoCo-IRC to Pipeline and Backend. 
+
+  2006-03-26 09:35:51 (r38) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M; Makefile.PL M;
+  lib/POE/Component/Server/IRC.pm M;
+  lib/POE/Component/Server/IRC/Daemon.pm M
+
+    Server to Server protocol hopefully all debugged. Tested against
+    hybrid network. \o/ 
+
+  2006-01-24 21:34:12 (r37) by bingos
+  lib/POE/Component/Server/IRC/Daemon.pm M
+
+    Daemon is almost complete. I-Line work to be done and the eagerly
+    awaited services/spoofed client API. 
+
+  2006-01-22 19:00:12 (r36) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M; t/2_pocosi.t M;
+  examples/test-harness.pl M; lib/POE/Component/Server/IRC.pm M;
+  lib/POE/Component/Server/IRC/Daemon.pm M
+
+    A whole hatfull of changes. Server to server code written and
+    debugged against Hybrid-7.0 \o/ Seems to work. Still lot's to do. 
+
+  2006-01-10 22:09:04 (r35) by bingos
+  examples/test-harness.pl M; lib/POE/Component/Server/IRC.pm M;
+  lib/POE/Component/Server/IRC/Daemon.pm M
+
+    Check in so I can edit on meh laptop whilst away from $home 
+
+  2006-01-08 14:02:52 (r34) by bingos; lib/POE/Component/Server/IRC.pm M
+
+    Hopefully set the svn:keyword properly. 
+
+  2006-01-07 17:44:42 (r33) by bingos
+  t/1_common.t M; lib/POE/Component/Server/IRC/Pipeline.pm A;
+  t/3_backend.t M; examples/simpleclient.pl M;
+  lib/POE/Component/Server/IRC/Backend.pm M;
+  lib/POE/Component/Server/IRC/Common.pm M; t/2_pocosi.t M;
+  examples/load-test.pl M; MANIFEST M; META.yml M;
+  examples/test-harness.pl M; lib/POE/Component/Server/IRC.pm M;
+  lib/POE/Component/Server/IRC/Daemon.pm M
+
+    Backend: Pipeline ported from PoCo-IRC; Changes to send_output to
+    enable better thruput; Daemon: near as damnit complete standalone
+    code; Server-to-server code embryonic; Service/Spoofed client
+    interface stalled. Reasonably stable after load/stress testing. 
+
+  2005-12-22 18:06:32 (r32) by bingos
+  examples/simpleclient.pl M; lib/POE/Component/Server/IRC/Backend.pm M;
+  Makefile.PL M; examples/test-harness.pl M;
+  lib/POE/Component/Server/IRC/Daemon.pm M
+
+    Minor bug fixes in ::Backend; Implemented OPER,KILL and started work
+    on peer-2-peer code in ::Daemon. 
+
+  2005-12-17 16:43:52 (r31) by bingos
+  examples/simpleclient.pl A; lib/POE/Component/Server/IRC/Backend.pm M;
+  lib/POE/Component/Server/IRC/Common.pm M; t/2_pocosi.t M;
+  examples/test-harness.pl M; lib/POE/Component/Server/IRC/Daemon.pm M
+
+    Added simpleclient.pl for testing purposes. Backend: now has
+    connection idle tracking. Daemon: implemented nearly all IRC client
+    commands, ( lacking STATS, LINKS, CONNECT, OPER, KILL, etc. ),
+    extended 2_pocosi.t to suit. 
+
+  2005-12-09 18:15:59 (r30) by bingos
+  t/1_common.t A; lib/POE/Component/Server/IRC/Backend.pm M;
+  lib/POE/Component/Server/IRC/Common.pm A; MANIFEST M;
+  examples/test-harness.pl M; lib/POE/Component/Server/IRC/Daemon.pm M
+
+    Common funcs moved to separate module. Few minor fixes to Backend
+    related to client disconnection. Daemon: major works in progress.
+    Implementing state and client command parsing. Peer routing is pretty
+    much in the bag. Just need peering to work now >;] 
+
+  2005-12-05 13:25:34 (r29) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M; examples/test-harness.pl M;
+  lib/POE/Component/Server/IRC/Daemon.pm M
+
+    Finished documenting Backend.pm 
+
+  2005-12-04 17:51:45 (r28) by bingos
+  t/3_backend.t M; lib/POE/Component/Server/IRC/Backend.pm M
+
+    Documentation nearly finished in Backend.pm. Amendment to backend
+    test case. 
+
+  2005-11-04 18:37:09 (r27) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M; META.yml M
+
+    Documentation updates to Backend.pm. The API is almost nailed down. 
+
+  2005-10-26 14:34:19 (r26) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M;
+  lib/POE/Component/Server/IRC/Plugin.pm M;
+  lib/POE/Component/Server/IRC/Daemon.pm M
+
+    A number of minor twiddles. A least the tests all pass. 
+
+  2005-07-07 20:12:12 (r22) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M;
+  lib/POE/Component/Server/IRC/Daemon.pm M
+
+    Partially documented Backend.pm. Made some more hacks to Daemon.pm
+    fleshing out the start of message routing. 
+
+  2005-06-23 16:05:49 (r21) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M; Makefile.PL M
+
+    Fixed a bug in the auth system by switching to using Ident::Agent. 
+
+  2005-06-23 14:50:40 (r20) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M; Makefile.PL M;
+  examples/test-harness.pl M; lib/POE/Component/Server/IRC/Daemon.pm M
+
+    Added compressed links using POE::Filter::Zlib to ::Backend. 
+
+  2005-06-18 15:25:45 (r16) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M; MANIFEST M; Makefile.PL M;
+  examples/test-harness.pl A; lib/POE/Component/Server/IRC/Daemon.pm M
+
+    Started implementing state using AnyData in Daemon.pm. Added
+    examples/test-harness.pl the code i'm using to test with. 
+
+  2005-06-15 14:56:19 (r15) by bingos
+  lib/POE/Component/Server/IRC/Plugin.pm M
+
+    Updated the documentation in Plugin.pm, removed references to USER
+    events as they aren't applicable. 
+
+  2005-06-15 14:42:48 (r14) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M;
+  lib/POE/Component/Server/IRC.pm M;
+  lib/POE/Component/Server/IRC/Daemon.pm M
+
+    Additions to Backend to add plugin _load and _unload methods. Makes
+    it easier for subclasses to manage their own plugins. 
+
+  2005-06-15 14:07:23 (r13) by bingos
+  t/1_simple.t A; t/3_backend.t A;
+  lib/POE/Component/Server/IRC/Backend.pm M; t/2_pocosi.t A; t/1.t D;
+  t/4_test_plugin.t A; t/2.t D; MANIFEST M; t/3.t D; t/4.t D;
+  lib/POE/Component/Server/IRC.pm M
+
+    With a tweak, tweak, here and a tweak, tweak, there. 
+
+  2005-06-15 10:36:04 (r12) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M; t/3.t M;
+  lib/POE/Component/Server/IRC.pm M
+
+    More tweaking of ::Backend :D IRC events sent by the Backend are now
+    distinguished by 'ircd_backend_cmd_' prefix. 
+
+  2005-06-15 08:19:58 (r11) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M; MANIFEST M; t/2.t M;
+  lib/POE/Component/Server/IRC.pm M;
+  lib/POE/Component/Server/IRC/Daemon.pm A
+
+    IRC.pm is now a subclass of Backend. Added Daemon.pm plugin which
+    will become the main state engine. 
+
+  2005-06-14 20:50:52 (r10) by bingos
+  lib/POE/Component/Server/IRC/OperServ.pm D;
+  lib/POE/Component/Server/IRC/Backend.pm M; MANIFEST M; t/2.t M;
+  lib/POE/Component/Server/IRC/Plugin.pm M; t/3.t M; t/4.t M;
+  lib/POE/Component/Server/IRC.pm M
+
+    Dramatic changes! Improved Backend and associated testsuite. IRC.pm
+    is no where done. 
+
+  2005-06-14 09:59:46 (r9) by bingos
+  lib/POE/Component/Server/IRC/Test A; MANIFEST M;
+  lib/POE/Component/Server/IRC/Test/Plugin.pm A; t/4.t A
+
+    Added testcase for plugin subsystem. 
+
+  2005-06-14 08:29:04 (r8) by bingos; MANIFEST M; Makefile.PL M; t/3.t A
+
+    Added testcase for ::Backend 3.t 
+
+  2005-06-13 22:44:11 (r7) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M; MANIFEST M
+
+    Finally got ::Backend working and firing off events. Plugin system
+    needs testing. 
+
+  2005-06-13 19:04:50 (r6) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M; t/1.t M; MANIFEST M;
+  lib/POE/Component/Server/IRC/Plugin.pm A
+
+    Implemented most of ::Backend. Need runtime testcase writing. 
+
+  2005-06-11 08:20:41 (r5) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm A
+
+    Added Backend.pm the beginnings of the new improved
+    PoCo-Server-IRC[tm] 
+
+  2005-06-09 22:59:45 (r4) by bingos
+  lib/POE/Component/Server/IRC A;
+  lib/POE/Component/Server/IRC/OperServ.pm A; lib/POE/Component/Server A;
+  lib A; MANIFEST M; Makefile.PL M; IRC.pm D; lib/POE A;
+  lib/POE/Component/Server/IRC.pm A; IRC-OperServ.pm D; lib/POE/Component
+  A; MANIFEST.SKIP A
+
+    Tidied up the distribution, moved .pm files to lib/ structure. 
+
+  2005-05-13 16:24:41 (r2) by bingos; install D; MANIFEST M
+
+    Removed 'install' script. 
+
+  2005-05-13 16:15:41 (r1) by svn
+  /trunk A; t A; t/1.t A; t/2.t A; MANIFEST A; install A;
+  examples/test-oper.pl A; examples A; /branches A; examples/load-test.pl
+  A; META.yml A; examples/test-ircd.pl A; Makefile.PL A; IRC.pm A;
+  IRC-OperServ.pm A; /tags A
+
+    Initial import
+
+==============
+End of Excerpt
+==============
