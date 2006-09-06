@@ -20,10 +20,12 @@ t/ts_04_sslify.t
 t/ts_05_oper.t
 t/ts_06_spoofs.t
 t/ts_07_callerid.t
+t/ts_08_operserv.t
 tools/svn-log.perl
 lib/POE/Component/Server/IRC.pm
 lib/POE/Component/Server/IRC/Backend.pm
 lib/POE/Component/Server/IRC/Common.pm
+lib/POE/Component/Server/IRC/OperServ.pm
 lib/POE/Component/Server/IRC/Pipeline.pm
 lib/POE/Component/Server/IRC/Plugin.pm
 lib/POE/Component/Server/IRC/Test/Plugin.pm
