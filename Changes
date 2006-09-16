@@ -1,4 +1,22 @@
 ===========================
+2006-09-06 17:43:39 0.99_04
+===========================
+
+  2006-09-06 17:43:07 (r91) by bingos
+  lib/POE/Component/Server/IRC/OperServ.pm M;
+  lib/POE/Component/Server/IRC/Backend.pm M;
+  lib/POE/Component/Server/IRC.pm M
+
+    Added documentation to OperServ and bumped the version numbers. 
+
+  2006-09-06 17:33:39 (r90) by bingos
+  lib/POE/Component/Server/IRC/OperServ.pm A; t/1_simple.t M; MANIFEST M;
+  t/ts_08_operserv.t A; Changes M
+
+    Added OperServ subclass once again. New and improved and shiny. With
+    a test. 
+
+===========================
 2006-09-03 17:16:55 0.99_03
 ===========================
 
