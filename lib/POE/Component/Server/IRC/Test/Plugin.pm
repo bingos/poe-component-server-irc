@@ -1,5 +1,6 @@
 package POE::Component::Server::IRC::Test::Plugin;
 
+use strict;
 use POE::Component::Server::IRC::Plugin qw( :ALL );
 
 our $VERSION = '1.00';

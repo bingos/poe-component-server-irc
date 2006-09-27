@@ -1,3 +1,23 @@
+========================
+2006-09-26 09:09:22 1.00
+========================
+
+  2006-09-26 09:08:24 (r95) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M; MANIFEST M; Build.PL D;
+  lib/POE/Component/Server/IRC.pm M
+
+    Removed Build.PL and bumped versions for release. 
+
+===========================
+2006-09-16 15:43:54 0.99_05
+===========================
+
+  2006-09-16 15:38:53 (r93) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M; META.yml D; MANIFEST M;
+  Makefile.PL M; Changes M; Build.PL A; lib/POE/Component/Server/IRC.pm M
+
+    Updated to use Module::Install 
+
 ===========================
 2006-09-06 17:43:39 0.99_04
 ===========================
