@@ -15,7 +15,7 @@ use POE::Component::Server::IRC::Plugin qw(:ALL);
 use Date::Format;
 use vars qw($VERSION $REVISION);
 
-$VERSION = '1.01';
+$VERSION = '1.02';
 ($REVISION) = (q$LastChangedRevision$=~/(\d+)/g);
 
 sub spawn {
@@ -5138,6 +5138,7 @@ sub add_spoofed_nick {
   $record->{hops} = 0;
   $record->{route_id} = 'spoofed';
   $record->{umode} = 'i' unless $record->{umode};
+  $record->{ircname} = "* I'm too lame to read the documentation *" unless $record->{ircname};
   $self->{state}->{stats}->{invisible}++ if $record->{umode} =~ /i/;
   $self->{state}->{stats}->{ops_online}++ if $record->{umode} =~ /o/;
   $record->{idle_time} = $record->{conn_time} = $record->{ts};

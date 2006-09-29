@@ -1,4 +1,15 @@
 ========================
+2006-09-27 10:12:39 1.01
+========================
+
+  2006-09-27 10:11:06 (r97) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M;
+  lib/POE/Component/Server/IRC/Test/Plugin.pm M; Changes M;
+  lib/POE/Component/Server/IRC.pm M
+
+    Ensured all modules had 'use strict' 
+
+========================
 2006-09-26 09:09:22 1.00
 ========================
 

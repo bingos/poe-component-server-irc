@@ -40,4 +40,5 @@ t/ts_05_oper.t
 t/ts_06_spoofs.t
 t/ts_07_callerid.t
 t/ts_08_operserv.t
+t/ts_09_serrano_spoofs.t
 tools/svn-log.perl
