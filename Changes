@@ -1,4 +1,15 @@
 ========================
+2006-09-29 08:57:44 1.02
+========================
+
+  2006-09-29 08:57:17 (r99) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M; t/ts_09_serrano_spoofs.t A;
+  MANIFEST M; Changes M; lib/POE/Component/Server/IRC.pm M
+
+    Fixed RT #21769. Sppofed nicks now have a default ircname set.
+    Reported by David Serrano 
+
+========================
 2006-09-27 10:12:39 1.01
 ========================
 

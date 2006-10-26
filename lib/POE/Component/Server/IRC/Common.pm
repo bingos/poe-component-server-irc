@@ -4,12 +4,12 @@ use strict;
 use warnings;
 use Algorithm::Diff qw(diff);
 
-our $VERSION = '1.00';
+our $VERSION = '1.01';
 
 # We export some stuff
 require Exporter;
 our @ISA = qw( Exporter );
-our %EXPORT_TAGS = ( 'ALL' => [ qw(u_irc l_irc gen_mode_change parse_mode_line unparse_mode_line parse_ban_mask validate_nick_name validate_chan_name matches_mask_array matches_mask) ] );
+our %EXPORT_TAGS = ( 'ALL' => [ qw(u_irc l_irc gen_mode_change parse_mode_line unparse_mode_line parse_ban_mask validate_nick_name validate_chan_name matches_mask_array matches_mask parse_user) ] );
 Exporter::export_ok_tags( 'ALL' );
 
 sub u_irc {
@@ -51,9 +51,20 @@ sub l_irc {
 }
 
 sub parse_mode_line {
+  my @args = @_;
+  my $chanmodes = [qw(beI k l imnpst)];
+  my $statmodes = 'ohv';
   my $hashref = { };
   my $count = 0;
-  foreach my $arg ( @_ ) {
+  while ( my $arg = shift @args ) {
+        if ( ref $arg eq 'ARRAY' ) {
+           $chanmodes = $arg;
+           next;
+        }
+        if ( ref $arg eq 'HASH' ) {
+           $statmodes = join '', keys %{ $arg };
+           next;
+        }
         if ( $arg =~ /^(\+|-)/ or $count == 0 ) {
            my $action = '+';
            foreach my $char ( split (//,$arg) ) {
@@ -62,6 +73,8 @@ sub parse_mode_line {
                 } else {
                    push @{ $hashref->{modes} }, $action . $char;
                 }
+                push @{ $hashref->{args} }, shift @args if $char =~ /[$statmodes$chanmodes->[0]$chanmodes->[1]]/;
+                push @{ $hashref->{args} }, shift @args if $action eq '+' and $char =~ /[$chanmodes->[2]]/;
            }
          } else {
                 push @{ $hashref->{args} }, $arg;
@@ -157,6 +170,13 @@ sub gen_mode_change {
 	$string .= $_->[0] . $_->[2] for @{ $h };
   }
   return unparse_mode_line( $string );
+}
+
+sub parse_user {
+  my $user = shift || return;
+  my ($n,$u,$h) = split /[!@]/, $user;
+  return ($n,$u,$h) if wantarray();
+  return $n;
 }
 
 1;
@@ -265,6 +285,10 @@ Takes one argument a channel name to validate. Returns true or false if the chan
 =item validate_nick_name
 
 Takes one argument a nickname to validate. Returns true or false if the nickname is valid or not.
+
+=item parse_user
+
+Takes one parameter, a string representing a user in the form nick!user@hostname. In a scalar context it returns just the nickname. In a list context it returns a list consisting of the nick, user and hostname, respectively.
 
 =back
 
