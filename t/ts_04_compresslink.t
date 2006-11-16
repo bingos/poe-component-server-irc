@@ -12,6 +12,8 @@ BEGIN: {
 
 plan skip_all => "POE::Filter::Zlib::Stream not found" unless $GOT_ZLIB;
 
+plan skip_all => '*BSD currently have issues with compressed links' if $^O =~ /bsd$/i;
+
 plan tests => 14;
 
 my $listener = POE::Component::Server::IRC->spawn( auth => 0, options => { trace => 0 }, antiflood => 0, plugin_debug => 0, debug => 0, config => { servername => 'listen.server.irc' } );
