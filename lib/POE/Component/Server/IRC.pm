@@ -1955,7 +1955,7 @@ sub _daemon_cmd_mode {
     my $mode_count = 0;
     while( my $mode = shift @{ $parsed_mode->{modes} } ) {
       if ( $mode !~ /[eIbklimnpstohv]/ ) {
-	push @{ $ref }, [ '472', ( split //, $mode )[1] ] unless $unknown;
+	push @{ $ref }, [ '472', ( split //, $mode )[1], $chan ] unless $unknown;
 	$unknown++;
 	next;
       }
