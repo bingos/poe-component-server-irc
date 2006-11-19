@@ -15,7 +15,7 @@ use POE::Component::Server::IRC::Plugin qw(:ALL);
 use Date::Format;
 use vars qw($VERSION $REVISION);
 
-$VERSION = '1.04';
+$VERSION = '1.05';
 ($REVISION) = (q$LastChangedRevision$=~/(\d+)/g);
 
 sub spawn {
@@ -1717,7 +1717,7 @@ sub _daemon_cmd_list {
 	$count++;
 	next INNER if $self->state_chan_mode_set( $chan, 'p' ) or $self->state_chan_mode_set( $chan, 's' ) and !$self->state_is_chan_member( $nick, $chan );
 	my $record = $self->{state}->{chans}->{ u_irc $chan };
-	push @{ $ref }, { prefix => $server, command => '322', params => [ $nick, $record->{name}, scalar keys %{ $record->{users} }, ( defined $record->{topic} ? $record->{topic} : '' ) ] };
+	push @{ $ref }, { prefix => $server, command => '322', params => [ $nick, $record->{name}, scalar keys %{ $record->{users} }, ( defined $record->{topic} ? $record->{topic}->[0] : '' ) ] };
     }
     push @{ $ref }, { prefix => $server, command => '323', params => [ $nick, 'End of /LIST' ] };
   }
@@ -2523,7 +2523,12 @@ sub _daemon_cmd_topic {
     my $record = $self->{state}->{chans}->{ u_irc $args->[0] };
     my $topic_length = $self->server_config('TOPICLEN');
     $args->[1] = substr( $args->[0],0,$topic_length) if length( $args->[0] ) > $topic_length;
-    $record->{topic} = [ $args->[1], $self->state_user_full( $nick ), time() ];
+    if ( $args->[1] eq '' ) {
+	delete $record->{topic};
+    }
+    else {
+        $record->{topic} = [ $args->[1], $self->state_user_full( $nick ), time() ];
+    }
     $self->_send_output_to_channel( $args->[0], { prefix => $self->state_user_full( $nick ), command => 'TOPIC', params => [ $chan_name, $args->[1] ] } );
   }
   return @{ $ref } if wantarray();

@@ -1,4 +1,24 @@
 ========================
+2006-11-16 09:25:31 1.04
+========================
+
+  2006-11-16 09:24:32 (r106) by bingos; t/ts_04_compresslink.t M
+
+    Made the compresslink test skip on *bsd systems, which currently have
+    issues that test. 
+
+  2006-11-16 09:00:34 (r105) by bingos; lib/POE/Component/Server/IRC.pm M
+
+    Problem with 472 numeric response fixed. Reported by eggzeck. 
+
+  2006-11-01 11:09:28 (r104) by bingos
+  lib/POE/Component/Server/IRC/Pipeline.pm M;
+  lib/POE/Component/Server/IRC/Backend.pm M; Changes M;
+  lib/POE/Component/Server/IRC.pm M
+
+    Documentation fix for ::Pipeline, spotted by Martijn van Beers.
+
+========================
 2006-10-26 12:14:17 1.03
 ========================
 
