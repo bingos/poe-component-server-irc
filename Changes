@@ -1,4 +1,15 @@
 ========================
+2006-11-19 14:29:24 1.05
+========================
+
+  2006-11-19 14:28:25 (r108) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M; MANIFEST M; Makefile.PL M;
+  Changes M; t/ts_10_eggzeck_topic.t A; lib/POE/Component/Server/IRC.pm M
+
+    Fixed problem with LIST and topics. Fixed TOPIC command as well.
+    Added a test. Reported by eggzeck" 
+
+========================
 2006-11-16 09:25:31 1.04
 ========================
 

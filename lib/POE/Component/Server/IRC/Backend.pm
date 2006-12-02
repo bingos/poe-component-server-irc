@@ -10,7 +10,7 @@ use Carp;
 use Net::Netmask;
 use vars qw($VERSION);
 
-$VERSION = '1.05';
+$VERSION = '1.06';
 
 sub create {
   my $package = shift;
@@ -100,7 +100,7 @@ sub call {
 }
 
 sub _start {
-  my ($kernel,$self) = @_[KERNEL,OBJECT];
+  my ($kernel,$self,$sender) = @_[KERNEL,OBJECT,SENDER];
 
   $self->{session_id} = $_[SESSION]->ID();
 
@@ -127,6 +127,10 @@ sub _start {
 	$self->{will_do_auth} = 1;
   }
   $self->_load_our_plugins();
+  if ( $kernel != $sender ) {
+    $self->{sessions}->{ $sender->ID }++;
+    $kernel->post( $sender => $self->{prefix} . 'registered' => $self );
+  }
   undef;
 }
 
@@ -143,9 +147,7 @@ sub register {
   $session = $session->ID(); $sender = $sender->ID();
 
   $self->{sessions}->{ $sender }++;
-  if ( $self->{sessions}->{ $sender } == 1 and $sender ne $session ) {
-	$kernel->refcount_increment( $sender => __PACKAGE__ );
-  }
+  $kernel->refcount_increment( $sender => __PACKAGE__ ) if $self->{sessions}->{ $sender } == 1 and $sender ne $session;
   $kernel->post( $sender => $self->{prefix} . 'registered' => $self );
   undef;
 }
@@ -155,9 +157,7 @@ sub unregister {
   $session = $session->ID(); $sender = $sender->ID();
 
   delete $self->{sessions}->{ $sender };
-  if ( $sender ne $session ) {
-	$kernel->refcount_decrement( $sender => __PACKAGE__ );
-  }
+  $kernel->refcount_decrement( $sender => __PACKAGE__ ) if $sender ne $session;
   $kernel->post( $sender => $self->{prefix} . 'unregistered' );
   undef;
 }
@@ -170,28 +170,16 @@ sub shutdown {
 sub _shutdown {
   my ($kernel,$self) = @_[KERNEL,OBJECT];
 
-  if ( $self->{alias} ) {
-	$kernel->alias_remove( $_ ) for $kernel->alias_list();
-  } else {
-	$kernel->refcount_decrement( $self->{session_id} => __PACKAGE__ );
-  }
+  $kernel->alias_remove( $_ ) for $kernel->alias_list();
+  $kernel->refcount_decrement( $self->{session_id} => __PACKAGE__ ) unless $self->{alias};
 
   $self->{terminating} = 1;
-  # Terminate listeners
   delete $self->{listeners};
-  # Terminate any pending connectors
   delete $self->{connectors};
-  #ToDo: Terminate all connections gracefully and send appropriate disconnect messages
-  #      for servers first then for clients.
-  # Dirty hack
   delete $self->{wheels}; # :)
   $kernel->alarm_remove_all();
-  # Unregister all registered sessions.
   $kernel->refcount_decrement( $_ => __PACKAGE__ ) for keys %{ $self->{sessions} };
-  #ToDo: unload all loaded plugins.
   $self->_unload_our_plugins();
-  
-  #$kernel->call( $self->{ident_client} => 'shutdown' );
   undef;
 }
 
@@ -211,16 +199,13 @@ sub send_event {
 }
 
 sub __send_event {
-	my( $self, $event, @args ) = @_[ OBJECT, ARG0, ARG1 .. $#_ ];
-
-	# Actually send the event...
-	$self->_send_event( $event, @args );
-	return 1;
+  my( $self, $event, @args ) = @_[ OBJECT, ARG0, ARG1 .. $#_ ];
+  $self->_send_event( $event, @args );
+  return 1;
 }
 
 sub _send_event {
   my ($self,$event,@args) = @_;
-  # Let the plugin system process this
   return 1 if $self->_plugin_process( 'SERVER', $event, \( @args ) ) == PCSI_EAT_ALL;
   $poe_kernel->post( $_ => $event, @args ) for  keys % { $self->{sessions} };
   return 1;
@@ -1136,6 +1121,9 @@ Returns an object. Accepts the following parameters, all are optional:
 	auth  => 0, # Disable auth globally, default enabled.
 	antiflood => 0, # Disable flood protection globally, default enabled.
   );
+
+If the component is created from within another session, that session will be automagcially registered
+with the component to receive events and get an 'ircd_backend_registered' event.
 
 =back
 

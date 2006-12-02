@@ -15,7 +15,7 @@ use POE::Component::Server::IRC::Plugin qw(:ALL);
 use Date::Format;
 use vars qw($VERSION $REVISION);
 
-$VERSION = '1.05';
+$VERSION = '1.06';
 ($REVISION) = (q$LastChangedRevision$=~/(\d+)/g);
 
 sub spawn {
@@ -5287,6 +5287,9 @@ Returns the object, takes the following parameters:
   'auth', set to 0 to globally disable IRC authentication, default is auth is enabled;
   'antiflood', set to 0 to globally disable flood protection, default enabled;
   'config', a hashref of configuration options, see configure() method for details;
+
+If the component is spawned from within another session then that session will automagically be 
+registered with the component to receive events and be sent an 'ircd_registered' event.
 
 =back
 
