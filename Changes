@@ -1,4 +1,15 @@
 ========================
+2006-12-02 15:46:33 1.06
+========================
+
+  2006-12-02 15:45:49 (r110) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M; Changes M;
+  lib/POE/Component/Server/IRC.pm M
+
+    Automagic registration of parent sessions added, as per buu's
+    suggestion
+
+========================
 2006-11-19 14:29:24 1.05
 ========================
 

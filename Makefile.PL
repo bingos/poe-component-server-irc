@@ -47,7 +47,7 @@ WriteMakefile(
 					  'POE::Filter::IRCD' => 2.2,
 					  'POE::Component::Client::Ident' => 1.00,
 					  'POE::Component::Client::DNS' => 0.99,
-					  'POE::Component::IRC' => 5.13,
+					  'POE::Component::IRC' => 5.18,
 					  'Algorithm::Diff' => 1.19,
 					 },
 			  'VERSION_FROM' => 'lib/POE/Component/Server/IRC.pm',
