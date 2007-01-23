@@ -15,7 +15,7 @@ use POE::Component::Server::IRC::Plugin qw(:ALL);
 use Date::Format;
 use vars qw($VERSION $REVISION);
 
-$VERSION = '1.07';
+$VERSION = '1.08';
 ($REVISION) = (q$LastChangedRevision$=~/(\d+)/g);
 
 sub spawn {
@@ -203,8 +203,9 @@ sub _client_register {
   my $port = $self->{state}->{conns}->{ $conn_id }->{socket}->[3];
   my $version = $self->server_version();
   my $network = $self->server_config('NETWORK');
+  my $server_is = $server . '[' . $server . '/' . $port . ']';
   $self->_send_output_to_client( $conn_id => { prefix => $server, command => '001', params => [ $nick, "Welcome to the $network Internet Relay Chat network $nick" ] } );
-  $self->_send_output_to_client( $conn_id => { prefix => $server, command => '002', params => [ $nick, "Your host is ${server}[${server}/${port}], running version $version" ] } );
+  $self->_send_output_to_client( $conn_id => { prefix => $server, command => '002', params => [ $nick, "Your host is $server_is, running version $version" ] } );
   $self->_send_output_to_client( $conn_id => { prefix => $server, command => '003', params => [ $nick, $self->server_created() ] } );
   $self->_send_output_to_client( $conn_id => { prefix => $server, command => '004', params => [ $nick, $server, $version, 'Dilowz', 'biklmnopstveIh', 'bkloveIh' ], colonify => 0 } );
   $self->_send_output_to_client( $conn_id => $_ ) for @{ $self->_daemon_cmd_isupport( $nick ) };

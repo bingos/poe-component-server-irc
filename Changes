@@ -1,4 +1,15 @@
 ========================
+2006-12-29 11:09:49 1.07
+========================
+
+  2006-12-29 11:08:09 (r112) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M; Makefile.PL M; Changes M;
+  t/ts_10_eggzeck_topic.t M; lib/POE/Component/Server/IRC.pm M
+
+    PoCo-IRC TOPIC bug caused problems with topic test. Raised poco-irc
+    prereq to 5.18. 
+
+========================
 2006-12-02 15:46:33 1.06
 ========================
 
