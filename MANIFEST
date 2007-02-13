@@ -31,6 +31,7 @@ t/3_backend.t
 t/4_test_plugin.t
 t/5_pod.t
 t/5_pod_coverage.t
+t/5_test_kwalitee.t
 t/ts_01_subclass.t
 t/ts_02_multi.t
 t/ts_03_serverlink.t
