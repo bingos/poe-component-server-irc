@@ -15,7 +15,7 @@ use POE::Component::Server::IRC::Plugin qw(:ALL);
 use Date::Format;
 use vars qw($VERSION $REVISION);
 
-$VERSION = '1.09';
+$VERSION = '1.10';
 ($REVISION) = (q$LastChangedRevision$=~/(\d+)/g);
 
 sub spawn {
@@ -1950,6 +1950,9 @@ sub _daemon_cmd_mode {
     my $unknown = 0;
     my $notop = 0;
     my $nick_is_op = $self->state_is_chan_op( $nick, $chan );
+    if ( $self->state_user_is_operator( $nick ) and $self->{config}->{OPHACKS} ) {
+	$nick_is_op = 1;
+    }
     my $nick_is_hop = $self->state_is_chan_hop( $nick, $chan );
     my $reply; my @reply_args;
     my $parsed_mode = parse_mode_line( @{ $args } );
@@ -2191,25 +2194,29 @@ sub _daemon_cmd_join {
 	next LOOP;
       }
       my $chanrec = $self->{state}->{chans}->{ $uchannel };
+      my $bypass; 
+      if ( $self->state_user_is_operator( $nick ) and $self->{config}->{OPHACKS} ) {
+	$bypass = 1;
+      }
       # Channel is full
-      if ( $chanrec->{mode} =~ /l/ and scalar keys %{ $chanrec } >= $chanrec->{climit} ) {
+      if ( !$bypass and $chanrec->{mode} =~ /l/ and scalar keys %{ $chanrec } >= $chanrec->{climit} ) {
 	$self->_send_output_to_client( $route_id => '471' => $channel );
         next LOOP;
       }
       my $chankey;
       $chankey = shift @chankeys if $chanrec->{mode} =~ /k/;
       # Channel +k and no key or invalid key provided
-      if ( $chanrec->{mode} =~ /k/ and ( !$chankey or ( $chankey ne $chanrec->{ckey} ) ) ) {
+      if ( !$bypass and $chanrec->{mode} =~ /k/ and ( !$chankey or ( $chankey ne $chanrec->{ckey} ) ) ) {
 	$self->_send_output_to_client( $route_id => '475' => $channel );
         next LOOP;
       }
       # Channel +i and not INVEX
-      if ( $chanrec->{mode} =~ /i/ and !$self->_state_user_invited( $nick, $channel ) ) {
+      if ( !$bypass and $chanrec->{mode} =~ /i/ and !$self->_state_user_invited( $nick, $channel ) ) {
 	$self->_send_output_to_client( $route_id => '473' => $channel );
         next LOOP;
       }
       # Channel +b and no exception
-      if ( $self->_state_user_banned( $nick, $channel ) ) {
+      if ( !$bypass and $self->_state_user_banned( $nick, $channel ) ) {
 	$self->_send_output_to_client( $route_id => '474' => $channel );
 	next LOOP;
       }
@@ -2286,7 +2293,11 @@ sub _daemon_cmd_kick {
 	last SWITCH;
     }
     $who = $self->state_user_nick( $who );
-    if ( !$self->state_is_chan_op( $nick, $chan ) ) {
+    my $bypass;
+    if ( $self->state_user_is_operator( $nick ) and $self->{config}->{OPHACKS} ) {
+	$bypass = 1;
+    }
+    if ( !$self->state_is_chan_op( $nick, $chan ) and !$bypass ) {
 	push @{ $ref }, [ '482', $chan ];
 	last SWITCH;
     }
@@ -2330,7 +2341,11 @@ sub _daemon_cmd_remove {
     }
     my $fullwho = $self->state_user_full( $who );
     $who = ( split /!/, $fullwho )[0];
-    if ( !$self->state_is_chan_op( $nick, $chan ) ) {
+    my $bypass;
+    if ( $self->state_user_is_operator( $nick ) and $self->{config}->{OPHACKS} ) {
+	$bypass = 1;
+    }
+    if ( !$self->state_is_chan_op( $nick, $chan ) and !$bypass ) {
 	push @{ $ref }, [ '482', $chan ];
 	last SWITCH;
     }
@@ -4658,6 +4673,9 @@ sub configure {
     $self->{config}->{INFO}->[9] = '#';
   }
 
+  # MagNET op hacks
+  $self->{config}->{OPHACKS} = 0 unless $self->{config}->{OPHACKS};
+
   $self->{Error_Codes} = {
 			401 => [ 1, "No such nick/channel" ],
 			402 => [ 1, "No such server" ],
@@ -5318,6 +5336,7 @@ Takes a number of parameters:
   'version', change the server version that is reported;
   'admin', an arrayref consisting of the 3 lines that will be returned by ADMIN;
   'info', an arrayref consisting of lines to be returned by INFO;
+  'ophacks', set to true to enable MagNET oper hacks;
 
 =item session_id
 
