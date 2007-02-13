@@ -10,7 +10,7 @@ use Carp;
 use Net::Netmask;
 use vars qw($VERSION);
 
-$VERSION = '1.10';
+$VERSION = '1.11';
 
 sub create {
   my $package = shift;

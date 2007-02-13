@@ -1,4 +1,23 @@
 ========================
+2007-02-13 11:53:44 1.10
+========================
+
+  2007-02-13 11:53:10 (r120) by bingos; t/5_test_kwalitee.t A
+
+    Actually added the test, Test::Kwalitee. Doh. 
+
+  2007-02-13 11:52:39 (r119) by bingos; MANIFEST M
+
+    Added new test, Test::Kwalitee 
+
+  2007-02-13 11:51:10 (r118) by bingos
+  lib/POE/Component/Server/IRC/OperServ.pm M;
+  lib/POE/Component/Server/IRC/Backend.pm M; Changes M;
+  lib/POE/Component/Server/IRC.pm M
+
+    Added MagNET Oper hacks. 
+
+========================
 2007-01-29 14:52:17 1.09
 ========================
 

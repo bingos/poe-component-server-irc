@@ -15,7 +15,7 @@ use POE::Component::Server::IRC::Plugin qw(:ALL);
 use Date::Format;
 use vars qw($VERSION $REVISION);
 
-$VERSION = '1.10';
+$VERSION = '1.11';
 ($REVISION) = (q$LastChangedRevision$=~/(\d+)/g);
 
 sub spawn {
@@ -1950,9 +1950,6 @@ sub _daemon_cmd_mode {
     my $unknown = 0;
     my $notop = 0;
     my $nick_is_op = $self->state_is_chan_op( $nick, $chan );
-    if ( $self->state_user_is_operator( $nick ) and $self->{config}->{OPHACKS} ) {
-	$nick_is_op = 1;
-    }
     my $nick_is_hop = $self->state_is_chan_hop( $nick, $chan );
     my $reply; my @reply_args;
     my $parsed_mode = parse_mode_line( @{ $args } );
@@ -2293,11 +2290,7 @@ sub _daemon_cmd_kick {
 	last SWITCH;
     }
     $who = $self->state_user_nick( $who );
-    my $bypass;
-    if ( $self->state_user_is_operator( $nick ) and $self->{config}->{OPHACKS} ) {
-	$bypass = 1;
-    }
-    if ( !$self->state_is_chan_op( $nick, $chan ) and !$bypass ) {
+    if ( !$self->state_is_chan_op( $nick, $chan ) ) {
 	push @{ $ref }, [ '482', $chan ];
 	last SWITCH;
     }
@@ -2341,11 +2334,7 @@ sub _daemon_cmd_remove {
     }
     my $fullwho = $self->state_user_full( $who );
     $who = ( split /!/, $fullwho )[0];
-    my $bypass;
-    if ( $self->state_user_is_operator( $nick ) and $self->{config}->{OPHACKS} ) {
-	$bypass = 1;
-    }
-    if ( !$self->state_is_chan_op( $nick, $chan ) and !$bypass ) {
+    if ( !$self->state_is_chan_op( $nick, $chan ) ) {
 	push @{ $ref }, [ '482', $chan ];
 	last SWITCH;
     }
@@ -4491,6 +4480,7 @@ sub state_is_chan_op {
   return unless $self->state_is_chan_member( $nick, $chan );
   my $record = $self->{state}->{users}->{ u_irc $nick };
   return 1 if $record->{chans}->{ u_irc $chan } =~ /o/;
+  return 1 if $self->{config}->{OPHACKS} and $record->{umode} =~ /o/;
   return 0;
 }
 
