@@ -1,4 +1,15 @@
 ========================
+2007-02-13 15:57:17 1.11
+========================
+
+  2007-02-13 15:56:55 (r122) by bingos
+  lib/POE/Component/Server/IRC/OperServ.pm M;
+  lib/POE/Component/Server/IRC/Backend.pm M; Changes M;
+  lib/POE/Component/Server/IRC.pm M
+
+    Refactored the MagNET Oper hacks. Should all work as expected now. 
+
+========================
 2007-02-13 11:53:44 1.10
 ========================
 

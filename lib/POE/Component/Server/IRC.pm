@@ -15,7 +15,7 @@ use POE::Component::Server::IRC::Plugin qw(:ALL);
 use Date::Format;
 use vars qw($VERSION $REVISION);
 
-$VERSION = '1.11';
+$VERSION = '1.12';
 ($REVISION) = (q$LastChangedRevision$=~/(\d+)/g);
 
 sub spawn {
@@ -4194,6 +4194,11 @@ sub _state_register_client {
   return 1;
 }
 
+sub state_nicks {
+  my $self = shift;
+  return map { $self->{state}->{users}->{$_}->{nick} } keys %{ $self->{state}->{users} };
+}
+
 sub state_nick_exists {
   my $self = shift;
   my $nick = shift || return 1;
@@ -4201,11 +4206,21 @@ sub state_nick_exists {
   return 1;
 }
 
+sub state_chans {
+  my $self = shift;
+  return map { $self->{state}->{chans}->{$_}->{name} } keys %{ $self->{state}->{chans} };
+}
+
 sub state_chan_exists {
   my $self = shift;
   my $chan = shift || return;
   return 0 unless defined $self->{state}->{chans}->{ u_irc $chan };
   return 1;
+}
+
+sub state_peers {
+  my $self = shift;
+  return map { $self->{state}->{peers}->{$_}->{name} } keys %{ $self->{state}->{peers} };
 }
 
 sub state_peer_exists {
@@ -5139,7 +5154,8 @@ sub add_spoofed_nick {
   my $ref;
   if ( ref $_[ARG0] eq 'HASH' ) {
 	$ref = $_[ARG0];
-  } else {
+  } 
+  else {
 	$ref = { @_[ARG0..$#_] };
   }
   $ref->{ lc $_ } = delete $ref->{$_} for keys %{ $ref };
@@ -5326,7 +5342,7 @@ Takes a number of parameters:
   'version', change the server version that is reported;
   'admin', an arrayref consisting of the 3 lines that will be returned by ADMIN;
   'info', an arrayref consisting of lines to be returned by INFO;
-  'ophacks', set to true to enable MagNET oper hacks;
+  'ophacks', set to true to enable oper hacks;
 
 =item session_id
 
@@ -5441,6 +5457,18 @@ No arguments, returns a string signifying when the ircd was created.
 =item server_config
 
 Takes one argument, the server configuration value to query.
+
+=item state_nicks
+
+Takes no arguments, returns a list of all nicknames in the state.
+
+=item state_chans
+
+Takes no arguments, returns a list of all channels in the state.
+
+=item state_peers
+
+Takes no arguments, returns a list of all irc servers in the state.
 
 =item state_nick_exists
 
@@ -5758,38 +5786,38 @@ After a session has registered with the component it will receive the following 
 
 =item ircd_registered
 
-Emitted: when a session registers with the component;
-Target: the registering session;
-Args:
+  Emitted: when a session registers with the component;
+  Target: the registering session;
+  Args:
         ARG0, the component's object;
 
 =item ircd_unregistered
 
-Emitted: when a session unregisters with the component;
-Target: the unregistering session;
-Args: none
+  Emitted: when a session unregisters with the component;
+  Target: the unregistering session;
+  Args: none
 
 =item ircd_listener_add
 
-Emitted: on a successful add_listener() call;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: on a successful add_listener() call;
+  Target: all plugins and registered sessions;
+  Args:
         ARG0, the listening port;
         ARG1, the listener id;
 
 =item ircd_listener_del
 
-Emitted: on a successful del_listener() call;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: on a successful del_listener() call;
+  Target: all plugins and registered sessions;
+  Args:
         ARG0, the listening port;
         ARG1, the listener id;
 
 =item ircd_daemon_server
 
-Emitted: when a server is introduced onto the network;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: when a server is introduced onto the network;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, server name;
 	ARG1, the name of the server that is introducing them;
 	ARG2, Hop count;
@@ -5797,16 +5825,16 @@ Args:
 
 =item ircd_daemon_squit
 
-Emitted: when a server quits the network;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: when a server quits the network;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the server name;
 
 =item ircd_daemon_nick
 
-Emitted: when a user is introduced onto the network or a user changes nick;
-Target: all plugins and registered sessions;
-Args: ( new nick ):
+  Emitted: when a user is introduced onto the network or a user changes nick;
+  Target: all plugins and registered sessions;
+  Args: ( new nick ):
 	ARG0, nickname;
 	ARG1, hop count;
 	ARG2, Time Stamp (TS);
@@ -5816,48 +5844,48 @@ Args: ( new nick ):
 	ARG6, servername;
 	ARG7, Real Name;
 
-Args: ( nick change ):
+  Args: ( nick change ):
 	ARG0, the full user (nick!ident@host);
 	ARG1, the nickname they are changing to;
 
 =item ircd_daemon_umode
 
-Emitted: when a user performs a umode change;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: when a user performs a umode change;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the full user (nick!ident@host);
 	ARG1, the umode changes they made;
 
 =item ircd_daemon_quit
 
-Emitted: when a user quits or the server they are on squits;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: when a user quits or the server they are on squits;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the full user (nick!ident@host);
 	ARG1, Quit message;
 
 =item ircd_daemon_join
 
-Emitted: when a user joins a channel;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: when a user joins a channel;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the full user (nick!ident@host);
 	ARG1, the channel name;
 
 =item ircd_daemon_part
 
-Emitted: when a user parts a channel;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: when a user parts a channel;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the full user (nick!ident@host);
 	ARG1, the channel name;
 	ARG2, part message or nickname;
 
 =item ircd_daemon_kick
 
-Emitted: when a user is kicked from a channel;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: when a user is kicked from a channel;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the full user (nick!ident@host) of the kicker;
 	ARG1, the channel name;
 	ARG2, the nick of the kicked person;
@@ -5865,79 +5893,79 @@ Args:
 
 =item ircd_daemon_mode
 
-Emitted: when a mode is changed on a channel;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: when a mode is changed on a channel;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the full user (nick!ident@host) or servername;
 	ARG1, Channel name;
 	ARG2 .. $#_: modes and arguments;
 
 =item ircd_daemon_topic
 
-Emitted: when a topic changes on a channel;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: when a topic changes on a channel;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the full user (nick!ident@host);
 	ARG1, Channel name;
 	ARG2, the new topic;
 
 =item ircd_daemon_public
 
-Emitted: on channel targetted privmsg, a spoofed nick must be on the channel;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: on channel targetted privmsg, a spoofed nick must be on the channel;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the full user (nick!ident@host);
 	ARG1, the channel name;
 	ARG2, what was said;
 
 =item ircd_daemon_privmsg
 
-Emitted: when someone sends a privmsg to a spoofed nick;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: when someone sends a privmsg to a spoofed nick;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the full user (nick!ident@host);
 	ARG1, the spoofed nick targetted;
 	ARG2, what was said;
 
 =item ircd_daemon_notice
 
-Emitted: when someone sends a notice to a spoofed nick or channel;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: when someone sends a notice to a spoofed nick or channel;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the full user (nick!ident@host);
 	ARG1, the spoofed nick targetted or channel spoofed nick is on;
 	ARG2, what was said;
 
 =item ircd_daemon_invite
 
-Emitted: when someone invites a spoofed nick to a channel;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: when someone invites a spoofed nick to a channel;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the full user (nick!ident@host);
 	ARG1, the spoofed nick targetted;
 	ARG2, the channel invited to;
 
 =item ircd_daemon_rehash
 
-Emitted: when an oper issues REHASH command;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: when an oper issues REHASH command;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the full user (nick!ident@host);
 
 =item ircd_daemon_die
 
-Emitted: when an oper issues DIE command;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: when an oper issues DIE command;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the full user (nick!ident@host);
 
 Note: the component will shutdown, this is a feature;
 
 =item ircd_daemon_gline
 
-Emitted: when an oper issues GLINE command;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: when an oper issues GLINE command;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the full user (nick!ident@host);
 	ARG1, user mask;
 	ARG2, host mask;
@@ -5945,9 +5973,9 @@ Args:
 
 =item ircd_daemon_kline
 
-Emitted: when an oper issues KLINE command;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: when an oper issues KLINE command;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the full user (nick!ident@host);
 	ARG1, target for the KLINE;
 	ARG2, duration in seconds;
@@ -5957,9 +5985,9 @@ Args:
 
 =item ircd_daemon_rkline
 
-Emitted: when an oper issues RKLINE command;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: when an oper issues RKLINE command;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the full user (nick!ident@host);
 	ARG1, target for the RKLINE;
 	ARG2, duration in seconds;
@@ -5969,9 +5997,9 @@ Args:
 
 =item ircd_daemon_unkline
 
-Emitted: when an oper UNKLINEs a KLINE;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: when an oper UNKLINEs a KLINE;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the full user (nick!ident@host);
 	ARG1, target for the UNKLINE;
 	ARG2, user mask;
@@ -5979,25 +6007,25 @@ Args:
 
 =item ircd_daemon_locops
 
-Emitted: when an oper issues a LOCOPS;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: when an oper issues a LOCOPS;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the full user (nick!ident@host);
 	ARG1, the locops message;
 
 =item ircd_daemon_operwall
 
-Emitted: when an oper issues a WALLOPS or OPERWALL;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: when an oper issues a WALLOPS or OPERWALL;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the full user (nick!ident@host);
 	ARG1, the wallops or operwall message;
 
 =item ircd_daemon_wallops
 
-Emitted: when a server issues a WALLOPS;
-Target: all plugins and registered sessions;
-Args:
+  Emitted: when a server issues a WALLOPS;
+  Target: all plugins and registered sessions;
+  Args:
 	ARG0, the server name;
 	ARG1, the wallops message;
 
