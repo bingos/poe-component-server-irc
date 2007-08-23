@@ -10,7 +10,7 @@ use Carp;
 use Net::Netmask;
 use vars qw($VERSION);
 
-$VERSION = '1.11';
+$VERSION = '1.12';
 
 sub create {
   my $package = shift;
@@ -216,8 +216,9 @@ sub _send_event {
 ############################
 
 sub _accept_failed {
-  my ($kernel,$self,$listener_id) = @_[KERNEL,OBJECT,ARG3];
+  my ($kernel,$self,$operation,$errnum,$errstr,$listener_id) = @_[KERNEL,OBJECT,ARG0..ARG3];
   delete $self->{listeners}->{ $listener_id };
+  $self->_send_event( $self->{prefix} . 'listener_failure', $listener_id, $operation, $errnum, $errstr );
   undef;
 }
 
@@ -1303,6 +1304,16 @@ Once registered your session will receive these states, which will have the appl
   Args:
 	ARG0, the listening port;
 	ARG1, the listener id;
+
+=item listener_failure 
+
+  Emitted: when a listener wheel fails;
+  Target: all plugins and registered sessions;
+  Args:
+	ARG0, the listener id;
+	ARG1, the name of the operation that failed;
+	ARG2, numeric value for $!;
+	ARG3, string value for $!;
 
 =item socketerr
 

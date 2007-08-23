@@ -34,6 +34,8 @@ NOTICE
 
 author 'Chris Williams <chris@bingosnet.co.uk>';
 license 'perl';
+abstract 'A fully event-driven networkable IRC server daemon module';
+build_requires 'Test::More' => 0.47;
 
 WriteMakefile(
 			  'NAME'	=> 'POE::Component::Server::IRC',

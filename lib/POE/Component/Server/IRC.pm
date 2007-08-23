@@ -15,7 +15,7 @@ use POE::Component::Server::IRC::Plugin qw(:ALL);
 use Date::Format;
 use vars qw($VERSION $REVISION);
 
-$VERSION = '1.12';
+$VERSION = '1.14';
 ($REVISION) = (q$LastChangedRevision$=~/(\d+)/g);
 
 sub spawn {
@@ -5222,7 +5222,7 @@ __END__
 
 =head1 NAME
 
-POE::Component::Server::IRC - a fully event-driven networkable IRC server daemon module.
+POE::Component::Server::IRC - A fully event-driven networkable IRC server daemon module.
 
 =head1 SYNOPSIS
 
@@ -5812,6 +5812,16 @@ After a session has registered with the component it will receive the following 
   Args:
         ARG0, the listening port;
         ARG1, the listener id;
+
+=item ircd_listener_failure
+
+  Emitted: when a listener wheel fails;
+  Target: all plugins and registered sessions;
+  Args:
+        ARG0, the listener id;
+        ARG1, the name of the operation that failed;
+        ARG2, numeric value for $!;
+        ARG3, string value for $!;
 
 =item ircd_daemon_server
 
