@@ -10,7 +10,7 @@ use Carp;
 use Net::Netmask;
 use vars qw($VERSION);
 
-$VERSION = '1.12';
+$VERSION = '1.16';
 
 sub create {
   my $package = shift;
@@ -285,7 +285,7 @@ sub _add_listener {
 
   my $listener = POE::Wheel::SocketFactory->new(
 	BindPort => $bindport,
-	( $parms{bindaddr} ? ( BindAddr => $parms{bindaddr} ) : () ),
+	( $parms{bindaddr} ? ( BindAddress => $parms{bindaddr} ) : () ),
 	Reuse => 'on',
 	( $parms{listenqueue} ? ( ListenQueue => $parms{listenqueue} ) : () ),
 	SuccessEvent => '_accept_connection',
