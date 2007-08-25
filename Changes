@@ -1,4 +1,15 @@
 ========================
+2007-08-23 16:16:45 1.16
+========================
+
+  2007-08-23 16:16:21 (r129) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M; Changes M;
+  lib/POE/Component/Server/IRC.pm M
+
+    add_listener() was using BindAddr instead of BindAddress when calling
+    SocketFactory. Spotted by lunartear 
+
+========================
 2007-08-23 15:53:52 1.14
 ========================
 

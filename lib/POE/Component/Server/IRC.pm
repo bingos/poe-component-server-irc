@@ -15,7 +15,7 @@ use POE::Component::Server::IRC::Plugin qw(:ALL);
 use Date::Format;
 use vars qw($VERSION $REVISION);
 
-$VERSION = '1.16';
+$VERSION = '1.18';
 ($REVISION) = (q$LastChangedRevision$=~/(\d+)/g);
 
 sub spawn {
@@ -772,7 +772,7 @@ sub _daemon_cmd_ping {
 	$self->{ircd}->send_output( { command => 'PING', params => [ $nick, $target ] }, $self->_state_peer_route( $args->[1] ) );
 	last SWITCH;
      }
-     push @{ $ref }, { command => 'PONG', params => [ $server, $args->[0] ] };
+     push @{ $ref }, { prefix => $server, command => 'PONG', params => [ $server, $args->[0] ] };
   }
   return @{ $ref } if wantarray();
   return $ref;
