@@ -3,7 +3,7 @@ package POE::Component::Server::IRC::Pipeline;
 use strict;
 use warnings;
 
-our $VERSION = '0.02';
+our $VERSION = '1.20';
 
 
 sub new {

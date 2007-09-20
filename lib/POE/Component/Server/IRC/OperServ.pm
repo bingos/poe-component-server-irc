@@ -4,7 +4,7 @@ use strict;
 use POE::Component::Server::IRC::Plugin qw(:ALL);
 use base qw(POE::Component::Server::IRC);
 
-our $VERSION = '1.11';
+our $VERSION = '1.20';
 
 sub _load_our_plugins {
   my $self = shift;

@@ -4,7 +4,7 @@ use strict;
 use warnings;
 use Algorithm::Diff qw(diff);
 
-our $VERSION = '1.01';
+our $VERSION = '1.20';
 
 # We export some stuff
 require Exporter;
