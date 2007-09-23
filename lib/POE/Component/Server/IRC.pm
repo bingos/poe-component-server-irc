@@ -15,7 +15,7 @@ use POE::Component::Server::IRC::Plugin qw(:ALL);
 use Date::Format;
 use vars qw($VERSION $REVISION);
 
-$VERSION = '1.20';
+$VERSION = '1.22';
 ($REVISION) = (q$LastChangedRevision$=~/(\d+)/g);
 
 sub spawn {
@@ -1862,7 +1862,7 @@ sub _daemon_cmd_whois {
 	push @{ $ref }, { prefix => $server, command => '312', params => [ $nick, $record->{nick}, $record->{server}, $self->_state_peer_desc( $record->{server} ) ] };
 	push @{ $ref }, { prefix => $server, command => '301', params => [ $nick, $record->{nick}, $record->{away} ] } if $record->{type} eq 'c' and $record->{away};
 	push @{ $ref }, { prefix => $server, command => '313', params => [ $nick, $record->{nick}, 'is an IRC Operator' ] } if $record->{umode} and $record->{umode} =~ /o/;
-	push @{ $ref }, { prefix => $server, command => '338', params => [ $nick, $record->{nick}, $record->{socket}->[0], 'actually using host' ] } if $record->{type} eq 'c';
+	push @{ $ref }, { prefix => $server, command => '338', params => [ $nick, $record->{nick}, $record->{socket}->[0], 'actually using host' ] } if $record->{type} eq 'c' and ( $self->server_config('whoisactually') or $self->state_user_is_operator( $nick ) );
 	push @{ $ref }, { prefix => $server, command => '317', params => [ $nick, $record->{nick}, ( time() - $record->{idle_time} ), $record->{conn_time}, 'seconds idle, signon time' ] } if $record->{type} eq 'c';
     }
     push @{ $ref }, { prefix => $server, command => '318', params => [ $nick, $query, 'End of /WHOIS list.' ] };
@@ -4678,7 +4678,9 @@ sub configure {
     $self->{config}->{INFO}->[9] = '#';
   }
 
-  # MagNET op hacks
+  $self->{config}->{WHOISACTUALLY} = 1 unless defined $self->{config}->{WHOISACTUALLY} and $self->{config}->{WHOISACTUALLY} eq '0';
+
+  # OPER hacks
   $self->{config}->{OPHACKS} = 0 unless $self->{config}->{OPHACKS};
 
   $self->{Error_Codes} = {
@@ -5343,6 +5345,7 @@ Takes a number of parameters:
   'admin', an arrayref consisting of the 3 lines that will be returned by ADMIN;
   'info', an arrayref consisting of lines to be returned by INFO;
   'ophacks', set to true to enable oper hacks;
+  'whoisactually', set this to 0 so only opers can see 338 replies to WHOIS queries, default is 1;
 
 =item session_id
 

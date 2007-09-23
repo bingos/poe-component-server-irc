@@ -1,4 +1,31 @@
 ========================
+2007-09-20 17:56:26 1.20
+========================
+
+  2007-09-20 17:55:48 (r136) by bingos
+  lib/POE/Component/Server/IRC/OperServ.pm M;
+  lib/POE/Component/Server/IRC/Pipeline.pm M;
+  lib/POE/Component/Server/IRC/Backend.pm M;
+  lib/POE/Component/Server/IRC/Common.pm M;
+  lib/POE/Component/Server/IRC/Test/Plugin.pm M;
+  lib/POE/Component/Server/IRC/Plugin.pm M
+
+    Updated versions on all .pm files prior to CPAN Release 
+
+  2007-09-17 16:11:54 (r135) by bingos; Makefile.PL M
+
+    Really unset the executable property on Makefile.PL this time. D'oh 
+
+  2007-09-17 16:05:30 (r134) by bingos; Makefile.PL M
+
+    Updated some of the prereqs in Makefile.PL 
+
+  2007-09-17 15:58:55 (r133) by bingos
+  Changes M; lib/POE/Component/Server/IRC.pm M
+
+    Removed executable property from Makefile.PL 
+
+========================
 2007-08-25 18:01:14 1.18
 ========================
 
