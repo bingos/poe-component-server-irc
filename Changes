@@ -1,4 +1,14 @@
 ========================
+2007-09-23 10:13:14 1.22
+========================
+
+  2007-09-23 10:08:18 (r138) by bingos
+  Changes M; lib/POE/Component/Server/IRC.pm M
+
+    Added config option to enable oper only RPL_WHOISACTUALLY as
+    suggested by Kaitlyn Parkhurst 
+
+========================
 2007-09-20 17:56:26 1.20
 ========================
 

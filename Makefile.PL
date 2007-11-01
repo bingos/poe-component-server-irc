@@ -41,11 +41,11 @@ WriteMakefile(
 			  'NAME'	=> 'POE::Component::Server::IRC',
 			  'PREREQ_PM' => {
 					  'warnings' => 0,
-					  'POE'    => 0.38,
 					  'Carp'   => 0,
 					  'Net::Netmask' => 1.9012,
 					  'Socket' => 0,
 					  'Date::Format' => 0,
+					  'POE'    => 0.38,
 					  'POE::Filter::IRCD' => 2.2,
 					  'POE::Component::Client::Ident' => 1.00,
 					  'POE::Component::Client::DNS' => 1.00,
