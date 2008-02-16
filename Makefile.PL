@@ -32,6 +32,8 @@ NOTICE
 
 }
 
+#my $dnsbl = prompt( 'Do you want optional DNSBL support ( requires POE::Component::Client::DNSBL ) [N/y]?', 'N' );
+
 author 'Chris Williams <chris@bingosnet.co.uk>';
 license 'perl';
 abstract 'A fully event-driven networkable IRC server daemon module';
@@ -40,15 +42,16 @@ build_requires 'Test::More' => 0.47;
 WriteMakefile(
 			  'NAME'	=> 'POE::Component::Server::IRC',
 			  'PREREQ_PM' => {
-					  'warnings' => 0,
+					  ( $] < 5.006 ? ( 'warnings::compat' => 0 ) : () ),
 					  'Carp'   => 0,
 					  'Net::Netmask' => 1.9012,
 					  'Socket' => 0,
 					  'Date::Format' => 0,
-					  'POE'    => 0.38,
+					  'POE'    => 0.9999,
 					  'POE::Filter::IRCD' => 2.2,
 					  'POE::Component::Client::Ident' => 1.00,
 					  'POE::Component::Client::DNS' => 1.00,
+#					  ( uc( $dnsbl ) eq 'Y' ? ( 'POE::Component::Client::DNSBL' => 0 ) : () ),
 					  'POE::Component::IRC' => 5.18,
 					  'Algorithm::Diff' => 1.19,
 					 },

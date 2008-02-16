@@ -15,7 +15,7 @@ use POE::Component::Server::IRC::Plugin qw(:ALL);
 use Date::Format;
 use vars qw($VERSION $REVISION);
 
-$VERSION = '1.24';
+$VERSION = '1.26';
 ($REVISION) = (q$LastChangedRevision$=~/(\d+)/g);
 
 sub spawn {
@@ -4527,7 +4527,7 @@ sub _state_o_line {
   return unless $user and $pass;
   my $ops = $self->{config}->{ops};
   return unless $ops->{ $user };
-  return -1 unless $ops->{ $user }->{password} eq $pass;
+  return -1 unless chkpasswd ( $pass, $ops->{ $user }->{password} );
   my $client_ip = $self->_state_user_ip( $nick );
   return unless $client_ip;
   return 1 if ( !$ops->{ $user }->{ipmask} and ( $client_ip and $client_ip =~ /^127\./ ) );
@@ -5372,6 +5372,8 @@ This adds an O line to the IRCd. Takes a number of parameters:
   'ipmask', either a scalar ipmask or an arrayref of Net::Netmask objects;
 
 A scalar ipmask can be contain '*' to match any number of characters or '?' to match one character. If no 'ipmask' is provided, operators are only allowed to OPER from the loopback interface.
+
+'password' can be either plain-text, C<crypt>'d or unix/apache md5. See C<mkpasswd> function in L<POE::Component::Server::IRC::Common> for generating passwords.
 
 =item del_operator
 

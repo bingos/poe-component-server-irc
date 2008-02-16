@@ -1,16 +1,18 @@
 package POE::Component::Server::IRC::Common;
 
+# We export some stuff
+require Exporter;
+@ISA = qw( Exporter );
+%EXPORT_TAGS = ( 'ALL' => [ qw(u_irc l_irc gen_mode_change parse_mode_line unparse_mode_line parse_ban_mask validate_nick_name validate_chan_name matches_mask_array matches_mask parse_user mkpasswd chkpasswd) ] );
+Exporter::export_ok_tags( 'ALL' );
+
 use strict;
 use warnings;
 use Algorithm::Diff qw(diff);
+use Crypt::PasswdMD5;
+use vars qw($VERSION);
 
-our $VERSION = '1.20';
-
-# We export some stuff
-require Exporter;
-our @ISA = qw( Exporter );
-our %EXPORT_TAGS = ( 'ALL' => [ qw(u_irc l_irc gen_mode_change parse_mode_line unparse_mode_line parse_ban_mask validate_nick_name validate_chan_name matches_mask_array matches_mask parse_user) ] );
-Exporter::export_ok_tags( 'ALL' );
+$VERSION = '1.21';
 
 sub u_irc {
   my $value = shift || return;
@@ -179,6 +181,39 @@ sub parse_user {
   return $n;
 }
 
+sub mkpasswd {
+  my $plain = shift || return;
+  my %opts = @_;
+  $opts{lc $_} = delete $opts{$_} for keys %opts;
+  return unix_md5_crypt($plain) if $opts{md5};
+  return apache_md5_crypt($plain) if $opts{apache};
+  my $salt = join '', ('.','/', 0..9, 'A'..'Z', 'a'..'z')[rand 64, rand 64];
+  return crypt( $plain, $salt );
+}
+
+sub chkpasswd {
+  my $pass = shift || return;
+  my $chk = shift || return;
+  my $md5 = '$1$'; my $apr = '$apr1$';
+  if ( index($chk,$apr) == 0 ) {
+     my $salt = $chk;
+     $salt =~ s/^\Q$apr//;
+     $salt =~ s/^(.*)\$/$1/;
+     $salt = substr( $salt, 0, 8 );
+     return 1 if apache_md5_crypt( $pass, $salt ) eq $chk;
+  }
+  elsif ( index($chk,$md5) == 0 ) {
+     my $salt = $chk;
+     $salt =~ s/^\Q$md5//;
+     $salt =~ s/^(.*)\$/$1/;
+     $salt = substr( $salt, 0, 8 );
+     return 1 if unix_md5_crypt( $pass, $salt ) eq $chk;
+  }
+  return 1 if crypt( $pass, $chk ) eq $chk;
+  return 1 if $pass eq $chk;
+  return;
+}
+
 1;
 __END__
 
@@ -211,6 +246,8 @@ POE::Component::Server::IRC::Common - provides a set of common functions for the
   my $results_hashref = matches_mask_array( \@masks, \@items_to_match_against );
 
   my $mode_change = gen_mode_change( 'abcde', 'befmZ' );
+
+  my $passwd = mkpasswd( 'moocow' );
 
 
 =head1 DESCRIPTION
@@ -289,6 +326,23 @@ Takes one argument a nickname to validate. Returns true or false if the nickname
 =item parse_user
 
 Takes one parameter, a string representing a user in the form nick!user@hostname. In a scalar context it returns just the nickname. In a list context it returns a list consisting of the nick, user and hostname, respectively.
+
+=item mkpasswd
+
+Takes one mandatory argument a plain string to 'encrypt'. If no further options are specified it uses C<crypt> to generate the
+password. Specifying 'md5' option uses L<Crypt::PasswdMD5>'s C<unix_md5_crypt> function to generate the password. Specifying 
+'apache' uses L<Crypt::PasswdMD5>'s C<apache_md5_crypt> function to generate the password.
+
+  my $passwd = mkpasswd( 'moocow' ); # vanilla crypt()
+
+  my $passwd = mkpasswd( 'moocow', md5 => 1 ) # unix_md5_crypt()
+
+  my $passwd = mkpasswd( 'moocow', apache => 1 ) # apache_md5_crypt()
+
+=item chkpasswd
+
+Takes two mandatory arguments, a password string and something to check that password against. The function first tries md5 
+comparisons ( UNIX and Apache ), then C<crypt> and finally plain-text password check.
 
 =back
 
