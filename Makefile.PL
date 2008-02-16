@@ -54,6 +54,7 @@ WriteMakefile(
 #					  ( uc( $dnsbl ) eq 'Y' ? ( 'POE::Component::Client::DNSBL' => 0 ) : () ),
 					  'POE::Component::IRC' => 5.18,
 					  'Algorithm::Diff' => 1.19,
+					  'Crypt::PasswdMD5' => 1.3,
 					 },
 			  'VERSION_FROM' => 'lib/POE/Component/Server/IRC.pm',
 			  'dist' => { 
