@@ -1,6 +1,10 @@
-========================
-2008-02-16 13:43:17 1.26
-========================
+==============================
+9999-99-99 99:99:99 (untagged)
+==============================
+
+  2008-02-16 13:50:23 (r144) by bingos; Makefile.PL M; Changes M
+
+    Forgot to add prereq for Crypt::PasswdMD5
 
   2008-02-16 13:13:57 (r142) by bingos
   t/1_common.t M; lib/POE/Component/Server/IRC/Common.pm M; Makefile.PL

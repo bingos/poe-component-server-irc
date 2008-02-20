@@ -1,3 +1,4 @@
+bin/pmkpasswd
 Changes
 examples/load-test.pl
 examples/multi-client.pl
@@ -10,6 +11,7 @@ inc/Module/Install/Base.pm
 inc/Module/Install/Makefile.pm
 inc/Module/Install/MakeMaker.pm
 inc/Module/Install/Metadata.pm
+inc/Module/Install/Scripts.pm
 ircd.crt
 ircd.key
 lib/POE/Component/Server/IRC.pm

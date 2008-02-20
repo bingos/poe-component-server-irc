@@ -38,6 +38,7 @@ author 'Chris Williams <chris@bingosnet.co.uk>';
 license 'perl';
 abstract 'A fully event-driven networkable IRC server daemon module';
 build_requires 'Test::More' => 0.47;
+install_script 'bin/pmkpasswd';
 
 WriteMakefile(
 			  'NAME'	=> 'POE::Component::Server::IRC',
