@@ -4,7 +4,7 @@ use strict;
 use POE::Component::Server::IRC::Plugin qw(:ALL);
 use base qw(POE::Component::Server::IRC);
 
-our $VERSION = '1.20';
+our $VERSION = '1.22';
 
 sub _load_our_plugins {
   my $self = shift;
@@ -22,6 +22,16 @@ sub IRCD_daemon_privmsg {
 	last SWITCH unless $ircd->state_chan_exists( $chan );
 	$ircd->yield( 'daemon_cmd_sjoin', 'OperServ', $chan );
 	last SWITCH;
+	}
+	if ( my ($chan) = $request =~ /^join\s+(#.+)\s*$/i ) {
+	last SWITCH unless $ircd->state_chan_exists( $chan );
+	$ircd->yield( 'daemon_cmd_join', 'OperServ', $chan );
+	last SWITCH;
+    }
+    if ( my ($chan, $mode) = $request =~ /^mode\s+(#.+)\s+(.+)\s*$/i ) {
+    last SWITCH unless $ircd->state_chan_exists( $chan );
+    $ircd->yield( 'daemon_cmd_mode', 'OperServ', $chan, $mode );
+    last SWITCH;
     }
   }
   return PCSI_EAT_NONE;
@@ -124,6 +134,15 @@ The following commands are accepted:
 
 The OperServ will remove all channel modes on the indicated channel, including all users' +ov flags. The timestamp
 of the channel will be reset and the OperServ will join that channel with +o.
+
+=item join CHANNEL
+
+The OperServ will simply join the channel you tell it to with +o.
+
+=item mode CHANNEL MODE
+
+The OperServ will set the channel mode you tell it to. You can also remove the channel mode by prefixing
+the mode with a '-' (minus) sign.
 
 =back
 

@@ -1,6 +1,12 @@
-==============================
-9999-99-99 99:99:99 (untagged)
-==============================
+========================
+2008-02-20 16:39:30 1.28
+========================
+
+  2008-02-20 16:37:48 (r146) by bingos
+  bin/pmkpasswd A; MANIFEST M; Makefile.PL M; bin A; Changes M;
+  lib/POE/Component/Server/IRC.pm M
+
+    Added pmkpasswd utility
 
   2008-02-16 13:50:23 (r144) by bingos; Makefile.PL M; Changes M
 

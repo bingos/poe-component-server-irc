@@ -1,4 +1,4 @@
-use Test::More tests => 17;
+use Test::More tests => 18;
 BEGIN { use_ok('POE') };
 BEGIN { use_ok('POE::Component::IRC') };
 BEGIN { use_ok('POE::Component::Server::IRC::OperServ') };
@@ -55,7 +55,7 @@ sub irc_001 {
 
 sub irc_381 {
   pass('We are operator');
-  $_[SENDER]->get_heap()->yield( 'join', '#test' );
+  $_[SENDER]->get_heap()->yield( 'join', '#test1' );
   undef;
 }
 
@@ -63,11 +63,24 @@ sub irc_join {
   my ($heap,$who,$where) = @_[HEAP,ARG0..ARG1];
   my $nick = ( split /!/, $who )[0];
   my $mynick = $heap->{irc}->nick_name();
-  if ( $nick eq $mynick ) {
-     $heap->{irc}->yield( 'privmsg', 'OperServ', "clear $where" );
-  } else {
-     ok( $nick eq 'OperServ', 'OperServ cleared channel' );
-     $heap->{ircd}->yield( 'del_spoofed_nick', 'OperServ' );
+  if ( $where eq '#test1' ) {
+    if ( $nick eq $mynick ) {
+      $heap->{irc}->yield( 'privmsg', 'OperServ', "clear $where" );
+    } 
+    else {
+      ok( $nick eq 'OperServ', 'OperServ cleared channel' );
+      #$heap->{ircd}->yield( 'del_spoofed_nick', 'OperServ' );
+      $heap->{irc}->yield( 'join', '#test2' );
+    }
+  }
+  else {
+    if ( $nick eq $mynick ) {
+      $heap->{irc}->yield( 'privmsg', 'OperServ', "join $where" );
+    } 
+    else {
+      ok( $nick eq 'OperServ', 'OperServ joined channel' );
+      $heap->{ircd}->yield( 'del_spoofed_nick', 'OperServ' );
+    }
   }
   undef;
 }
