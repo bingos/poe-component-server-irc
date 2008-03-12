@@ -4,7 +4,7 @@ use strict;
 use POE::Component::Server::IRC::Plugin qw(:ALL);
 use base qw(POE::Component::Server::IRC);
 
-our $VERSION = '1.22';
+our $VERSION = '1.25';
 
 sub _load_our_plugins {
   my $self = shift;
@@ -28,11 +28,20 @@ sub IRCD_daemon_privmsg {
 	$ircd->yield( 'daemon_cmd_join', 'OperServ', $chan );
 	last SWITCH;
     }
+	if ( my ($chan) = $request =~ /^part\s+(#.+)\s*$/i ) {
+	last SWITCH unless $ircd->state_chan_exists( $chan );
+	$ircd->yield( 'daemon_cmd_part', 'OperServ', $chan );
+	last SWITCH;
+	}
     if ( my ($chan, $mode) = $request =~ /^mode\s+(#.+)\s+(.+)\s*$/i ) {
     last SWITCH unless $ircd->state_chan_exists( $chan );
     $ircd->yield( 'daemon_cmd_mode', 'OperServ', $chan, $mode );
     last SWITCH;
     }
+	if ( my ($chan, $target) = $request =~ /^op\s+(#.+)\s+(.+)\s*$/i ) {
+	last SWITCH unless $ircd->state_chan_exists( $chan );
+	$ircd->daemon_server_mode( $chan, '+o', $target );
+	}
   }
   return PCSI_EAT_NONE;
 }
@@ -40,7 +49,8 @@ sub IRCD_daemon_privmsg {
 sub IRCD_daemon_join {
   my ($self,$ircd) = splice @_, 0, 2;
   my $nick = ( split /!/, ${ $_[0] } )[0];
-  return PCSI_EAT_NONE unless $ircd->state_user_is_operator( $nick );
+  return PCSI_EAT_NONE unless $ircd->state_user_is_operator( $nick )
+  	&& $nick eq 'OperServ';
   my $channel = ${ $_[1] };
   return PCSI_EAT_NONE if $ircd->state_is_chan_op( $nick, $channel );
   $ircd->daemon_server_mode( $channel, '+o', $nick );
@@ -137,16 +147,24 @@ of the channel will be reset and the OperServ will join that channel with +o.
 
 =item join CHANNEL
 
-The OperServ will simply join the channel you tell it to with +o.
+The OperServ will simply join the channel you specify with +o.
+
+=item part CHANNEL
+
+The OperServ will part (leave) the channel specified.
 
 =item mode CHANNEL MODE
 
 The OperServ will set the channel mode you tell it to. You can also remove the channel mode by prefixing
 the mode with a '-' (minus) sign.
 
+=item op CHANNEL USER
+
+The OperServ will give +o to any user on a channel you specify. OperServ does not need to be in that channel (as this is mostly a server hack).
+
 =back
 
-Whenever an operator joins a channel the OperServ will issue a server mode change to +o the operator on that channel.
+Whenever the OperServ joins a channel (which you specify with the join command) it will automatically gain +o.
 
 =head1 AUTHOR
 
