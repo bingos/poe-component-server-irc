@@ -1,4 +1,15 @@
 ========================
+2008-03-11 12:32:17 1.30
+========================
+
+  2008-03-11 12:30:24 (r148) by bingos
+  lib/POE/Component/Server/IRC/OperServ.pm M;
+  lib/POE/Component/Server/IRC/Backend.pm M; t/ts_08_operserv.t M;
+  Changes M; lib/POE/Component/Server/IRC.pm M
+
+    Applied a patch to OperServ from eggzeck for enhancements. 
+
+========================
 2008-02-20 16:39:30 1.28
 ========================
 

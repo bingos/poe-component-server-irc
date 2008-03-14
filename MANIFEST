@@ -7,6 +7,7 @@ examples/test-harness.pl
 examples/test-ircd.pl
 examples/test-oper.pl
 inc/Module/Install.pm
+inc/Module/Install/AuthorTests.pm
 inc/Module/Install/Base.pm
 inc/Module/Install/Makefile.pm
 inc/Module/Install/MakeMaker.pm
@@ -31,9 +32,6 @@ t/1_simple.t
 t/2_pocosi.t
 t/3_backend.t
 t/4_test_plugin.t
-t/5_pod.t
-t/5_pod_coverage.t
-t/5_test_kwalitee.t
 t/ts_01_subclass.t
 t/ts_02_multi.t
 t/ts_03_serverlink.t
@@ -45,4 +43,7 @@ t/ts_07_callerid.t
 t/ts_08_operserv.t
 t/ts_09_serrano_spoofs.t
 t/ts_10_eggzeck_topic.t
+xt/pod.t
+xt/pod_coverage.t
+xt/test_kwalitee.t
 tools/svn-log.perl

@@ -22,26 +22,26 @@ sub IRCD_daemon_privmsg {
 	last SWITCH unless $ircd->state_chan_exists( $chan );
 	$ircd->yield( 'daemon_cmd_sjoin', 'OperServ', $chan );
 	last SWITCH;
-	}
-	if ( my ($chan) = $request =~ /^join\s+(#.+)\s*$/i ) {
+    }
+    if ( my ($chan) = $request =~ /^join\s+(#.+)\s*$/i ) {
 	last SWITCH unless $ircd->state_chan_exists( $chan );
 	$ircd->yield( 'daemon_cmd_join', 'OperServ', $chan );
 	last SWITCH;
     }
-	if ( my ($chan) = $request =~ /^part\s+(#.+)\s*$/i ) {
+    if ( my ($chan) = $request =~ /^part\s+(#.+)\s*$/i ) {
 	last SWITCH unless $ircd->state_chan_exists( $chan );
 	$ircd->yield( 'daemon_cmd_part', 'OperServ', $chan );
 	last SWITCH;
-	}
-    if ( my ($chan, $mode) = $request =~ /^mode\s+(#.+)\s+(.+)\s*$/i ) {
-    last SWITCH unless $ircd->state_chan_exists( $chan );
-    $ircd->yield( 'daemon_cmd_mode', 'OperServ', $chan, $mode );
-    last SWITCH;
     }
-	if ( my ($chan, $target) = $request =~ /^op\s+(#.+)\s+(.+)\s*$/i ) {
+    if ( my ($chan, $mode) = $request =~ /^mode\s+(#.+)\s+(.+)\s*$/i ) {
+    	last SWITCH unless $ircd->state_chan_exists( $chan );
+    	$ircd->yield( 'daemon_cmd_mode', 'OperServ', $chan, $mode );
+    	last SWITCH;
+    }
+    if ( my ($chan, $target) = $request =~ /^op\s+(#.+)\s+(.+)\s*$/i ) {
 	last SWITCH unless $ircd->state_chan_exists( $chan );
 	$ircd->daemon_server_mode( $chan, '+o', $target );
-	}
+    }
   }
   return PCSI_EAT_NONE;
 }

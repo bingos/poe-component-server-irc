@@ -3,6 +3,7 @@
 # the contents of the Makefile that is written.
 # Blah!
 
+use strict;
 use inc::Module::Install;
 
 my $GOT_IRCD;
@@ -39,16 +40,24 @@ license 'perl';
 abstract 'A fully event-driven networkable IRC server daemon module';
 build_requires 'Test::More' => 0.47;
 install_script 'bin/pmkpasswd';
+author_tests 'xt';
 
 WriteMakefile(
 			  'NAME'	=> 'POE::Component::Server::IRC',
 			  'PREREQ_PM' => {
+					  'strict' => 0,
+					  'vars' => 0,
+					  'constant' => 0,
 					  ( $] < 5.006 ? ( 'warnings::compat' => 0 ) : () ),
 					  'Carp'   => 0,
 					  'Net::Netmask' => 1.9012,
 					  'Socket' => 0,
 					  'Date::Format' => 0,
 					  'POE'    => 0.9999,
+					  'POE::Wheel::SocketFactory' => 0,
+					  'POE::Wheel::ReadWrite' => 0,
+					  'POE::Filter::Stackable' => 0,
+					  'POE::Filter::Line' => 0,
 					  'POE::Filter::IRCD' => 2.2,
 					  'POE::Component::Client::Ident' => 1.00,
 					  'POE::Component::Client::DNS' => 1.00,
