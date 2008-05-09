@@ -12,7 +12,6 @@ inc/Module/Install/Base.pm
 inc/Module/Install/Makefile.pm
 inc/Module/Install/MakeMaker.pm
 inc/Module/Install/Metadata.pm
-inc/Module/Install/Scripts.pm
 ircd.crt
 ircd.key
 lib/POE/Component/Server/IRC.pm
@@ -22,9 +21,9 @@ lib/POE/Component/Server/IRC/OperServ.pm
 lib/POE/Component/Server/IRC/Pipeline.pm
 lib/POE/Component/Server/IRC/Plugin.pm
 lib/POE/Component/Server/IRC/Test/Plugin.pm
+LICENSE
 Makefile.PL
 MANIFEST
-MANIFEST.SKIP
 META.yml			Module meta-data (added by MakeMaker)
 README
 t/1_common.t
@@ -45,5 +44,4 @@ t/ts_09_serrano_spoofs.t
 t/ts_10_eggzeck_topic.t
 xt/pod.t
 xt/pod_coverage.t
-xt/test_kwalitee.t
 tools/svn-log.perl

@@ -350,6 +350,12 @@ comparisons ( UNIX and Apache ), then C<crypt> and finally plain-text password c
 
 Chris 'BinGOs' Williams
 
+=head1 LICENSE
+
+Copyright C<(c)> Chris Williams
+
+This module may be used, modified, and distributed under the same terms as Perl itself. Please see the license that came with your Perl distribution for details.
+
 =head1 SEE ALSO
 
 L<POE::Component::Server::IRC>

@@ -3,6 +3,7 @@
 # the contents of the Makefile that is written.
 # Blah!
 
+use 5.006;
 use strict;
 use inc::Module::Install;
 
@@ -40,6 +41,7 @@ license 'perl';
 abstract 'A fully event-driven networkable IRC server daemon module';
 build_requires 'Test::More' => 0.47;
 install_script 'bin/pmkpasswd';
+perl_version '5.006';
 author_tests 'xt';
 
 WriteMakefile(
@@ -48,7 +50,6 @@ WriteMakefile(
 					  'strict' => 0,
 					  'vars' => 0,
 					  'constant' => 0,
-					  ( $] < 5.006 ? ( 'warnings::compat' => 0 ) : () ),
 					  'Carp'   => 0,
 					  'Net::Netmask' => 1.9012,
 					  'Socket' => 0,

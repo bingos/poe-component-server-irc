@@ -1,6 +1,7 @@
 package POE::Component::Server::IRC::Test::Plugin;
 
 use strict;
+use warnings;
 use POE::Component::Server::IRC::Plugin qw( :ALL );
 
 our $VERSION = '1.20';
@@ -46,6 +47,12 @@ No arguments required, returns an POE::Component::Server::IRC::Test::Plugin obje
 =head1 AUTHOR
 
 Chris "BinGOs" Williams
+
+=head1 LICENSE
+
+Copyright C<(c)> Chris Williams
+
+This module may be used, modified, and distributed under the same terms as Perl itself. Please see the license that came with your Perl distribution for details.
 
 =head1 SEE ALSO
 

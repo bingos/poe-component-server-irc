@@ -291,6 +291,12 @@ Apocalypse E<lt>apocal@cpan.orgE<gt>
 
 Ported to POE::Component::Server::IRC by Chris 'BinGOs' Williams E<lt>chris@bingosnet.co.ukE<gt>
 
+=head1 LICENSE
+
+Copyright C<(c)> Chris Williams and Apocalypse
+
+This module may be used, modified, and distributed under the same terms as Perl itself. Please see the license that came with your Perl distribution for details.
+
 =head1 PROPS
 
 The idea is heavily borrowed from X-Chat, BIG thanks goes out to the genius that came up with the EAT_* system :)

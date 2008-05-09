@@ -1,6 +1,7 @@
 package POE::Component::Server::IRC::OperServ;
 
 use strict;
+use warnings;
 use POE::Component::Server::IRC::Plugin qw(:ALL);
 use base qw(POE::Component::Server::IRC);
 
@@ -169,6 +170,12 @@ Whenever the OperServ joins a channel (which you specify with the join command) 
 =head1 AUTHOR
 
 Chris 'BinGOs' Williams
+
+=head1 LICENSE
+
+Copyright C<(c)> Chris Williams
+
+This module may be used, modified, and distributed under the same terms as Perl itself. Please see the license that came with your Perl distribution for details.
 
 =head1 SEE ALSO
 

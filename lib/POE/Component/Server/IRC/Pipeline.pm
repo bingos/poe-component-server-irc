@@ -517,4 +517,10 @@ L<POE::Session::MultiDispatch> which does something similar for session events.
 
 Jeff C<japhy> Pinyan, F<japhy@perlmonk.org>.
 
+=head1 LICENSE
+
+Copyright C<(c)> Jeff Pinyan
+
+This module may be used, modified, and distributed under the same terms as Perl itself. Please see the license that came with your Perl distribution for details.
+
 =cut
