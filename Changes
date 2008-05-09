@@ -1,4 +1,49 @@
 ========================
+2008-05-09 13:47:35 1.32
+========================
+
+  2008-05-09 13:46:16 (r155) by bingos
+  Makefile.PL M; t/ts_04_compresslink.t M; t/ts_04_sslify.t M
+
+    Fixed some distribution problems
+
+  2008-05-09 13:35:34 (r154) by bingos
+  lib/POE/Component/Server/IRC/OperServ.pm M;
+  lib/POE/Component/Server/IRC/Pipeline.pm M;
+  lib/POE/Component/Server/IRC/Backend.pm M; xt/test_kwalitee.t D;
+  lib/POE/Component/Server/IRC/Common.pm M; MANIFEST M;
+  lib/POE/Component/Server/IRC/Test/Plugin.pm M; Makefile.PL M;
+  lib/POE/Component/Server/IRC/Plugin.pm M;
+  lib/POE/Component/Server/IRC.pm M
+
+    Updated and added LICENSE information
+
+  2008-05-09 13:17:49 (r153) by bingos
+  xt/test_kwalitee.t A; t/pod_coverage.t D; t/test_kwalitee.t D;
+  xt/pod_coverage.t A; MANIFEST.SKIP D
+
+    Removed MANIFEST.SKIP
+
+  2008-03-14 14:10:39 (r152) by bingos
+  t/5_test_kwalitee.t D; lib/POE/Component/Server/IRC/OperServ.pm M;
+  xt/pod.t A; t/pod_coverage.t A; t/5_pod_coverage.t D; MANIFEST M;
+  Makefile.PL M; Changes M; t/test_kwalitee.t A;
+  lib/POE/Component/Server/IRC.pm M; t/5_pod.t D; xt A
+
+    Moving author tests to xt/, updated prereqs list, indentation tidy to
+    OperServ.pm 
+
+  2008-03-12 23:34:13 (r151) by eggzeck
+  lib/POE/Component/Server/IRC/OperServ.pm M
+
+    Added some upgrades
+
+  2008-03-12 23:30:09 (r150) by eggzeck
+  lib/POE/Component/Server/IRC.pm M
+
+    Changed version variable to 1.33
+
+========================
 2008-03-11 12:32:17 1.30
 ========================
 

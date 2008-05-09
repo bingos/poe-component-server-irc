@@ -10,7 +10,6 @@ inc/Module/Install.pm
 inc/Module/Install/AuthorTests.pm
 inc/Module/Install/Base.pm
 inc/Module/Install/Makefile.pm
-inc/Module/Install/MakeMaker.pm
 inc/Module/Install/Metadata.pm
 ircd.crt
 ircd.key

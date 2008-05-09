@@ -37,6 +37,8 @@ NOTICE
 #my $dnsbl = prompt( 'Do you want optional DNSBL support ( requires POE::Component::Client::DNSBL ) [N/y]?', 'N' );
 
 author 'Chris Williams <chris@bingosnet.co.uk>';
+name 'POE-Component-Server-IRC';
+version_from 'lib/POE/Component/Server/IRC.pm';
 license 'perl';
 abstract 'A fully event-driven networkable IRC server daemon module';
 build_requires 'Test::More' => 0.47;
@@ -44,34 +46,20 @@ install_script 'bin/pmkpasswd';
 perl_version '5.006';
 author_tests 'xt';
 no_index directory => 'xt';
-clean_files 'META.yml';
-
-WriteMakefile(
-			  'NAME'	=> 'POE::Component::Server::IRC',
-			  'PREREQ_PM' => {
-					  'strict' => 0,
-					  'vars' => 0,
-					  'constant' => 0,
-					  'Carp'   => 0,
-					  'Net::Netmask' => 1.9012,
-					  'Socket' => 0,
-					  'Date::Format' => 0,
-					  'POE'    => 0.9999,
-					  'POE::Wheel::SocketFactory' => 0,
-					  'POE::Wheel::ReadWrite' => 0,
-					  'POE::Filter::Stackable' => 0,
-					  'POE::Filter::Line' => 0,
-					  'POE::Filter::IRCD' => 2.2,
-					  'POE::Component::Client::Ident' => 1.00,
-					  'POE::Component::Client::DNS' => 1.00,
-#					  ( uc( $dnsbl ) eq 'Y' ? ( 'POE::Component::Client::DNSBL' => 0 ) : () ),
-					  'POE::Component::IRC' => 5.18,
-					  'Algorithm::Diff' => 1.19,
-					  'Crypt::PasswdMD5' => 1.3,
-					 },
-			  'VERSION_FROM' => 'lib/POE/Component/Server/IRC.pm',
-			  'dist' => { 
-					'COMPRESS' => 'gzip --best',
-					'PREOP' => ( './tools/svn-log.perl > ./Changes' ),
-			  },
-			 );
+makemaker_args(dist => { PREOP => './tools/svn-log.perl > ./Changes' });
+requires 'Carp'   => 0;
+requires 'Net::Netmask' => 1.9012;
+requires 'Socket' => 0;
+requires 'Date::Format' => 0;
+requires 'POE'    => 0.9999;
+requires 'POE::Wheel::SocketFactory' => 0;
+requires 'POE::Wheel::ReadWrite' => 0;
+requires 'POE::Filter::Stackable' => 0;
+requires 'POE::Filter::Line' => 0;
+requires 'POE::Filter::IRCD' => 2.2;
+requires 'POE::Component::Client::Ident' => 1.00;
+requires 'POE::Component::Client::DNS' => 1.00;
+requires 'POE::Component::IRC' => 5.70;
+requires 'Algorithm::Diff' => 1.19;
+requires 'Crypt::PasswdMD5' => 1.3;
+WriteAll();
