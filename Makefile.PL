@@ -43,6 +43,8 @@ build_requires 'Test::More' => 0.47;
 install_script 'bin/pmkpasswd';
 perl_version '5.006';
 author_tests 'xt';
+no_index directory => 'xt';
+clean_files 'META.yml';
 
 WriteMakefile(
 			  'NAME'	=> 'POE::Component::Server::IRC',

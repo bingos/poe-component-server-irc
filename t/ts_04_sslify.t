@@ -5,7 +5,7 @@ use POE::Component::IRC;
 
 my $GOT_SSL;
 
-BEGIN: {
+BEGIN {
   $GOT_SSL = 0;
   eval {
         require POE::Component::SSLify;

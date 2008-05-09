@@ -3,7 +3,7 @@ use POE qw(Component::Server::IRC);
 
 my $GOT_ZLIB = 0;
 
-BEGIN: {
+BEGIN {
   eval { 
 	require POE::Filter::Zlib::Stream;
 	$GOT_ZLIB = 1;
