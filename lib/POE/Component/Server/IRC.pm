@@ -15,7 +15,7 @@ use POE::Component::Server::IRC::Plugin qw(:ALL);
 use Date::Format;
 use vars qw($VERSION $REVISION);
 
-$VERSION = '1.32';
+$VERSION = '1.34';
 ($REVISION) = (q$LastChangedRevision$=~/(\d+)/g);
 
 sub spawn {
@@ -2424,7 +2424,7 @@ sub _daemon_cmd_umode {
   my $ref = [ ];
   my $record = $self->{state}->{users}->{ u_irc $nick };
   unless ( $umode ) {
-    push @{ $ref }, { prefix => $server, command => '422', params => [ $nick, '+' . $record->{umode} ] };
+    push @{ $ref }, { prefix => $server, command => '221', params => [ $nick, '+' . $record->{umode} ] };
   } else {
     my $peer_ignore;
     my $parsed_mode = parse_mode_line( $umode );
