@@ -46,6 +46,7 @@ t/ts_08_operserv.t
 t/ts_09_serrano_spoofs.t
 t/ts_10_eggzeck_topic.t
 t/ts_11_hinrik_umode.t
+t/ts_12_hinrik_time.t
 xt/pod.t
 xt/pod_coverage.t
 tools/svn-log.perl

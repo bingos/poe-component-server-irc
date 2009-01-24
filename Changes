@@ -1,6 +1,14 @@
-========================
-2008-10-01 11:36:30 1.34
-========================
+==============================
+9999-99-99 99:99:99 (untagged)
+==============================
+
+  2008-10-01 12:10:37 (r162) by bingos; MANIFEST M
+
+    Updated MANIFEST
+
+  2008-10-01 11:46:33 (r160) by bingos; LICENSE A; Changes M
+
+    Added the LICENSE file
 
   2008-10-01 11:35:10 (r158) by bingos
   MANIFEST M; lib/POE/Component/Server/IRC.pm M; t/ts_11_hinrik_umode.t A

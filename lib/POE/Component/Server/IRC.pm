@@ -15,7 +15,7 @@ use POE::Component::Server::IRC::Plugin qw(:ALL);
 use Date::Format;
 use vars qw($VERSION $REVISION);
 
-$VERSION = '1.34';
+$VERSION = '1.36';
 ($REVISION) = (q$LastChangedRevision$=~/(\d+)/g);
 
 sub spawn {
@@ -1508,7 +1508,7 @@ sub _daemon_cmd_time {
 	$self->{ircd}->send_output( { prefix => $nick, command => 'TIME', params => [ $self->_state_peer_name( $target ) ] }, $self->_state_peer_route( $target ) );
 	last SWITCH;
     }
-    push @{ $ref }, { prefix => $server, command => '351', params => [ $nick, $server, time2str( "%A %B %e %Y -- %T %z", time() ) ] };
+    push @{ $ref }, { prefix => $server, command => '391', params => [ $nick, $server, time2str( "%A %B %e %Y -- %T %z", time() ) ] };
   }
   return @{ $ref } if wantarray();
   return $ref;
