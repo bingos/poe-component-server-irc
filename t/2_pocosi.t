@@ -5,7 +5,7 @@
 
 # change 'tests => 1' to 'tests => last_test_to_print';
 
-use Test::More tests => 21;
+use Test::More tests => 23;
 BEGIN { use_ok('POE::Component::Server::IRC') };
 BEGIN { use_ok('POE::Component::IRC') };
 BEGIN { use_ok('POE') };
@@ -15,7 +15,7 @@ BEGIN { use_ok('POE') };
 # Insert your test code below, the Test::More module is use()ed here so read
 # its man page ( perldoc Test::More ) for help writing this test script.
 
-my $pocosi = POE::Component::Server::IRC->spawn( auth => 0, options => { trace => 0 }, antiflood => 0, plugin_debug => 1, debug => 1 );
+my $pocosi = POE::Component::Server::IRC->spawn( auth => 0, options => { trace => 0 }, antiflood => 0, plugin_debug => 0, debug => 0 );
 my $pocoirc = POE::Component::IRC->spawn( flood => 1 );
 
 if ( $pocosi and $pocoirc ) {
@@ -61,8 +61,10 @@ sub _shutdown {
 sub ircd_registered {
   my ($heap,$object) = @_[HEAP,ARG0];
   my $backend = $_[SENDER]->get_heap();
-  isa_ok( $object, "POE::Component::Server::IRC" );
-  isa_ok( $backend, "POE::Component::Server::IRC" );
+  isa_ok( $object, 'POE::Component::Pluggable' );
+  isa_ok( $object, 'POE::Component::Server::IRC' );
+  isa_ok( $backend, 'POE::Component::Server::IRC' );
+  isa_ok( $backend->pipeline, 'POE::Component::Pluggable::Pipeline');
   undef;
 }
 

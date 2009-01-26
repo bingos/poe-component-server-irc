@@ -15,13 +15,13 @@ use POE::Component::Server::IRC::Plugin qw(:ALL);
 use Date::Format;
 use vars qw($VERSION $REVISION);
 
-$VERSION = '1.38';
+$VERSION = '1.37_01';
 ($REVISION) = (q$LastChangedRevision$=~/(\d+)/g);
 
 sub spawn {
   my $package = shift;
-  my $self = $package->create(@_);
-  $self->{prefix} = 'ircd_';
+  my $self = $package->create( prefix => 'ircd_', @_);
+#  $self->{prefix} = 'ircd_';
   $self->{config}->{ uc $_ } = delete $self->{config}->{$_} for keys %{ $self->{config} };
   $self->configure();
   $self->_state_create();
