@@ -52,6 +52,7 @@ requires 'Net::Netmask' => 1.9012;
 requires 'Socket' => 0;
 requires 'Date::Format' => 0;
 requires 'POE'    => 0.9999;
+requires 'POE::Component::Pluggable' => 1.14;
 requires 'POE::Wheel::SocketFactory' => 0;
 requires 'POE::Wheel::ReadWrite' => 0;
 requires 'POE::Filter::Stackable' => 0;

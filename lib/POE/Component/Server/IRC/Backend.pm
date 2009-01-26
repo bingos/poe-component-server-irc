@@ -4,10 +4,10 @@ use strict;
 use warnings;
 use POE qw(Wheel::SocketFactory Wheel::ReadWrite Filter::Stackable Filter::Line Filter::IRCD);
 use POE::Component::Server::IRC::Plugin qw( :ALL );
-use POE::Component::Server::IRC::Pipeline;
 use Socket;
 use Carp;
 use Net::Netmask;
+use base qw(POE::Component::Pluggable);
 use vars qw($VERSION);
 
 $VERSION = '1.22';
@@ -25,6 +25,15 @@ sub create {
   $self->{antiflood} = 1 unless defined $self->{antiflood} and $self->{antiflood} eq '0';
   my $options = delete $self->{options};
   my $sslify_options = delete $self->{sslify_options};
+  my $plugin_debug   = delete $self->{plugin_debug};
+
+  $self->_pluggable_init(
+        prefix     => $self->{prefix},
+        reg_prefix => 'PCSI_',
+        types      => { SERVER => 'IRCD' },
+        ($plugin_debug ? (debug => 1) : () ),
+  );
+
 
   $self->{session_id} = POE::Session->create(
 	object_states => [
@@ -179,6 +188,7 @@ sub _shutdown {
   delete $self->{wheels}; # :)
   $kernel->alarm_remove_all();
   $kernel->refcount_decrement( $_ => __PACKAGE__ ) for keys %{ $self->{sessions} };
+  $self->_pluggable_destroy();
   $self->_unload_our_plugins();
   undef;
 }
@@ -206,9 +216,15 @@ sub __send_event {
 
 sub _send_event {
   my ($self,$event,@args) = @_;
-  return 1 if $self->_plugin_process( 'SERVER', $event, \( @args ) ) == PCSI_EAT_ALL;
+  return 1 if $self->_pluggable_process( 'SERVER', $event, \( @args ) ) == PCSI_EAT_ALL;
   $poe_kernel->post( $_ => $event, @args ) for  keys % { $self->{sessions} };
   return 1;
+}
+
+sub _pluggable_event {
+    my ($self, @args) = @_;
+    $self->yield(__send_event => @args);
+    return;
 }
 
 ############################
@@ -888,188 +904,6 @@ sub exempted {
 ##################
 # Plugin methods #
 ##################
-
-# accesses the plugin pipeline
-sub pipeline {
-  my ($self) = @_;
-  $self->{PLUGINS} = POE::Component::Server::IRC::Pipeline->new($self)
-    unless UNIVERSAL::isa($self->{PLUGINS}, 'POE::Component::Server::IRC::Pipeline');
-  return $self->{PLUGINS};
-}
-
-# Adds a new plugin object
-sub plugin_add {
-  my ($self, $name, $plugin) = @_;
-  my $pipeline = $self->pipeline;
-
-  unless (defined $name and defined $plugin) {
-    warn 'Please supply a name and the plugin object to be added!';
-    return;
-  }
-
-  return $pipeline->push($name => $plugin);
-}
-
-# Removes a plugin object
-sub plugin_del {
-  my ($self, $name) = @_;
-
-  unless (defined $name) {
-    warn 'Please supply a name/object for the plugin to be removed!';
-    return;
-  }
-
-  my $return = scalar $self->pipeline->remove($name);
-  warn "$@\n" if $@;
-  return $return;
-}
-
-# Gets the plugin object
-sub plugin_get {
-  my ($self, $name) = @_;  
-
-  unless (defined $name) {
-    warn 'Please supply a name/object for the plugin to be removed!';
-    return;
-  }
-
-  return scalar $self->pipeline->get($name);
-}
-
-# Lists loaded plugins
-sub plugin_list {
-  my ($self) = @_;
-  my $pipeline = $self->pipeline;
-  my %return;
-
-  for (@{ $pipeline->{PIPELINE} }) {
-    $return{ $pipeline->{PLUGS}{$_} } = $_;
-  }
-
-  return \%return;
-}
-
-# Lists loaded plugins in order!
-sub plugin_order {
-  my ($self) = @_;
-  return $self->pipeline->{PIPELINE};
-}
-
-# Lets a plugin register for certain events
-sub plugin_register {
-  my ($self, $plugin, $type, @events) = @_;
-  my $pipeline = $self->pipeline;
-
-  unless (defined $type and ($type eq 'SERVER' or $type eq 'USER')) {
-    warn 'Type should be SERVER or USER!';
-    return;
-  }
-
-  unless (defined $plugin) {
-    warn 'Please supply the plugin object to register!';
-    return;
-  }
-
-  unless (@events) {
-    warn 'Please supply at least one event to register!';
-    return;
-  }
-
-  for my $ev (@events) {
-    if (ref($ev) and ref($ev) eq "ARRAY") {
-      @{ $pipeline->{HANDLES}{$plugin}{$type} }{ map lc, @$ev } = (1) x @$ev;
-    }
-    else {
-      $pipeline->{HANDLES}{$plugin}{$type}{lc $ev} = 1;
-    }
-  }
-
-  return 1;
-}
-
-# Lets a plugin unregister events
-sub plugin_unregister {
-  my ($self, $plugin, $type, @events) = @_;
-  my $pipeline = $self->pipeline;
-
-  unless (defined $type and ($type eq 'SERVER' or $type eq 'USER')) {
-    warn 'Type should be SERVER or USER!';
-    return;
-  }
-
-  unless (defined $plugin) {
-    warn 'Please supply the plugin object to register!';
-    return;
-  }
-
-  unless (@events) {
-    warn 'Please supply at least one event to unregister!';
-    return;
-  }
-
-  for my $ev (@events) {
-    if (ref($ev) and ref($ev) eq "ARRAY") {
-      for my $e (map lc, @$ev) {
-        unless (delete $pipeline->{HANDLES}{$plugin}{$type}{$e}) {
-          warn "The event '$e' does not exist!";
-          next;
-        }
-      }
-    }
-    else {
-      $ev = lc $ev;
-      unless (delete $pipeline->{HANDLES}{$plugin}{$type}{$ev}) {
-        warn "The event '$ev' does not exist!";
-        next;
-      }
-    }
-  }
-
-  return 1;
-}
-
-# Process an input event for plugins
-sub _plugin_process {
-  my ($self, $type, $event, @args) = @_;
-  my $pipeline = $self->pipeline;
-
-  $event = lc $event;
-  my $prefix = $self->{prefix};
-  $event =~ s/^\Q$prefix\E//;
-
-  my $sub = ($type eq 'SERVER' ? "IRCD" : "U") . "_$event";
-  my $return = PCSI_EAT_NONE;
-  my $our_ret = $return;
-
-  if ( $self->can($sub) ) {
-  	$our_ret = $self->$sub( $self, @args );
-  } elsif ( $self->can('_default') ) {
-	$our_ret = $self->_default( $self, $sub, @args );
-  }
-
-  return $return if $our_ret == PCSI_EAT_PLUGIN;
-  $return = PCSI_EAT_ALL if $our_ret == PCSI_EAT_CLIENT;
-  return PCSI_EAT_ALL if $our_ret == PCSI_EAT_ALL;
-
-  for my $plugin (@{ $pipeline->{PIPELINE} }) {
-    next
-      unless $pipeline->{HANDLES}{$plugin}{$type}{$event}
-      or $pipeline->{HANDLES}{$plugin}{$type}{all};
-
-    my $ret = PCSI_EAT_NONE;
-
-    eval { $ret = $plugin->$sub($self, @args) };
-    warn "$sub call failed with $@\n" if $@ and $self->{plugin_debug} and $plugin->can($sub);
-    eval { $ret = $plugin->_default($self, $sub, @args) } if $@;
-    warn "_default call failed with $@\n" if $@ and $self->{plugin_debug};
-
-    return $return if $ret == PCSI_EAT_PLUGIN;
-    $return = PCSI_EAT_ALL if $ret == PCSI_EAT_CLIENT;
-    return PCSI_EAT_ALL if $ret == PCSI_EAT_ALL;
-  }
-
-  return $return;
-}  
 
 1;
 __END__
