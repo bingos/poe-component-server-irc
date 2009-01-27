@@ -7,14 +7,15 @@ examples/test-harness.pl
 examples/test-ircd.pl
 examples/test-oper.pl
 inc/Module/Install.pm
-inc/Module/Install/Metadata.pm
-inc/Module/Install/Base.pm
-inc/Module/Install/Makefile.pm
 inc/Module/Install/AuthorTests.pm
-inc/Module/Install/WriteAll.pm
-inc/Module/Install/Win32.pm
+inc/Module/Install/Base.pm
 inc/Module/Install/Can.pm
 inc/Module/Install/Fetch.pm
+inc/Module/Install/Makefile.pm
+inc/Module/Install/Metadata.pm
+inc/Module/Install/Scripts.pm
+inc/Module/Install/Win32.pm
+inc/Module/Install/WriteAll.pm
 ircd.crt
 ircd.key
 lib/POE/Component/Server/IRC.pm
@@ -26,8 +27,8 @@ lib/POE/Component/Server/IRC/Plugin.pm
 lib/POE/Component/Server/IRC/Test/Plugin.pm
 LICENSE
 Makefile.PL
-MANIFEST
-META.yml			Module meta-data (added by MakeMaker)
+MANIFEST			This list of files
+META.yml
 README
 t/1_common.t
 t/1_simple.t
@@ -47,6 +48,7 @@ t/ts_09_serrano_spoofs.t
 t/ts_10_eggzeck_topic.t
 t/ts_11_hinrik_umode.t
 t/ts_12_hinrik_time.t
+t/ts_13_nickrace.t
+tools/svn-log.perl
 xt/pod.t
 xt/pod_coverage.t
-tools/svn-log.perl

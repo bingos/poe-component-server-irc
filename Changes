@@ -1,3 +1,18 @@
+==============================
+9999-99-99 99:99:99 (untagged)
+==============================
+
+  2009-01-26 13:17:36 (r166) by bingos
+  t/2_pocosi.t M; lib/POE/Component/Server/IRC.pm M
+
+    Fixed up and tested. We are now using PoCo-Pluggable for plugin stuff
+
+  2009-01-26 12:57:04 (r165) by bingos
+  lib/POE/Component/Server/IRC/Backend.pm M; t/2_pocosi.t M; Makefile.PL
+  M; Changes M; lib/POE/Component/Server/IRC.pm M
+
+    First stage of porting to use PoCo-Pluggable
+
 ========================
 2009-01-24 22:13:54 1.36
 ========================
