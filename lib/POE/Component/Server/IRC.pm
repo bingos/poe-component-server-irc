@@ -5306,7 +5306,7 @@ sported by L<POE::Component::IRC>.
 
 =over
 
-=item spawn
+=item C<spawn>
 
 Creates a L<POE::Session> and associated object. The session's heap is set to the object, so it is
 possible to retrieve the object in any of your event handlers by using $_[SENDER]->get_heap().
@@ -5331,7 +5331,7 @@ These methods provide mechanisms for configuring and controlling the IRCd compon
 
 =over
 
-=item configure
+=item C<configure>
 
 Configures your new shiny IRCd.
 
@@ -5350,23 +5350,23 @@ Takes a number of parameters:
   'ophacks', set to true to enable oper hacks;
   'whoisactually', set this to 0 so only opers can see 338 replies to WHOIS queries, default is 1;
 
-=item session_id
+=item C<session_id>
 
 Takes no arguments. Returns the ID of the component's session. Ideal for posting events to the component.
 
-=item yield
+=item C<yield>
 
 This method provides an alternative object based means of posting events to the component. First argument is the event to post, following arguments are sent as arguments to the resultant post.
 
-=item call
+=item C<call>
 
 This method provides an alternative object based means of calling events to the component. First argument is the event to call, following arguments are sent as arguments to the resultant call.
 
-=item shutdown
+=item C<shutdown>
 
 Takes no arguments. Terminates the component. Removes all listeners and connectors. Disconnects all current client and server connections.
 
-=item add_operator
+=item C<add_operator>
 
 This adds an O line to the IRCd. Takes a number of parameters:
 
@@ -5378,11 +5378,11 @@ A scalar ipmask can be contain '*' to match any number of characters or '?' to m
 
 'password' can be either plain-text, C<crypt>'d or unix/apache md5. See C<mkpasswd> function in L<POE::Component::Server::IRC::Common> for generating passwords.
 
-=item del_operator
+=item C<del_operator>
 
 Takes a single argument, the username to remove.
 
-=item add_peer
+=item C<add_peer>
 
 Adds peer servers that we will allow to connect to us and who we will connect to. Takes the following parameters:
 
@@ -5401,11 +5401,11 @@ supported:
 
   'zip', set to a true value to enable ziplink support. This must be done on both ends of the connection;
 
-=item del_peer
+=item C<del_peer>
 
 Takes a single argument, the peer to remove. This does not disconnect the said peer if it is currently connected.
 
-=item add_auth
+=item C<add_auth>
 
 By default the IRCd allows any user@host to connect to the server without a password. Configuring auths enables you to
 control who can connect and set passwords required to connect.
@@ -5422,23 +5422,23 @@ Auth masks are processed in order of addition.
 If auth masks have been defined, then a connecting user *must* match one of the masks in order to be authorised
 to connect. This is a feature >;)
 
-=item del_auth
+=item C<del_auth>
 
 Takes a single argument, the mask to remove.
 
-=item add_denial
+=item C<add_denial>
 
 Takes one mandatory argument and one optional. The first mandatory argument is a L<Net::Netmask> object that will be used to check connecting IP addresses against. The second optional argument is a reason string for the denial.
 
-=item del_denial
+=item C<del_denial>
 
 Takes one mandatory argument, a L<Net::Netmask> object to remove from the current denial list.
 
-=item add_exemption
+=item C<add_exemption>
 
 Takes one mandatory argument, a L<Net::Netmask> object that will be checked against connecting IP addresses for exemption from denials.
 
-=item del_exemption
+=item C<del_exemption>
 
 Takes one mandatory argument, a L<Net::Netmask> object to remove from the current exemption list.
 
@@ -5450,123 +5450,123 @@ The STATE contains all the salient information regarding nicknames, channels and
 
 =over
 
-=item server_name
+=item C<server_name>
 
 No arguments, returns the name of the ircd.
 
-=item server_version
+=item C<server_version>
 
 No arguments, returns the software version of the ircd.
 
-=item server_created
+=item C<server_created>
 
 No arguments, returns a string signifying when the ircd was created.
 
-=item server_config
+=item C<server_config>
 
 Takes one argument, the server configuration value to query.
 
-=item state_nicks
+=item C<state_nicks>
 
 Takes no arguments, returns a list of all nicknames in the state.
 
-=item state_chans
+=item C<state_chans>
 
 Takes no arguments, returns a list of all channels in the state.
 
-=item state_peers
+=item C<state_peers>
 
 Takes no arguments, returns a list of all irc servers in the state.
 
-=item state_nick_exists
+=item C<state_nick_exists>
 
 Takes one argument, a nickname, returns true or false dependent on whether the given nickname exists or not.
 
-=item state_chan_exists
+=item C<state_chan_exists>
 
 Takes one argument, a channel name, returns true or false dependent on whether the given channel exists or not.
 
-=item state_peer_exists
+=item C<state_peer_exists>
 
 Takes one argument, a peer server name, returns true or false dependent on whether the given peer exists or not.
 
-=item state_user_full
+=item C<state_user_full>
 
 Takes one argument, a nickname, returns that users full nick!user@host if they exist, undef if they don't.
 
-=item state_user_nick 
+=item C<state_user_nick>
 
 Takes one argument, a nickname, returns the proper nickname for that user. Returns undef if the nick doesn't exist.
 
-=item state_user_umode
+=item C<state_user_umode>
 
 Takes one argument, a nickname, returns that users mode setting.
 
-=item state_user_is_operator
+=item C<state_user_is_operator>
 
 Takes one argument, a nickname, returns true or false dependent on whether the given nickname is an IRC operator or not.
 
-=item state_user_chans
+=item C<state_user_chans>
 
 Takes one argument, a nickname, returns a list of channels that that nick is a member of.
 
-=item state_user_server
+=item C<state_user_server>
 
 Takes one argument, a nickname, returns the name of the peer server that that user is connected from.
 
-=item state_chan_list
+=item C<state_chan_list>
 
 Takes one argument, a channel name, returns a list of the member nicks on that channel.
 
-=item state_chan_list_prefixed
+=item C<state_chan_list_prefixed>
 
 Takes one argument, a channel name, returns a list of the member nicks on that channel, nicknames will be prefixed with @%+ if they are +o +h or +v, respectively.
 
-=item state_chan_topic
+=item C<state_chan_topic>
 
 Takes one argument, a channel name, returns undef if no topic is set on that channel, or an arrayref consisting of the topic, who set it and the time they set it.
 
-=item state_chan_mode_set
+=item C<state_chan_mode_set>
 
 Takes two arguments, a channel name and a channel mode character. Returns true if that channel mode is set, false otherwise.
 
-=item state_is_chan_member
+=item C<state_is_chan_member>
 
 Takes two arguments, a nick and a channel name. Returns true if that nick is on channel, false otherwise.
 
-=item state_user_chan_mode
+=item C<state_user_chan_mode>
 
 Takes two arguments, a nick and a channel name. Returns that nicks status ( +ohv or '' ) on that channel.
 
-=item state_is_chan_op
+=item C<state_is_chan_op>
 
 Takes two arguments, a nick and a channel name. Returns true if that nick is an channel operator, false otherwise.
 
-=item state_is_chan_hop
+=item C<state_is_chan_hop>
 
 Takes two arguments, a nick and a channel name. Returns true if that nick is an channel half-operator, false otherwise.
 
-=item state_has_chan_voice
+=item C<state_has_chan_voice>
 
 Takes two arguments, a nick and a channel name. Returns true if that nick has channel voice, false otherwise.
 
-=item daemon_server_kill
+=item C<daemon_server_kill>
 
 Takes two arguments, a nickname and a comment ( which is optional ); Issues a SERVER KILL of the given nick;
 
-=item daemon_server_mode
+=item C<daemon_server_mode>
 
 First argument is a channel name, remaining arguments are channel modes and their parameters to apply.
 
-=item daemon_server_kick
+=item C<daemon_server_kick>
 
 Takes two arguments that are mandatory and an optional one: channel name, nickname of the user to kick and a pithy comment.
 
-=item daemon_server_remove
+=item C<daemon_server_remove>
 
 Takes two arguments that are mandatory and an optional one: channel name, nickname of the user to remove and a pithy comment.
 
-=item daemon_server_wallops
+=item C<daemon_server_wallops>
 
 Takes one argument, the message text to send.
 
@@ -5578,15 +5578,15 @@ These are POE events that can be sent to the component.
 
 =over
 
-=item register
+=item C<register>
 
 Takes no arguments. Registers a session to receive events from the component.
 
-=item unregister
+=item C<unregister>
 
 Takes no arguments. Unregisters a previously registered session.
 
-=item add_listener
+=item C<add_listener>
 
 Takes a number of arguments. Adds a new listener.
 
@@ -5597,7 +5597,7 @@ Takes a number of arguments. Adds a new listener.
 
 A listener is required to accept connections from clients.
 
-=item del_listener
+=item C<del_listener>
 
 Takes either 'port' or 'listener':
 
@@ -5606,7 +5606,7 @@ Takes either 'port' or 'listener':
 
 The listener will be deleted. Note: any connected clients on that port will not be disconnected.
 
-=item add_spoofed_nick
+=item C<add_spoofed_nick>
 
 Takes a single argument a hashref which should have the following keys:
 
@@ -5618,7 +5618,7 @@ Takes a single argument a hashref which should have the following keys:
 
 Note: spoofed nicks are currently only really functional for use as IRC services;
 
-=item del_spoofed_nick
+=item C<del_spoofed_nick>
 
 Takes a single mandatory argument, the spoofed nickname to remove. Optionally, you may
 specify a quit message for the spoofed nick.
@@ -5630,40 +5630,40 @@ of a spoofed nick as the first argument.
 
 =over
 
-=item daemon_cmd_join
+=item C<daemon_cmd_join>
 
 Takes two arguments, a spoofed nick and a channel name to join.
 
-=item daemon_cmd_part
+=item C<daemon_cmd_part>
 
 Takes two arguments, a spoofed nick and a channel name to part from.
 
-=item daemon_cmd_mode
+=item C<daemon_cmd_mode>
 
 Takes at least three arguments, a spoofed nick, a channel and a channel mode to apply.
 Additional arguments are parameters for the channel modes.
 
-=item daemon_cmd_kick
+=item C<daemon_cmd_kick>
 
 Takes at least three arguments, a spoofed nick, a channel name and the nickname of a 
 user to kick from that channel. You may supply a fourth argument which will be the 
 kick comment.
 
-=item daemon_cmd_topic
+=item C<daemon_cmd_topic>
 
 Takes three arguments, a spoofed nick, a channel name and the topic to set on that 
 channel. If the third argument is an empty string then the channel topic will be unset.
 
-=item daemon_cmd_nick
+=item C<daemon_cmd_nick>
 
 Takes two arguments, a spoofed nick and a new nickname to change to.
 
-=item daemon_cmd_gline
+=item C<daemon_cmd_gline>
 
 Takes three arguments, a spoofed nick, a user@host mask to gline and a reason for the
 gline.
 
-=item daemon_cmd_kline
+=item C<daemon_cmd_kline>
 
 Takes a number of arguments depending on where the KLINE is to be applied and for how long:
 
@@ -5698,7 +5698,7 @@ To set a temporary 10 minute KLINE on all servers:
 		     $reason,
   );
 
-=item daemon_cmd_unkline
+=item C<daemon_cmd_unkline>
 
 Removes a KLINE as indicated by the user@host mask supplied. 
 
@@ -5720,7 +5720,7 @@ To remove a KLINE from all servers:
 		     '*',
   );
 
-=item daemon_cmd_rkline
+=item C<daemon_cmd_rkline>
 
 Used to set a regex based KLINE. The regex given must be based on a user@host mask.
 
@@ -5755,32 +5755,32 @@ To set a temporary 10 minute RKLINE on all servers:
 		     $reason,
   );
 
-=item daemon_cmd_sjoin
+=item C<daemon_cmd_sjoin>
 
 Takes two arguments a spoofed nickname and an existing channel name. This command will then
 manipulate the channel timestamp to clear all modes on that channel, including existing
 channel operators, reset the channel mode to '+nt', the spoofed nick will then join the 
 channel and gain channel ops.
 
-=item daemon_cmd_privmsg
+=item C<daemon_cmd_privmsg>
 
 Takes three arguments, a spoofed nickname, a target ( which can be a nickname or a channel name )
 and whatever text you wish to send. 
 
-=item daemon_cmd_notice
+=item C<daemon_cmd_notice>
 
 Takes three arguments, a spoofed nickname, a target ( which can be a nickname or a channel name )
 and whatever text you wish to send. 
 
-=item daemon_cmd_locops
+=item C<daemon_cmd_locops>
 
 Takes two arguments, a spoofed nickname and the text message to send to local operators.
 
-=item daemon_cmd_wallops
+=item C<daemon_cmd_wallops>
 
 Takes two arguments, a spoofed nickname and the text message to send to all operators.
 
-=item daemon_cmd_operwall
+=item C<daemon_cmd_operwall>
 
 Takes two arguments, a spoofed nickname and the text message to send to all operators.
 
@@ -5792,14 +5792,14 @@ After a session has registered with the component it will receive the following 
 
 =over
 
-=item ircd_registered
+=item C<ircd_registered>
 
   Emitted: when a session registers with the component;
   Target: the registering session;
   Args:
         ARG0, the component's object;
 
-=item ircd_unregistered
+=item C<ircd_unregistered>
 
   Emitted: when a session unregisters with the component;
   Target: the unregistering session;
