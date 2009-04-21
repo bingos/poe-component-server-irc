@@ -911,7 +911,7 @@ __END__
 =head1 NAME
 
 POE::Component::Server::IRC::Backend - A POE component class that provides network connection abstraction for
-L<POE::Component::Server::IRC>.
+POE::Component::Server::IRC.
 
 =head1 SYNOPSIS
 
@@ -941,7 +941,7 @@ L<POE::Component::Server::IRC>.
 
 =over
 
-=item create
+=item C<create>
 
 Returns an object. Accepts the following parameters, all are optional: 
 
@@ -968,66 +968,66 @@ These are the methods that may be invoked on our object.
 
 =over
 
-=item shutdown
+=item C<shutdown>
 
 Takes no arguments. Terminates the component. Removes all listeners and connectors. Disconnects all current client and server connections.
 
-=item session_id
+=item C<session_id>
 
 Takes no arguments. Returns the ID of the component's session. Ideal for posting events to the component.
 
-=item send_event
+=item C<send_event>
 
 Seen an event through the component's event handling system. First argument is the event name, subsequent arguments are the event's parameters.
 
-=item antiflood
+=item C<antiflood>
 
 Takes two arguments, a connection id and true/false value. If value is specified antiflood protection is enabled or disabled accordingly for the specified connection. If a value is not specified the current status of antiflood protection is returned. Returns undef on error.
 
-=item compressed_link
+=item C<compressed_link>
 
 Takes two arguments, a connection id and true/false value. If value is specified compression is enabled or disabled accordingly for the specified connection. If a value is not specified the current status of compression is returned. Returns undef on error.
 
-=item disconnect
+=item C<disconnect>
 
 Requires on argument, the connection id you wish to disconnect. The component will terminate the connection the next time that the wheel input is flushed, so you may send some sort of error message to the client on that connection. Returns true on success, undef on error.
 
-=item connection_info
+=item C<connection_info>
 
 Takes one argument, a connection_id. Returns a list consisting of: the IP address of the peer; the port on the peer; 
 our socket address; our socket port. Returns undef on error.
 
    my($peeraddr,$peerport,$sockaddr,$sockport) = $object->connection_info( $conn_id );
 
-=item add_denial
+=item C<add_denial>
 
 Takes one mandatory argument and one optional. The first mandatory argument is a L<Net::Netmask> object that will be used to check connecting IP addresses against. The second optional argument is a reason string for the denial.
 
-=item del_denial
+=item C<del_denial>
 
 Takes one mandatory argument, a L<Net::Netmask> object to remove from the current denial list.
 
-=item denied
+=item C<denied>
 
 Takes one argument, an IP address. Returns true or false depending on whether that IP is denied or not.
 
-=item add_exemption
+=item C<add_exemption>
 
 Takes one mandatory argument, a L<Net::Netmask> object that will be checked against connecting IP addresses for exemption from denials.
 
-=item del_exemption
+=item C<del_exemption>
 
 Takes one mandatory argument, a L<Net::Netmask> object to remove from the current exemption list.
 
-=item exempted
+=item C<exempted>
 
 Takes one argument, an IP address. Returns true or false depending on whether that IP is exempt from denial or not.
 
-=item yield
+=item C<yield>
 
 This method provides an alternative object based means of posting events to the component. First argument is the event to post, following arguments are sent as arguments to the resultant post.
 
-=item call
+=item C<call>
 
 This method provides an alternative object based means of calling events to the component. First argument is the event to call, following arguments are sent as arguments to the resultant call.
 
@@ -1039,15 +1039,15 @@ These are POE events that the component will accept:
 
 =over
 
-=item register
+=item C<register>
 
 Takes no arguments. Registers a session to receive events from the component.
 
-=item unregister
+=item C<unregister>
 
 Takes no arguments. Unregisters a previously registered session.
 
-=item add_listener
+=item C<add_listener>
 
 Takes a number of arguments. Adds a new listener.
 
@@ -1056,7 +1056,7 @@ Takes a number of arguments. Adds a new listener.
 	'bindaddr', specify a local address to bind the listener to;
 	'listenqueue', change the SocketFactory's ListenQueue;
 
-=item del_listener
+=item C<del_listener>
 
 Takes either 'port' or 'listener': 
 
@@ -1065,7 +1065,7 @@ Takes either 'port' or 'listener':
 
 The listener will be deleted. Note: any connected clients on that port will not be disconnected.
 
-=item add_connector
+=item C<add_connector>
 
 Takes two mandatory arguments, 'remoteaddress' and 'remoteport'. Opens a TCP connection to specified address and port.
 
@@ -1073,7 +1073,7 @@ Takes two mandatory arguments, 'remoteaddress' and 'remoteport'. Opens a TCP con
 	'remoteport', the TCP port on the remote host;
 	'bindaddress', a local address to bind from ( optional );
 
-=item send_output
+=item C<send_output>
 
 Takes a hashref and one or more connection IDs.
 
@@ -1091,20 +1091,20 @@ Once registered your session will receive these states, which will have the appl
 
 =over
 
-=item registered
+=item C<registered>
 
   Emitted: when a session registers with the component;
   Target:	the registering session;
   Args: 
 	ARG0, the component's object;
 
-=item unregistered
+=item C<unregistered>
 
   Emitted: when a session unregisters with the component;
   Target: the unregistering session;
   Args: none
 
-=item connection
+=item C<connection>
 
   Emitted: when a client connects to one of the component's listeners;
   Target: all plugins and registered sessions;
@@ -1115,7 +1115,7 @@ Once registered your session will receive these states, which will have the appl
 	ARG3, our ip address;
 	ARG4, our socket port;
 
-=item auth_done
+=item C<auth_done>
 
   Emitted: after a client has connected and the component has validated hostname and ident;
   Target: all plugins and registered sessions;
@@ -1123,7 +1123,7 @@ Once registered your session will receive these states, which will have the appl
 	ARG0, the conn id;
 	ARG1, a HASHREF with the following keys: 'ident' and 'hostname';
 
-=item listener_add
+=item C<listener_add>
 
   Emitted: on a successful add_listener() call;
   Target: all plugins and registered sessions;
@@ -1131,7 +1131,7 @@ Once registered your session will receive these states, which will have the appl
 	ARG0, the listening port;
 	ARG1, the listener id;
 
-=item listener_del
+=item C<listener_del>
 
   Emitted: on a successful del_listener() call;
   Target: all plugins and registered sessions;
@@ -1139,7 +1139,7 @@ Once registered your session will receive these states, which will have the appl
 	ARG0, the listening port;
 	ARG1, the listener id;
 
-=item listener_failure 
+=item C<listener_failure>
 
   Emitted: when a listener wheel fails;
   Target: all plugins and registered sessions;
@@ -1149,14 +1149,14 @@ Once registered your session will receive these states, which will have the appl
 	ARG2, numeric value for $!;
 	ARG3, string value for $!;
 
-=item socketerr
+=item C<socketerr>
 
   Emitted: on the failure of an add_connector()
   Target: all plugins and registered sessions;
   Args:
 	ARG0, a HASHREF containing the params that add_connector() was called with;
 
-=item connected
+=item C<connected>
 
   Emitted: when the component establishes a connection with a peer;
   Target: all plugins and registered sessions;
@@ -1167,14 +1167,14 @@ Once registered your session will receive these states, which will have the appl
 	ARG3, our ip address;
 	ARG4, our socket port;
 
-=item connection_flood
+=item C<connection_flood>
 
   Emitted: when a client connection is flooded;
   Target: all plugins and registered sessions;
   Args:
 	ARG0, the conn id;
 
-=item connection_idle
+=item C<connection_idle>
 
   Emitted: when a client connection has not sent any data for a set period;
   Target: all plugins and registered sessions;
@@ -1182,7 +1182,7 @@ Once registered your session will receive these states, which will have the appl
 	ARG0, the conn id;
 	ARG1, the number of seconds period we consider as idle;
 
-=item disconnected
+=item C<disconnected>
 
   Emitted: when a client disconnects;
   Target: all plugins and registered sessions;
@@ -1190,7 +1190,7 @@ Once registered your session will receive these states, which will have the appl
 	ARG0, the conn id;
 	ARG1, the error or reason for disconnection;
 
-=item cmd_*
+=item C<cmd_*>
 
   Emitted: when a client or peer sends a valid IRC line to us;
   Target: all plugins and registered sessions;
@@ -1212,11 +1212,11 @@ These are plugin related methods:
 
 =over
 
-=item pipeline
+=item C<pipeline>
 
 Returns the L<POE::Component::Server::IRC::Pipeline> object used internally by the component.
 
-=item plugin_add 
+=item C<plugin_add>
 
 Accepts two arguments:
 
@@ -1228,7 +1228,7 @@ plugins of the same kind active in one PoCo-Server-IRC-Backend object.
 
 Returns 1 if plugin was initialized, undef if not.
 
-=item plugin_del
+=item C<plugin_del>
 
 Accepts one argument:
 
@@ -1236,7 +1236,7 @@ Accepts one argument:
 
 Returns the plugin object if the plugin was removed, undef if not.
 
-=item plugin_get
+=item C<plugin_get>
 
 Accepts one argument:
 
@@ -1244,16 +1244,16 @@ Accepts one argument:
 
 Returns the plugin object if it was found, undef if not.
 
-=item plugin_list
-=item plugin_order
+=item C<plugin_list>
+=item C<plugin_order>
 
 Has no arguments.
 
 Returns a hashref of plugin objects, keyed on alias, or an empty list if there are no
 plugins loaded.
 
-=item plugin_register
-=item plugin_unregister
+=item C<plugin_register>
+=item C<plugin_unregister>
 
 See L<POE::Component::Server::IRC::Plugin> for details on these methods.
 
@@ -1263,7 +1263,7 @@ And plugin related states, prefixed with the appropriate prefix or the default, 
 
 =over
 
-=item plugin_add
+=item C<plugin_add>
 
   Emitted: when the component successfully adds a new plugin;
   Target: all plugins and registered sessions;
@@ -1271,7 +1271,7 @@ And plugin related states, prefixed with the appropriate prefix or the default, 
 	ARG0, plugin alias;
 	ARG1, plugin object;
 
-=item plugin_del
+=item C<plugin_del>
 
   Emitted: when the component successfully removes a plugin;
   Target: all plugins and registered sessions;
@@ -1287,7 +1287,7 @@ Chris 'BinGOs' Williams
 
 =head1 LICENSE
 
-Copyright C<(c)> Chris Williams
+Copyright E<copy> Chris Williams
 
 This module may be used, modified, and distributed under the same terms as Perl itself. Please see the license that came with your Perl distribution for details.
 
