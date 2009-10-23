@@ -63,4 +63,7 @@ requires 'POE::Component::Client::DNS' => 1.00;
 requires 'POE::Component::IRC' => 5.70;
 requires 'Algorithm::Diff' => 1.19;
 requires 'Crypt::PasswdMD5' => 1.3;
+auto_license holder => 'Chris Williams';
+auto_provides;
+githubmeta;
 WriteAll();
