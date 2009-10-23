@@ -12,7 +12,7 @@ use Algorithm::Diff qw(diff);
 use Crypt::PasswdMD5;
 use vars qw($VERSION);
 
-$VERSION = '1.21';
+$VERSION = '1.40';
 
 sub u_irc {
   my $value = shift || return;

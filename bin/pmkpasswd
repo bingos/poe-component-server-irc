@@ -6,7 +6,7 @@ use Getopt::Long;
 use POE::Component::Server::IRC::Common qw(mkpasswd);
 use vars qw($VERSION);
 
-$VERSION = '1.28';
+$VERSION = '1.40';
 
 my $version;
 my $md5;

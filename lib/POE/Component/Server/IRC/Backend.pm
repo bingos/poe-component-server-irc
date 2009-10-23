@@ -10,7 +10,7 @@ use Net::Netmask;
 use base qw(POE::Component::Pluggable);
 use vars qw($VERSION);
 
-$VERSION = '1.22';
+$VERSION = '1.40';
 
 sub create {
   my $package = shift;
