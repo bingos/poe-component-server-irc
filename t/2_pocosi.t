@@ -61,10 +61,10 @@ sub _shutdown {
 sub ircd_registered {
   my ($heap,$object) = @_[HEAP,ARG0];
   my $backend = $_[SENDER]->get_heap();
-  isa_ok( $object, 'POE::Component::Pluggable' );
+  isa_ok( $object, 'Object::Pluggable' );
   isa_ok( $object, 'POE::Component::Server::IRC' );
   isa_ok( $backend, 'POE::Component::Server::IRC' );
-  isa_ok( $backend->pipeline, 'POE::Component::Pluggable::Pipeline');
+  isa_ok( $backend->pipeline, 'Object::Pluggable::Pipeline');
   undef;
 }
 

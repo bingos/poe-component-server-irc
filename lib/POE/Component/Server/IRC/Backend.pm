@@ -7,7 +7,7 @@ use POE::Component::Server::IRC::Plugin qw( :ALL );
 use Socket;
 use Carp;
 use Net::Netmask;
-use base qw(POE::Component::Pluggable);
+use base qw(Object::Pluggable);
 
 sub create {
   my $package = shift;
@@ -213,7 +213,7 @@ sub __send_event {
 
 sub _send_event {
   my ($self,$event,@args) = @_;
-  return 1 if $self->_pluggable_process( 'SERVER', $event, \( @args ) ) == PCSI_EAT_ALL;
+  return 1 if $self->_pluggable_process( 'SERVER', $event, \@args ) == PCSI_EAT_ALL;
   $poe_kernel->post( $_ => $event, @args ) for  keys % { $self->{sessions} };
   return 1;
 }

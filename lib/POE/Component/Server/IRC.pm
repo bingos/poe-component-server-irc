@@ -34,6 +34,7 @@ sub _load_our_plugins {
 
 sub IRCD_connection {
   my ($self,$ircd) = splice @_,0 ,2;
+  pop @_;
   my ($conn_id,$peeraddr,$peerport,$sockaddr,$sockport) = map { ${ $_ } } @_;
 
   delete $self->{state}->{conns}->{ $conn_id } if $self->_connection_exists( $conn_id );
@@ -47,6 +48,7 @@ sub IRCD_connection {
 
 sub IRCD_connected {
   my ($self,$ircd) = splice @_,0 ,2;
+  pop @_;
   my ($conn_id,$peeraddr,$peerport,$sockaddr,$sockport,$name) = map { ${ $_ } } @_;
 
   delete $self->{state}->{conns}->{ $conn_id } if $self->_connection_exists( $conn_id );
@@ -62,6 +64,7 @@ sub IRCD_connected {
 
 sub IRCD_connection_flood {
   my ($self,$ircd) = splice @_,0 ,2;
+  pop @_;
   my ($conn_id) = map { ${ $_ } } @_;
   $self->_terminate_conn_error( $conn_id, 'Excess Flood' );
   return PCSI_EAT_ALL;
@@ -69,6 +72,7 @@ sub IRCD_connection_flood {
 
 sub IRCD_connection_idle {
   my ($self,$ircd) = splice @_,0 ,2;
+  pop @_;
   my ($conn_id,$interval) = map { ${ $_ } } @_;
   return PCSI_EAT_NONE unless $self->_connection_exists( $conn_id );
   my $conn = $self->{state}->{conns}->{ $conn_id };
@@ -88,6 +92,7 @@ sub IRCD_connection_idle {
 
 sub IRCD_auth_done {
   my ($self,$ircd) = splice @_,0 ,2;
+  pop @_;
   my ($conn_id,$ref) = map { ${ $_ } } @_;
   return PCSI_EAT_ALL unless $self->_connection_exists( $conn_id );
   $self->{state}->{conns}->{ $conn_id }->{auth} = $ref;
@@ -97,6 +102,7 @@ sub IRCD_auth_done {
 
 sub IRCD_disconnected {
   my ($self,$ircd) = splice @_,0 ,2;
+  pop @_;
   my ($conn_id,$errstr) = map { ${ $_ } } @_;
   return PCSI_EAT_ALL unless $self->_connection_exists( $conn_id );
 
@@ -122,6 +128,7 @@ sub IRCD_disconnected {
 
 sub IRCD_compressed_conn {
   my ($self,$ircd) = splice @_,0 ,2;
+  pop @_;
   my ($conn_id) = map { ${ $_ } } @_;
   $self->_state_send_burst( $conn_id );
   return PCSI_EAT_ALL;
@@ -130,6 +137,7 @@ sub IRCD_compressed_conn {
 sub _default {
   my ($self,$ircd,$event) = splice @_, 0, 3;
   return PCSI_EAT_NONE unless $event =~ /^IRCD_cmd_/;
+  pop @_;
   my ($conn_id,$input) = map { ${ $_ } } @_;
 
   return PCSI_EAT_ALL unless $self->_connection_exists( $conn_id );
