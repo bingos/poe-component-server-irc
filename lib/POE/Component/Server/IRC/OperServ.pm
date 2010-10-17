@@ -5,8 +5,6 @@ use warnings;
 use POE::Component::Server::IRC::Plugin qw(:ALL);
 use base qw(POE::Component::Server::IRC);
 
-our $VERSION = '1.40';
-
 sub _load_our_plugins {
   my $self = shift;
   $self->SUPER::_load_our_plugins();

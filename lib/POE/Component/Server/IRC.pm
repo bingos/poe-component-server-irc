@@ -13,10 +13,6 @@ use POE;
 use POE::Component::Server::IRC::Common qw(:ALL);
 use POE::Component::Server::IRC::Plugin qw(:ALL);
 use Date::Format;
-use vars qw($VERSION $REVISION);
-
-$VERSION = '1.40';
-($REVISION) = (q$LastChangedRevision$=~/(\d+)/g);
 
 sub spawn {
   my $package = shift;
@@ -4633,6 +4629,11 @@ sub configure {
   }
 
   $self->{config}->{ uc $_ } = $options->{ $_ } for keys %{ $options };
+  my $v;
+  {
+    no strict 'vars';
+    $v = defined $VERSION ? $VERSION : 'dev-git';
+  }
 
   $self->{config}->{CREATED} = time();
   $self->{config}->{CASEMAPPING} = 'rfc1459';
@@ -4640,7 +4641,7 @@ sub configure {
   $self->{config}->{SERVERNAME} =~ s/[^a-zA-Z0-9\-.]//g;
   $self->{config}->{SERVERNAME} .= '.' unless $self->{config}->{SERVERNAME} =~ /\./;
   $self->{config}->{SERVERDESC} = 'Poco? POCO? POCO!' unless $self->{config}->{SERVERDESC};
-  $self->{config}->{VERSION} = ref ( $self ) . '-' . $VERSION unless $self->{config}->{VERSION};
+  $self->{config}->{VERSION} = ref ( $self ) . '-' . $v unless $self->{config}->{VERSION};
   $self->{config}->{NETWORK} = 'poconet' unless $self->{config}->{NETWORK};
   $self->{config}->{HOSTLEN} = 63 unless ( defined ( $self->{config}->{HOSTLEN} ) and $self->{config}->{HOSTLEN} > 63 );
   $self->{config}->{NICKLEN} = 9 unless ( defined ( $self->{config}->{NICKLEN} ) and $self->{config}->{NICKLEN} > 9 );

@@ -4,8 +4,6 @@ use strict;
 use warnings;
 use POE::Component::Server::IRC::Plugin qw( :ALL );
 
-our $VERSION = '1.40';
-
 sub new {
   return bless { @_[1..$#_] }, $_[0];
 }

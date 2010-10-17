@@ -4,9 +4,6 @@ use strict;
 use warnings;
 use Getopt::Long;
 use POE::Component::Server::IRC::Common qw(mkpasswd);
-use vars qw($VERSION);
-
-$VERSION = '1.40';
 
 my $version;
 my $md5;
@@ -16,7 +13,9 @@ my $password;
 GetOptions( 'version', \$version, 'md5', \$md5, 'apache', \$apache, 'password', \$password );
 
 if ( $version ) {
-  print "$0 - version ", $VERSION, "\n";
+  no strict 'vars';
+  my $v = defined $VERSION ? $VERSION : 'dev-git';
+  print "$0 - version ", $v, "\n";
   exit 0;
 }
 

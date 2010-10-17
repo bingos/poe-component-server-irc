@@ -1,8 +1,3 @@
-Makefile
-Makefile.old
 POE-Component-Server-IRC-*
-blib
-inc
-pm_to_blib
-META.yml
 cover_db
+.build
