@@ -1214,7 +1214,7 @@ These are plugin related methods:
 
 =item C<pipeline>
 
-Returns the L<POE::Component::Server::IRC::Pipeline> object used internally by the component.
+Returns the L<Object::Pluggable::Pipeline> object used internally by the component.
 
 =item C<plugin_add>
 

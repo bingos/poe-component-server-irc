@@ -3,6 +3,7 @@ Revision history for POE-Component-Server-IRC
 {{$NEXT}}
     - Converted the Changes file to something human-writable (and more
       human-readable)
+    - Removed the unused Pipeline.pm file
 
 1.40  Fri Oct 23 16:03:38 CET 2009
     - Don't send NICK messages more than once when we're in channels
