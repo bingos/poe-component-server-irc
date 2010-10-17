@@ -52,6 +52,5 @@ t/ts_11_hinrik_umode.t
 t/ts_12_hinrik_time.t
 t/ts_13_nickrace.t
 t/ts_14_nickchange_channel.t
-tools/git-log.pl
 xt/pod.t
 xt/pod_coverage.t

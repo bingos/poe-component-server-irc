@@ -46,7 +46,6 @@ install_script 'bin/pmkpasswd';
 perl_version '5.006';
 author_tests 'xt';
 no_index directory => 'xt';
-makemaker_args(dist => { PREOP => "$^X ./tools/git-log.pl > ./Changes" });
 requires 'Carp'   => 0;
 requires 'Net::Netmask' => 1.9012;
 requires 'Socket' => 0;
