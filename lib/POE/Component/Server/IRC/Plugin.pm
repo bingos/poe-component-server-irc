@@ -1,15 +1,12 @@
-# Declare our package
 package POE::Component::Server::IRC::Plugin;
 
-# Standard stuff to catch errors
-use strict qw(subs vars refs);				# Make sure we can't mess up
-use warnings FATAL => 'all';				# Enable warnings to catch errors
+use strict;
+use warnings FATAL => 'all';
 
-# We export some stuff
 require Exporter;
-our @ISA = qw( Exporter );
-our %EXPORT_TAGS = ( 'ALL' => [ qw( PCSI_EAT_NONE PCSI_EAT_CLIENT PCSI_EAT_PLUGIN PCSI_EAT_ALL ) ] );
-Exporter::export_ok_tags( 'ALL' );
+use base qw(Exporter);
+our @EXPORT_OK = qw(PCSI_EAT_NONE PCSI_EAT_CLIENT PCSI_EAT_PLUGIN PCSI_EAT_ALL);
+our %EXPORT_TAGS = ( ALL => [@EXPORT_OK] );
 
 # Our constants
 use constant PCSI_EAT_NONE   => 1;
@@ -18,21 +15,20 @@ use constant PCSI_EAT_PLUGIN => 3;
 use constant PCSI_EAT_ALL    => 4;
 
 1;
-__END__
+
+=encoding utf8
+
 =head1 NAME
 
 POE::Component::Server::IRC::Plugin - Provides plugin documentation for POE::Component::Server::IRC.
 
-=head1 ABSTRACT
-
-	Provides plugin documentation for POE::Component::Server::IRC
-
 =head1 DESCRIPTION
 
-This is the document coders/users should refer to when using/developing plugins for
-POE::Component::Server::IRC.
+This is the document coders/users should refer to when using/developing plugins
+for POE::Component::Server::IRC.
 
-The plugin system works by letting coders hook into aspects of POE::Component::Server::IRC::Backend:
+The plugin system works by letting coders hook into aspects of
+POE::Component::Server::IRC::Backend:
 
 	Data received from the server
 
@@ -68,8 +64,8 @@ The general architecture of using the plugins should be:
 	# Ah, we want to remove the plugin
 	$plugin = $irc->plugin_del( 'ExamplePlugin' );
 
-The plugins themselves will conform to the standard API described here. What they can do is
-limited only by imagination and the IRC RFC's ;)
+The plugins themselves will conform to the standard API described here. What
+they can do is limited only by imagination and the IRC RFC's ;)
 
 	# Import the constants
 	use POE::Component::Server::IRC::Plugin qw( :ALL );
@@ -126,7 +122,7 @@ limited only by imagination and the IRC RFC's ;)
 
 =head1 Available methods to use on the $irc object
 
-=head2 plugin_add
+=head2 C<plugin_add>
 
 	Accepts two arguments:
 		The alias for the plugin
@@ -139,14 +135,14 @@ limited only by imagination and the IRC RFC's ;)
 
 	Returns 1 if plugin was initialized, undef if not.
 
-=head2 plugin_get
+=head2 C<plugin_get>
 
 	Accepts one argument:
 		The alias for the plugin
 
 	Returns the plugin object if it was found, undef if not.
 
-=head2 plugin_del
+=head2 C<plugin_del>
 
 	Accepts one argument:
 		The alias for the plugin or the plugin object itself
@@ -155,14 +151,14 @@ limited only by imagination and the IRC RFC's ;)
 
 	Returns the plugin object if the plugin was removed, undef if not.
 
-=head2 plugin_list
+=head2 C<plugin_list>
 
 	Has no arguments.
 
 	Returns a hashref of plugin objects, keyed on alias, or an empty list if there are no
 	plugins loaded.
 
-=head2 plugin_register
+=head2 C<plugin_register>
 
 	Accepts the following arguments:
 		The plugin object
@@ -179,7 +175,7 @@ limited only by imagination and the IRC RFC's ;)
 
 	Returns 1 if everything checked out fine, undef if something's seriously wrong
 
-=head2 plugin_unregister
+=head2 C<plugin_unregister>
 
 	Accepts the following arguments:
 		The plugin object
@@ -198,32 +194,35 @@ limited only by imagination and the IRC RFC's ;)
 
 =head2 ircd_backend_plugin_add
 
-This event will be triggered after a plugin is added. It receives two arguments, the first being
-the plugin name, and the second being the plugin object.
+This event will be triggered after a plugin is added. It receives two
+arguments, the first being the plugin name, and the second being the plugin
+object.
 
 =head2 ircd_backend_plugin_del
 
-This event will be triggered after a plugin is deleted. It receives two arguments, the first being
-the plugin name, and the second being the plugin object.
+This event will be triggered after a plugin is deleted. It receives two
+arguments, the first being the plugin name, and the second being the plugin
+object.
 
 =head1 Event arguments
 
 =head2 SERVER hooks
 
-Hooks that are targeted toward data received from the server will get the exact same
-arguments as if it was a normal event, look at the POE::Component::Server::IRC::Backend
-docs for more information.
+Hooks that are targeted toward data received from the server will get the
+exact same arguments as if it was a normal event, look at the
+POE::Component::Server::IRC::Backend docs for more information.
 
 	NOTE: Server methods are identified in the plugin namespace by the subroutine prefix
 	of IRCD_*. I.e. an ircd_backend_cmd_kick event handler would be:
 
 	sub IRCD_cmd_kick {}
 
-The only difference is instead of getting scalars, the hook will get a reference to
-the scalar, to allow it to mangle the data. This allows the plugin to modify data *before*
-they are sent out to registered sessions.
+The only difference is instead of getting scalars, the hook will get a
+reference to the scalar, to allow it to mangle the data. This allows the
+plugin to modify data *before* they are sent out to registered sessions.
 
-They are required to return one of the exit codes so POE::Component::Server::IRC::Backend will know what to do.
+They are required to return one of the exit codes so
+POE::Component::Server::IRC::Backend will know what to do.
 
 =head3 Names of potential hooks
 
@@ -231,12 +230,14 @@ They are required to return one of the exit codes so POE::Component::Server::IRC
 	connected
 	plugin_del
 
-Keep in mind that they are always lowercased, check out the POE::Component::IRC manpage.
+Keep in mind that they are always lowercased, check out the
+POE::Component::Server::IRC manpage.
 
 =head2 _default
 
-If a plugin doesn't have a specific hook method defined for an event, the component will attempt to call
-a plugin's _default() method. The first parameter after the plugin and irc objects will be the handler name.
+If a plugin doesn't have a specific hook method defined for an event, the
+component will attempt to call a plugin's _default() method. The first
+parameter after the plugin and irc objects will be the handler name.
 
 	sub _default {
 	  my ($self,$irc,$event) = splice @_, 0, 3;
@@ -244,7 +245,8 @@ a plugin's _default() method. The first parameter after the plugin and irc objec
 	  return PCSI_EAT_NONE;
 	}
 
-The _default() handler is expected to return one of the exit codes so POE::Component::Server::IRC::Backend will know what to do.
+The _default() handler is expected to return one of the exit codes so
+POE::Component::Server::IRC::Backend will know what to do.
 
 =head1 Exit Codes
 
@@ -269,9 +271,9 @@ The _default() handler is expected to return one of the exit codes so POE::Compo
 
 =head1 Plugin ordering system
 
-The plugins are given priority on a first come, first serve basis. Therefore, plugins that were added
-before others have the first shot at processing events. Ideas are welcome on a clean system to allow
-users to re-order plugins.
+The plugins are given priority on a first come, first serve basis. Therefore,
+plugins that were added before others have the first shot at processing events.
+Ideas are welcome on a clean system to allow users to re-order plugins.
 
 =head1 EXPORT
 
@@ -280,22 +282,26 @@ users to re-order plugins.
 
 =head1 SEE ALSO
 
-L<POE::Component::IRC>
+L<Object::Pluggable|Object::Pluggable>
 
 =head1 AUTHOR
 
 Apocalypse E<lt>apocal@cpan.orgE<gt>
 
-Ported to POE::Component::Server::IRC by Chris 'BinGOs' Williams E<lt>chris@bingosnet.co.ukE<gt>
+Ported to POE::Component::Server::IRC by Chris 'BinGOs' Williams
+E<lt>chris@bingosnet.co.ukE<gt>
 
 =head1 LICENSE
 
 Copyright C<(c)> Chris Williams and Apocalypse
 
-This module may be used, modified, and distributed under the same terms as Perl itself. Please see the license that came with your Perl distribution for details.
+This module may be used, modified, and distributed under the same terms as
+Perl itself. Please see the license that came with your Perl distribution for
+details.
 
 =head1 PROPS
 
-The idea is heavily borrowed from X-Chat, BIG thanks goes out to the genius that came up with the EAT_* system :)
+The idea is heavily borrowed from X-Chat, BIG thanks goes out to the genius
+that came up with the EAT_* system :)
 
 =cut
