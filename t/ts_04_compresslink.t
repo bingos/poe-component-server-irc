@@ -1,7 +1,7 @@
 use Test::More; # tests => 16;
 use POE qw(Component::Server::IRC);
 
-my $GOT_ZLIB = 0;
+our $GOT_ZLIB;
 
 BEGIN {
   eval { 

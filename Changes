@@ -9,6 +9,7 @@ Revision history for POE-Component-Server-IRC
     - Changed POE::Component::IRC to a test (instead of runtime) dependency
     - Added some documentation to the distribution about the IRC server
       protocols we implement
+    - The compress link test was getting skipped unconditionally. Fixed.
 
 1.40  Fri Oct 23 16:03:38 CET 2009
     - Don't send NICK messages more than once when we're in channels
