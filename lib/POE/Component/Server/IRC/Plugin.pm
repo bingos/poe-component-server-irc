@@ -8,11 +8,12 @@ use base qw(Exporter);
 our @EXPORT_OK = qw(PCSI_EAT_NONE PCSI_EAT_CLIENT PCSI_EAT_PLUGIN PCSI_EAT_ALL);
 our %EXPORT_TAGS = ( ALL => [@EXPORT_OK] );
 
-# Our constants
-use constant PCSI_EAT_NONE   => 1;
-use constant PCSI_EAT_CLIENT => 2;
-use constant PCSI_EAT_PLUGIN => 3;
-use constant PCSI_EAT_ALL    => 4;
+use constant {
+    PCSI_EAT_NONE   => 1,
+    PCSI_EAT_CLIENT => 2,
+    PCSI_EAT_PLUGIN => 3,
+    PCSI_EAT_ALL    => 4,
+};
 
 1;
 
