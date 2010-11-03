@@ -107,7 +107,8 @@ sub _default {
   }
   if ( $event eq 'irc_error' ) {
 	ok( 1, $event );
-	$_[HEAP]->{ircd}->del_listener( port => $_[HEAP]->{port} );
+        $heap->{quit}++;
+	$_[HEAP]->{ircd}->del_listener( port => $_[HEAP]->{port} ) if $heap->{quit} == 2;
   }
   return 0;
 }

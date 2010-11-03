@@ -1,6 +1,7 @@
 Revision history for POE-Component-Server-IRC
 
 {{$NEXT}}
+    - Fix race condition in t/ts_02_multi.t
 
 1.41  Sat Oct 30 22:25:55 GMT 2010
     - Converted the Changes file to something human-writable (and more
