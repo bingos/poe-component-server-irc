@@ -1,6 +1,8 @@
 Revision history for POE-Component-Server-IRC
 
 {{$NEXT}}
+
+1.42  Fri Nov 5 12:30:25 CET 2010
     - Fix race condition in t/ts_02_multi.t
 
 1.41  Sat Oct 30 22:25:55 GMT 2010
