@@ -9,8 +9,11 @@ package POE::Component::Server::IRC;
 use strict;
 use warnings;
 use base qw(POE::Component::Server::IRC::Backend);
+use IRC::Utils qw(u_irc parse_mode_line unparse_mode_line parse_mask
+                  matches_mask gen_mode_change is_valid_nick_name
+                  is_valid_chan_name);
 use POE;
-use POE::Component::Server::IRC::Common qw(:ALL);
+use POE::Component::Server::IRC::Common qw(chkpasswd);
 use POE::Component::Server::IRC::Plugin qw(:ALL);
 use Date::Format;
 
@@ -310,7 +313,7 @@ sub _cmd_from_unknown {
 	last SWITCH;
     }
     if ( $cmd eq 'NICK' and $pcount ) {
-	if ( !validate_nick_name( $params->[0] ) ) {
+	if ( !is_valid_nick_name( $params->[0] ) ) {
 	  $self->_send_output_to_client( $wheel_id => '432' => $params->[0] );
 	  last SWITCH;
 	}
@@ -1341,7 +1344,7 @@ sub _daemon_cmd_nick {
     if ( $nick eq $new ) {
 	last SWITCH;
     }
-    if ( !validate_nick_name( $new ) ) {
+    if ( !is_valid_nick_name( $new ) ) {
 	push @{ $ref }, [ '432', $new ];
 	last SWITCH;
     }
@@ -1712,7 +1715,7 @@ sub _daemon_cmd_list {
     push @{ $ref }, { prefix => $server, command => '321', params => [ $nick, 'Channel', 'Users  Name' ] };
     my $count = 0;
     INNER: foreach my $chan (@chans) {
-	unless ( validate_chan_name( $chan ) and $self->state_chan_exists( $chan ) ) {
+	unless ( is_valid_chan_name( $chan ) and $self->state_chan_exists( $chan ) ) {
 	  unless ( $count ) {
 		push @{ $ref }, [ '401', $chan ];
 	  	last INNER;
@@ -2073,7 +2076,7 @@ sub _daemon_cmd_mode {
       # Bans
       if ( my ($flag) = $mode =~ /(\+|-)b/ ) {
 	next if ++$mode_count > $maxmodes;
-	my $mask = parse_ban_mask( $arg );
+	my $mask = parse_mask( $arg );
 	my $umask = u_irc $mask;
 	if ( $flag eq '+' and !$record->{bans}->{ $umask } ) {
 	  $record->{bans}->{ $umask } = [ $mask, $self->state_user_full( $nick ), time() ];
@@ -2090,7 +2093,7 @@ sub _daemon_cmd_mode {
       # Invex
       if ( my ($flag) = $mode =~ /(\+|-)I/ ) {
 	next if ++$mode_count > $maxmodes;
-	my $mask = parse_ban_mask( $arg );
+	my $mask = parse_mask( $arg );
 	my $umask = u_irc $mask;
 	if ( $flag eq '+' and !$record->{invex}->{ $umask } ) {
 	  $record->{invex}->{ $umask } = [ $mask, $self->state_user_full( $nick ), time() ];
@@ -2107,7 +2110,7 @@ sub _daemon_cmd_mode {
       # Exceptions
       if ( my ($flag) = $mode =~ /(\+|-)e/ ) {
 	next if ++$mode_count > $maxmodes;
-	my $mask = parse_ban_mask( $arg );
+	my $mask = parse_mask( $arg );
 	my $umask = u_irc $mask;
 	if ( $flag eq '+' and !$record->{excepts}->{ $umask } ) {
 	  $record->{excepts}->{ $umask } = [ $mask, $self->state_user_full( $nick ), time() ];
@@ -2167,7 +2170,7 @@ sub _daemon_cmd_join {
 	next LOOP;
       }
       # Channel isn't valid
-      if ( !validate_chan_name( $channel ) or length( $channel ) > $channel_length ) {
+      if ( !is_valid_chan_name( $channel ) or length( $channel ) > $channel_length ) {
 	$self->_send_output_to_client( $route_id => '403' => $channel );
 	next LOOP;
       }
@@ -3411,7 +3414,7 @@ sub _daemon_peer_mode {
       }
       # Bans
       if ( my ($flag) = $mode =~ /(\+|-)b/ ) {
-	my $mask = parse_ban_mask( $arg );
+	my $mask = parse_mask( $arg );
 	my $umask = u_irc $mask;
 	if ( $flag eq '+' and !$record->{bans}->{ $umask } ) {
 	  $record->{bans}->{ $umask } = [ $mask, ( $full || $server ), time() ];
@@ -3427,7 +3430,7 @@ sub _daemon_peer_mode {
       }
       # Invex
       if ( my ($flag) = $mode =~ /(\+|-)I/ ) {
-	my $mask = parse_ban_mask( $arg );
+	my $mask = parse_mask( $arg );
 	my $umask = u_irc $mask;
 	if ( $flag eq '+' and !$record->{invex}->{ $umask } ) {
 	   $record->{invex}->{ $umask } = [ $mask, ( $full || $server ), time() ];
@@ -3443,7 +3446,7 @@ sub _daemon_peer_mode {
       }
       # Exceptions
       if ( my ($flag) = $mode =~ /(\+|-)e/ ) {
-	my $mask = parse_ban_mask( $arg );
+	my $mask = parse_mask( $arg );
 	my $umask = u_irc $mask;
 	if ( $flag eq '+' and !$record->{excepts}->{ $umask } ) {
 	  $record->{excepts}->{ $umask } = [ $mask, ( $full || $server ), time() ];
@@ -4010,7 +4013,7 @@ sub _state_auth_peer_conn {
     	return 1 if $block->match( $client_ip );
     }
   } 
-  return 1 if matches_mask( $peers->{ uc $name }->{ipmask}, $client_ip );
+  return 1 if matches_mask( '*!*@'.$peers->{ uc $name }->{ipmask}, "*!*\@$client_ip" );
   return 0;
 }
 
@@ -5024,7 +5027,7 @@ sub daemon_server_mode {
       }
       # Bans
       if ( my ($flag) = $mode =~ /(\+|-)b/ ) {
-	my $mask = parse_ban_mask( $arg );
+	my $mask = parse_mask( $arg );
 	my $umask = u_irc $mask;
 	if ( $flag eq '+' and !$record->{bans}->{ $umask } ) {
 	  $record->{bans}->{ $umask } = [ $mask, ( $full || $server ), time() ];
@@ -5036,7 +5039,7 @@ sub daemon_server_mode {
       }
       # Invex
       if ( my ($flag) = $mode =~ /(\+|-)I/ ) {
-	my $mask = parse_ban_mask( $arg );
+	my $mask = parse_mask( $arg );
 	my $umask = u_irc $mask;
 	if ( $flag eq '+' and !$record->{invex}->{ $umask } ) {
 	   $record->{invex}->{ $umask } = [ $mask, ( $full || $server ), time() ];
@@ -5048,7 +5051,7 @@ sub daemon_server_mode {
       }
       # Exceptions
       if ( my ($flag) = $mode =~ /(\+|-)e/ ) {
-	my $mask = parse_ban_mask( $arg );
+	my $mask = parse_mask( $arg );
 	my $umask = u_irc $mask;
 	if ( $flag eq '+' and !$record->{excepts}->{ $umask } ) {
 	  $record->{excepts}->{ $umask } = [ $mask, ( $full || $server ), time() ];
