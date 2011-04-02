@@ -2,6 +2,7 @@ Revision history for POE-Component-Server-IRC
 
 {{$NEXT}}
     - Removed most of Common.pm in favor of IRC::Utils
+    - Use strftime() instead of Date::Format
 
 1.42  Fri Nov 5 12:30:25 CET 2010
     - Fix race condition in t/ts_02_multi.t
