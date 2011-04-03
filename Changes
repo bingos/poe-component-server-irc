@@ -1,6 +1,8 @@
 Revision history for POE-Component-Server-IRC
 
 {{$NEXT}}
+
+1.43  Sun Apr 3 02:57:40 GMT 2011
     - Removed most of Common.pm in favor of IRC::Utils
     - Use strftime() instead of Date::Format
 
