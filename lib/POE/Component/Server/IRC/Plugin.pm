@@ -21,12 +21,13 @@ use constant {
 
 =head1 NAME
 
-POE::Component::Server::IRC::Plugin - Provides plugin documentation for POE::Component::Server::IRC.
+POE::Component::Server::IRC::Plugin - Provides plugin documentation for
+POE::Component::Server::IRC.
 
 =head1 DESCRIPTION
 
-This is the document coders/users should refer to when using/developing plugins
-for POE::Component::Server::IRC.
+This is the document coders/users should refer to when using/developing
+plugins for POE::Component::Server::IRC.
 
 The plugin system works by letting coders hook into aspects of
 POE::Component::Server::IRC::Backend:

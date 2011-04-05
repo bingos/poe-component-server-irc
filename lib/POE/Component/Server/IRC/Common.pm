@@ -31,14 +31,14 @@ sub chkpasswd {
         $salt =~ s/^\Q$apr//;
         $salt =~ s/^(.*)\$/$1/;
         $salt = substr( $salt, 0, 8 );
-        return 1 if apache_md5_crypt( $pass, $salt ) eq $chk;
+        return 1 if apache_md5_crypt($pass, $salt) eq $chk;
     }
     elsif ( index($chk,$md5) == 0 ) {
         my $salt = $chk;
         $salt =~ s/^\Q$md5//;
         $salt =~ s/^(.*)\$/$1/;
         $salt = substr( $salt, 0, 8 );
-        return 1 if unix_md5_crypt( $pass, $salt ) eq $chk;
+        return 1 if unix_md5_crypt($pass, $salt) eq $chk;
     }
 
     return 1 if crypt( $pass, $chk ) eq $chk;
@@ -56,12 +56,12 @@ POE::Component::Server::IRC::Common - provides a set of common functions for the
 
 =head1 SYNOPSIS
 
-  use strict;
-  use warnings;
+ use strict;
+ use warnings;
 
-  use POE::Component::Server::IRC::Common qw( :ALL );
+ use POE::Component::Server::IRC::Common qw( :ALL );
 
-  my $passwd = mkpasswd( 'moocow' );
+ my $passwd = mkpasswd( 'moocow' );
 
 
 =head1 DESCRIPTION
@@ -71,29 +71,23 @@ L<POE::Component::Server::IRC|POE::Component::Server::IRC> suite.
 
 =head1 FUNCTIONS
 
-=over
-
-=item C<mkpasswd>
+=head2 C<mkpasswd>
 
 Takes one mandatory argument a plain string to 'encrypt'. If no further
 options are specified it uses C<crypt> to generate the password. Specifying
-'md5' option uses L<Crypt::PasswdMD5>'s C<unix_md5_crypt> function to
-generate the password. Specifying  'apache' uses L<Crypt::PasswdMD5>'s
-C<apache_md5_crypt> function to generate the password.
+'md5' option uses L<Crypt::PasswdMD5|Crypt::PasswdMD5>'s C<unix_md5_crypt>
+function to generate the password. Specifying 'apache' uses
+Crypt::PasswdMD5 C<apache_md5_crypt> function to generate the password.
 
-  my $passwd = mkpasswd( 'moocow' ); # vanilla crypt()
+ my $passwd = mkpasswd( 'moocow' ); # vanilla crypt()
+ my $passwd = mkpasswd( 'moocow', md5 => 1 ) # unix_md5_crypt()
+ my $passwd = mkpasswd( 'moocow', apache => 1 ) # apache_md5_crypt()
 
-  my $passwd = mkpasswd( 'moocow', md5 => 1 ) # unix_md5_crypt()
-
-  my $passwd = mkpasswd( 'moocow', apache => 1 ) # apache_md5_crypt()
-
-=item C<chkpasswd>
+=head2 C<chkpasswd>
 
 Takes two mandatory arguments, a password string and something to check that
 password against. The function first tries md5 comparisons (UNIX and Apache),
 then C<crypt> and finally plain-text password check.
-
-=back
 
 =head1 AUTHOR
 
@@ -109,6 +103,6 @@ for details.
 
 =head1 SEE ALSO
 
-L<POE::Component::Server::IRC>
+L<POE::Component::Server::IRC|POE::Component::Server::IRC>
 
 =cut
