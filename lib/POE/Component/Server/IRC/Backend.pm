@@ -2,7 +2,7 @@ package POE::Component::Server::IRC::Backend;
 
 use strict;
 use warnings;
-use Carp;
+use Carp qw(croak);
 use POE qw(Wheel::SocketFactory Wheel::ReadWrite Filter::Stackable
            Filter::Line Filter::IRCD);
 use POE::Component::Server::IRC::Plugin qw(:ALL);
@@ -22,6 +22,45 @@ sub create {
     my $options        = delete $self->{options};
     my $sslify_options = delete $self->{sslify_options};
     my $plugin_debug   = delete $self->{plugin_debug};
+
+    eval {
+        require POE::Filter::Zlib::Stream;
+        $self->{got_zlib} = 1;
+    };
+
+    if ($self->{auth}) {
+        eval {
+            require POE::Component::Client::Ident::Agent;
+            $self->{got_ident} = 1;
+        };
+        if (!$self->{got_ident}) {
+            croak('POE::Component::Client::Ident::Agent needed for authentication');
+        }
+        eval {
+            require POE::Component::Client::DNS;
+            $self->{got_dns} = 1;
+        };
+        if (!$self->{got_dns}) {
+            croak('POE::Component::Client::DNS needed for authentication');
+        }
+    }
+
+    if ($sslify_options && ref $sslify_options eq 'ARRAY') {
+        eval {
+            require POE::Component::SSLify;
+            POE::Component::SSLify->import(
+                qw(SSLify_Options Server_SSLify Client_SSLify)
+            );
+        };
+        chomp $@;
+        croak("Can't use ssl: $@") if $@;
+
+        eval { SSLify_Options(@$sslify_options); };
+        chomp $@;
+        croak("Can't use ssl: $@") if $@;
+        $self->{got_ssl} = 1;
+    }
+
 
     $self->_syndicator_init(
         prefix     => $self->{prefix},
@@ -61,30 +100,6 @@ sub create {
         (ref $options eq 'HASH' ? (options => $options) : ()),
     );
 
-    $self->{got_zlib} = 0;
-    eval {
-        require POE::Filter::Zlib::Stream;
-        $self->{got_zlib} = 1;
-    };
-
-    if ($sslify_options and ref $sslify_options eq 'ARRAY') {
-        $self->{got_ssl} = $self->{got_server_ssl} = 0;
-        eval {
-            require POE::Component::SSLify;
-            POE::Component::SSLify->import(
-                qw(SSLify_Options Server_SSLify Client_SSLify)
-            );
-            $self->{got_ssl} = 1;
-        };
-        warn "$@\n" if $@;
-
-        if ($self->{got_ssl}) {
-            eval { SSLify_Options(@$sslify_options); };
-            $self->{got_server_ssl} = 1 unless $@;
-            warn "$@\n" if $@;
-        }
-    }
-
     return $self;
 }
 
@@ -103,22 +118,11 @@ sub _start {
         Filters => [$self->{line_filter}, $self->{ircd_filter}],
     );
 
-    $self->{can_do_auth} = 0;
-    eval {
-        require POE::Component::Client::Ident::Agent;
-        require POE::Component::Client::DNS;
-    };
-    if (!$@) {
+    if ($self->{auth}) {
         $self->{resolver} = POE::Component::Client::DNS->spawn(
             Alias   => 'poco_dns_' . $self->session_id(),
             Timeout => 10,
         );
-        $self->{can_do_auth} = 1;
-    }
-    $self->{will_do_auth} = 0;
-
-    if ($self->{auth} and $self->{can_do_auth}) {
-        $self->{will_do_auth} = 1;
     }
 
     $self->_load_our_plugins();
@@ -184,11 +188,12 @@ sub _accept_connection {
     $peeraddr    = inet_ntoa($peeraddr);
     my $listener = $self->{listeners}{$listener_id};
 
-    if ($self->{got_server_ssl} && $listener->{usessl}) {
+    if ($self->{got_ssl} && $listener->{usessl}) {
         eval {
             $socket = POE::Component::SSLify::Server_SSLify($socket);
         };
-        warn "$@\n" if $@;
+        chomp $@;
+        die "Failed to SSLify server socket: $@" if $@;
     }
 
     return if $self->denied($peeraddr);
@@ -224,7 +229,7 @@ sub _accept_connection {
             $sockport
         );
 
-        if ($listener->{do_auth} && $self->{will_do_auth}) {
+        if ($listener->{do_auth} && $self->{auth}) {
             $kernel->yield('_auth_client', $wheel_id);
         }
         else {
@@ -413,7 +418,8 @@ sub _sock_up {
         eval {
             $socket = POE::Component::SSLify::Client_SSLify($socket);
         };
-        warn "Couldn't use an SSL socket: $@ \n" if $@;
+        chomp $@;
+        die "Failed to SSLify client socket: $@" if $@;
     }
 
     my $wheel = POE::Wheel::ReadWrite->new(

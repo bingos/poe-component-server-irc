@@ -7418,8 +7418,6 @@ sub configure {
         MAXTARGETS    => 4,
         MAXBANS       => 25,
         MAXBANLENGTH  => 1024,
-        # TODO: Find some way to disable requirement for
-        # PoCo-Client-DNS and PoCo-Client-Ident
         AUTH          => 1,
         ANTIFLOOD     => 1,
         WHOISACTUALLY => 1,
