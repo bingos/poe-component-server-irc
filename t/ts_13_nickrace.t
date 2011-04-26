@@ -23,8 +23,8 @@ POE::Session->create(
     package_states => [
         main => [qw(
             _start
-            _config_ircd 
-            _shutdown 
+            _config_ircd
+            _shutdown
             irc_001
             irc_433
             irc_disconnected
@@ -46,10 +46,10 @@ sub _start {
 
     if ($wheel) {
         my $port = ( unpack_sockaddr_in( $wheel->getsockname ) )[0];
-        $kernel->yield(_config_ircd => $port);
+        $kernel->yield('_config_ircd', $port);
         $heap->{count} = 0;
         $wheel = undef;
-        $kernel->delay(_shutdown => 60 );
+        $kernel->delay('_shutdown', 60);
         return;
     }
 
@@ -61,7 +61,7 @@ sub _config_ircd {
 
     $ircd->yield('add_i_line');
     $ircd->yield(add_listener => Port => $port);
-    
+
     $bot1->yield(register => 'all');
     $bot1->yield(connect => {
         nick    => 'TestBot1',
@@ -69,7 +69,7 @@ sub _config_ircd {
         port    => $port,
         ircname => 'Test test bot',
     });
-    
+
     $bot2->yield(register => 'all');
     $bot2->yield(connect => {
         nick    => 'TestBot1',
@@ -96,7 +96,7 @@ sub irc_433 {
 sub irc_disconnected {
     my ($kernel, $sender, $heap) = @_[KERNEL, SENDER, HEAP];
     my $irc = $sender->get_heap();
-    
+
     pass($irc->session_alias() . ' disconnected');
     $heap->{count}++;
     $kernel->yield('_shutdown') if $heap->{count} == 2;
@@ -104,7 +104,7 @@ sub irc_disconnected {
 
 sub _shutdown {
     my ($kernel) = $_[KERNEL];
-    
+
     $kernel->alarm_remove_all();
     $ircd->yield('shutdown');
     $bot1->yield('shutdown');

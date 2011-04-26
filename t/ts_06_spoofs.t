@@ -1,65 +1,63 @@
-use Test::More tests => 12;
-BEGIN { use_ok('POE') };
-BEGIN { use_ok('POE::Component::Server::IRC') };
+use strict;
+use warnings;
+use Test::More tests => 7;
+use POE;
+use POE::Component::Server::IRC;
 
-my $pocosi = POE::Component::Server::IRC->spawn( auth => 0, options => { trace => 0 }, antiflood => 0, plugin_debug => 0, debug => 0 );
+my $pocosi = POE::Component::Server::IRC->spawn(
+    auth         => 0,
+    options      => { trace => 0 },
+    antiflood    => 0,
+    plugin_debug => 0,
+    debug        => 0,
+);
 
-if ( $pocosi ) {
-	isa_ok( $pocosi, "POE::Component::Server::IRC" );
-	POE::Session->create(
-		package_states => [ 
-			'main' => [ qw( _start 
-					_shutdown
-					ircd_registered
-					ircd_daemon_quit
-					ircd_daemon_nick ) ],
-		],
-		options => { trace => 0 },
-		heap => { ircd => $pocosi },
-	);
-	$poe_kernel->run();
-}
+POE::Session->create(
+    package_states => [
+        'main' => [qw(
+            _start
+            _shutdown
+            ircd_daemon_quit
+            ircd_daemon_nick
+        )],
+    ],
+    heap => { ircd => $pocosi },
+);
 
-exit 0;
+$poe_kernel->run();
 
 sub _start {
-  my ($kernel,$heap) = @_[KERNEL,HEAP];
-  $heap->{ircd}->yield( 'register' );
-  $heap->{ircd}->yield( 'add_spoofed_nick', { nick => 'OperServ', umode => 'o', ircname => 'The OperServ Bot' } );
-  $kernel->delay( '_shutdown' => 20 );
-  undef;
+    my ($kernel, $heap) = @_[KERNEL, HEAP];
+    $heap->{ircd}->yield('register', 'all');
+    $heap->{ircd}->yield(
+        'add_spoofed_nick', {
+            nick    => 'OperServ',
+            umode   => 'o',
+            ircname => 'The OperServ Bot',
+        }
+    );
+    $kernel->delay('_shutdown', 20);
 }
 
 sub _shutdown {
-  my $heap = $_[HEAP];
-  $_[KERNEL]->delay( '_shutdown' => undef );
-  $heap->{ircd}->yield( 'shutdown' );
-  delete $heap->{ircd};
-  undef;
-}
-
-sub ircd_registered {
-  my ($heap,$object) = @_[HEAP,ARG0];
-  my $backend = $_[SENDER]->get_heap();
-  isa_ok( $object, "POE::Component::Server::IRC" );
-  isa_ok( $backend, "POE::Component::Server::IRC" );
-  undef;
+    my $heap = $_[HEAP];
+    $_[KERNEL]->delay('_shutdown');
+    $heap->{ircd}->yield('shutdown');
+    delete $heap->{ircd};
 }
 
 sub ircd_daemon_quit {
-  pass('Deleted Spoof User');
-  $poe_kernel->yield( '_shutdown' );
-  undef;
+    pass('Deleted Spoof User');
+    $poe_kernel->yield('_shutdown');
 }
 
 sub ircd_daemon_nick {
-  my @args = @_[ARG0..$#_];
-  ok( $args[0] eq 'OperServ', 'Spoof Test 1: Nick' );
-  ok( $args[4] eq 'OperServ', 'Spoof Test 1: User' );
-  ok( $args[5] eq 'poco.server.irc', 'Spoof Test 1: Host' );
-  ok( $args[6] eq 'poco.server.irc', 'Spoof Test 1: Server' );
-  ok( $args[3] eq '+o', 'Spoof Test 1: Umode' );
-  ok( $args[7] eq 'The OperServ Bot', 'Spoof Test 1: GECOS' );
-  $_[SENDER]->get_heap()->yield( 'del_spoofed_nick', $args[0] );
-  undef;
+    my @args = @_[ARG0..$#_];
+    is($args[0], 'OperServ', 'Spoof Test 1: Nick');
+    is($args[4], 'OperServ', 'Spoof Test 1: User');
+    is($args[5], 'poco.server.irc', 'Spoof Test 1: Host');
+    is($args[6], 'poco.server.irc', 'Spoof Test 1: Server');
+    is($args[3], '+o', 'Spoof Test 1: Umode');
+    is($args[7], 'The OperServ Bot', 'Spoof Test 1: GECOS');
+    $_[SENDER]->get_heap()->yield('del_spoofed_nick', $args[0]);
 }
