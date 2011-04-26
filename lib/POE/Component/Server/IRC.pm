@@ -19,7 +19,6 @@ sub spawn {
 
     $self->configure($self->{config} ? delete $self->{config} : ());
     $self->_state_create();
-    $self->{ircd} = $self;
     return $self;
 }
 
@@ -102,7 +101,7 @@ sub IRCD_connection_idle {
     }
 
     $conn->{pinged} = 1;
-    $self->{ircd}->send_output(
+    $self->send_output(
         {
             command => 'PING',
             params  => [$self->server_name()],
@@ -136,14 +135,14 @@ sub IRCD_disconnected {
         }
         if ($self->_connection_is_peer($conn_id)) {
             my $peer = $self->{state}{conns}{$conn_id}{name};
-            $self->{ircd}->send_output(
+            $self->send_output(
                 @{ $self->_daemon_peer_squit($conn_id, $peer, $errstr) }
             );
             delete $self->{state}{conns}{$conn_id};
             last SWITCH;
         }
         if ($self->_connection_is_client($conn_id)) {
-            $self->{ircd}->send_output(
+            $self->send_output(
                 @{ $self->_daemon_cmd_quit(
                     $self->_client_nickname($conn_id,$errstr ),
                     $errstr,
@@ -299,17 +298,17 @@ sub _client_register {
 
     $self->{state}{conns}{$conn_id}{registered} = 1;
     $self->{state}{conns}{$conn_id}{type} = 'c';
-    $self->{ircd}->send_event(
+    $self->send_event(
         'cmd_lusers',
         $conn_id,
         { command => 'LUSERS' },
     );
-    $self->{ircd}->send_event(
+    $self->send_event(
         'cmd_motd',
         $conn_id,
         { command => 'MOTD' },
     );
-    $self->{ircd}->send_event(
+    $self->send_event(
         'cmd_mode',
         $conn_id,
         {
@@ -374,7 +373,7 @@ sub _cmd_from_unknown {
 
             if ($params->[1] && $params->[1] =~ /TS$/) {
                 $self->{state}{conns}{$wheel_id}{ts_server} = 1;
-                $self->{ircd}->antiflood($wheel_id, 0);
+                $self->antiflood($wheel_id, 0);
             }
             last SWITCH;
         }
@@ -420,7 +419,7 @@ sub _cmd_from_unknown {
                 $self->_state_send_burst($wheel_id);
             }
 
-            $self->{ircd}->send_event(
+            $self->send_event(
                 "daemon_capab",
                 $conn->{name},
                 @{ $conn->{capab} },
@@ -498,14 +497,14 @@ sub _cmd_from_peer {
         }
 
         if ($cmd =~ /\d{3}/) {
-            $self->{ircd}->send_output(
+            $self->send_output(
                 $input,
                 $self->_state_user_route($params->[0])
             );
             last SWITCH;
         }
         if ($cmd eq 'QUIT') {
-            $self->{ircd}->send_output(
+            $self->send_output(
                 @{ $self->_daemon_peer_quit(
                     $prefix, @$params, $conn_id
                 )}
@@ -545,7 +544,7 @@ sub _cmd_from_peer {
         if ($cmd =~ /^SVINFO$/i && $self->can($method)) {
             $self->$method($conn_id, @$params);
             my $conn = $self->{state}{conns}{$conn_id};
-            $self->{ircd}->send_event(
+            $self->send_event(
                 "daemon_svinfo",
                 $conn->{name},
                 @$params,
@@ -738,7 +737,7 @@ sub _daemon_cmd_message {
                 }
             }
 
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $nick,
                     command => $type,
@@ -762,7 +761,7 @@ sub _daemon_cmd_message {
                     }
                 }
 
-                $self->{ircd}->send_output(
+                $self->send_output(
                     {
                         prefix  => $full,
                         command => $type,
@@ -771,7 +770,7 @@ sub _daemon_cmd_message {
                     @local,
                 );
 
-                $self->{ircd}->send_event(
+                $self->send_event(
                     "daemon_" . lc $type,
                     $full,
                     $target,
@@ -803,7 +802,7 @@ sub _daemon_cmd_message {
                 }
             }
 
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $nick,
                     command => $type,
@@ -812,7 +811,7 @@ sub _daemon_cmd_message {
                 keys %targets,
             );
 
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $full,
                     command => $type,
@@ -821,7 +820,7 @@ sub _daemon_cmd_message {
                 @local,
             );
 
-            $self->{ircd}->send_event(
+            $self->send_event(
                 "daemon_" . lc $type,
                 $full,
                 $target,
@@ -842,7 +841,7 @@ sub _daemon_cmd_message {
             }
 
             if ($targs->{$target}[1] ne $self->server_name()) {
-                $self->{ircd}->send_output(
+                $self->send_output(
                     {
                         prefix  => $nick,
                         command => $type,
@@ -859,7 +858,7 @@ sub _daemon_cmd_message {
                     next LOOP;
                 }
 
-                $self->{ircd}->send_output(
+                $self->send_output(
                     {
                         prefix  => $full,
                         command => $type,
@@ -878,7 +877,7 @@ sub _daemon_cmd_message {
             if (@local == 1) {
                 my $ref = shift @local;
                 if ($ref->[0] eq 'spoofed') {
-                    $self->{ircd}->send_event(
+                    $self->send_event(
                         "daemon_" . lc $type,
                         $full,
                         $ref->[1],
@@ -886,7 +885,7 @@ sub _daemon_cmd_message {
                     );
                 }
                 else {
-                    $self->{ircd}->send_output(
+                    $self->send_output(
                         {
                             prefix  => $full,
                             command => $type,
@@ -949,11 +948,11 @@ sub _daemon_cmd_message {
                     $msg->{prefix} = $full;
                 }
                 if (!$route_id eq 'spoofed') {
-                    $self->{ircd}->send_output($msg, $route_id);
+                    $self->send_output($msg, $route_id);
                 }
                 else {
                     my $tmsg = $type eq 'PRIVMSG' ? 'public' : 'notice';
-                    $self->{ircd}->send_event(
+                    $self->send_event(
                         "daemon_$tmsg",
                         $full,
                         $channel,
@@ -1002,7 +1001,7 @@ sub _daemon_cmd_message {
 
                             my ($n, $uh) = split /!/,
                             $self->state_user_full($nick);
-                            $self->{ircd}->send_output(
+                            $self->send_output(
                                 {
                                     prefix  => $server,
                                     command => '718',
@@ -1038,7 +1037,7 @@ sub _daemon_cmd_message {
 
                 if ($route_id eq 'spoofed') {
                     $msg->{prefix} = $full;
-                    $self->{ircd}->send_event(
+                    $self->send_event(
                         "daemon_" . lc $type,
                         $full,
                         $target,
@@ -1049,7 +1048,7 @@ sub _daemon_cmd_message {
                     if ($self->_connection_is_client($route_id)) {
                         $msg->{prefix} = $full;
                     }
-                    $self->{ircd}->send_output($msg, $route_id);
+                    $self->send_output($msg, $route_id);
                 }
                 next LOOP;
             }
@@ -1182,7 +1181,7 @@ sub _daemon_cmd_quit {
 
     $nick = uc_irc($nick);
     my $record = delete $self->{state}{peers}{uc $self->server_name()}{users}{$nick};
-    $self->{ircd}->send_output(
+    $self->send_output(
         {
             prefix  => $record->{nick},
             command => 'QUIT',
@@ -1196,7 +1195,7 @@ sub _daemon_cmd_quit {
         command => 'QUIT',
         params  => [$qmsg],
     };
-    $self->{ircd}->send_event("daemon_quit", $full, $qmsg);
+    $self->send_event("daemon_quit", $full, $qmsg);
 
     # Remove for peoples accept lists
     for my $user (keys %{ $record->{accepts} }) {
@@ -1246,7 +1245,7 @@ sub _daemon_cmd_ping {
         }
         if ($count >= 2 && (uc $args->[1] ne uc $server)) {
             my $target = $self->_state_peer_name($args->[1]);
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     command => 'PING',
                     params  => [$nick, $target],
@@ -1284,7 +1283,7 @@ sub _daemon_cmd_pong {
         }
         if ($count >= 2 && uc $args->[1] ne uc $server) {
             my $target = $self->_state_peer_name($args->[1]);
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     command => 'PONG',
                     params  => [$nick, $target],
@@ -1355,11 +1354,11 @@ sub _daemon_cmd_oper {
             params  => [$nick, '+o'],
         };
 
-        $self->{ircd}->send_output(
+        $self->send_output(
             $reply,
             $self->_state_connected_peers(),
         );
-        $self->{ircd}->send_event(
+        $self->send_event(
             "daemon_umode",
             $self->state_user_full($nick),
             '+o',
@@ -1367,7 +1366,7 @@ sub _daemon_cmd_oper {
 
         my $route_id = $self->_state_user_route($nick);
         $self->{state}{localops}{$route_id} = time;
-        $self->{ircd}->antiflood($route_id, 0);
+        $self->antiflood($route_id, 0);
         push @$ref, $reply;
     }
 
@@ -1386,8 +1385,8 @@ sub _daemon_cmd_die {
             push @$ref, ['481'];
             last SWITCH;
         }
-        $self->{ircd}->send_event("daemon_die", $nick);
-        $self->{ircd}->shutdown();
+        $self->send_event("daemon_die", $nick);
+        $self->shutdown();
     }
     return @$ref if wantarray;
     return $ref;
@@ -1404,7 +1403,7 @@ sub _daemon_cmd_rehash {
             push @$ref, ['481'];
             last SWITCH;
         }
-        $self->{ircd}->send_event("daemon_rehash", $nick);
+        $self->send_event("daemon_rehash", $nick);
         push @$ref, {
             prefix  => $server,
             command => '383',
@@ -1433,7 +1432,7 @@ sub _daemon_cmd_locops {
             last SWITCH;
         }
         my $full = $self->state_user_full($nick);
-        $self->{ircd}->send_output(
+        $self->send_output(
             {
                 prefix  => $full,
                 command => 'WALLOPS',
@@ -1441,7 +1440,7 @@ sub _daemon_cmd_locops {
             },
             keys %{ $self->{state}{locops} },
         );
-        $self->{ircd}->send_event("daemon_locops", $full, $args->[0]);
+        $self->send_event("daemon_locops", $full, $args->[0]);
     }
 
     return @$ref if wantarray;
@@ -1467,7 +1466,7 @@ sub _daemon_cmd_wallops {
         }
         my $full = $self->state_user_full($nick);
 
-        $self->{ircd}->send_output(
+        $self->send_output(
             {
                 prefix  => $nick,
                 command => 'WALLOPS',
@@ -1476,7 +1475,7 @@ sub _daemon_cmd_wallops {
             $self->_state_connected_peers(),
         );
 
-        $self->{ircd}->send_output(
+        $self->send_output(
             {
                 prefix  => $full,
                 command => 'WALLOPS',
@@ -1485,7 +1484,7 @@ sub _daemon_cmd_wallops {
             keys %{ $self->{state}{operwall} },
         );
 
-        $self->{ircd}->send_event("daemon_operwall", $full, $args->[0]);
+        $self->send_event("daemon_operwall", $full, $args->[0]);
     }
 
     return @$ref if wantarray;
@@ -1511,7 +1510,7 @@ sub _daemon_cmd_operwall {
         }
         my $full = $self->state_user_full($nick);
 
-        $self->{ircd}->send_output(
+        $self->send_output(
             {
                 prefix  => $nick,
                 command => 'WALLOPS',
@@ -1520,7 +1519,7 @@ sub _daemon_cmd_operwall {
             $self->_state_connected_peers(),
         );
 
-        $self->{ircd}->send_output(
+        $self->send_output(
             {
                 prefix  => $full,
                 command => 'WALLOPS',
@@ -1529,7 +1528,7 @@ sub _daemon_cmd_operwall {
             keys %{ $self->{state}{operwall} },
         );
 
-        $self->{ircd}->send_event("daemon_operwall", $full, $args->[0]);
+        $self->send_event("daemon_operwall", $full, $args->[0]);
     }
 
     return @$ref if wantarray;
@@ -1559,7 +1558,7 @@ sub _daemon_cmd_connect {
         }
         if ($count >= 3 && uc $server ne uc $args->[2]) {
             $args->[2] = $self->_state_peer_name($args->[2]);
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $nick,
                     command => 'CONNECT',
@@ -1595,7 +1594,7 @@ sub _daemon_cmd_connect {
         my $name = $connector->{name};
         my $rport = $args->[1] || $connector->{rport};
         my $raddr = $connector->{raddress};
-        $self->{ircd}->add_connector(
+        $self->add_connector(
             remoteaddress => $raddr,
             remoteport    => $rport,
             name          => $name,
@@ -1636,7 +1635,7 @@ sub _daemon_cmd_squit {
 
         if (grep { $_ eq $peer }
                 keys %{ $self->{state}{peers}{uc $server}{peers} }) {
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $nick,
                     command => 'SQUIT',
@@ -1648,8 +1647,8 @@ sub _daemon_cmd_squit {
         }
 
         my $conn_id = $self->_state_peer_route($peer);
-        $self->{ircd}->disconnect($conn_id, $reason);
-        $self->{ircd}->send_output(
+        $self->disconnect($conn_id, $reason);
+        $self->send_output(
             {
                 command => 'ERROR',
                 params  => [
@@ -1722,7 +1721,7 @@ sub _daemon_cmd_rkline {
                 }
             }
 
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $nick,
                     command => 'RKLINE',
@@ -1741,7 +1740,7 @@ sub _daemon_cmd_rkline {
                 if (!$reason) {
                 $reason = pop @$args || 'No Reason';
             }
-            $self->{ircd}->send_event(
+            $self->send_event(
                 "daemon_rkline",
                 $full,
                 $target,
@@ -1838,7 +1837,7 @@ sub _daemon_cmd_kline {
                 }
             }
 
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $nick,
                     command => 'KLINE',
@@ -1863,7 +1862,7 @@ sub _daemon_cmd_kline {
             if (!$reason) {
                 $reason = pop @$args || 'No Reason';
             }
-            $self->{ircd}->send_event(
+            $self->send_event(
                 "daemon_kline",
                 $full,
                 $target,
@@ -1946,7 +1945,7 @@ sub _daemon_cmd_unkline {
                 }
             }
 
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix   => $nick,
                     command  => 'UNKLINE',
@@ -1961,7 +1960,7 @@ sub _daemon_cmd_unkline {
         }
         if ($us) {
             my $target = $args->[3] || $server;
-            $self->{ircd}->send_event(
+            $self->send_event(
                 "daemon_unkline", $full, $target, $user, $host,
             );
             my $i = 0;
@@ -2021,7 +2020,7 @@ sub _daemon_cmd_gline {
             reason => $reason,
         };
 
-        $self->{ircd}->send_output(
+        $self->send_output(
             {
                 prefix   => $nick,
                 command  => 'GLINE',
@@ -2032,7 +2031,7 @@ sub _daemon_cmd_gline {
                 $self->_state_connected_peers()
         );
 
-        $self->{ircd}->send_event(
+        $self->send_event(
             "daemon_gline",
             $full,
             $user_part,
@@ -2078,7 +2077,7 @@ sub _daemon_cmd_kill {
         my $comment = $args->[1] || '<No reason given>';
         if ($self->_state_is_local_user($target)) {
             my $route_id = $self->_state_user_route($target);
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $nick,
                     command => 'KILL',
@@ -2090,7 +2089,7 @@ sub _daemon_cmd_kill {
                 $self->_state_connected_peers(),
             );
 
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $self->state_user_full($nick),
                     command => 'KILL',
@@ -2108,7 +2107,7 @@ sub _daemon_cmd_kill {
         }
         else {
             $self->{state}{users}{uc_irc($target)}{killed} = 1;
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $nick,
                     command => 'KILL',
@@ -2119,7 +2118,7 @@ sub _daemon_cmd_kill {
                 },
                 $self->_state_connected_peers(),
             );
-            $self->{ircd}->send_output(
+            $self->send_output(
                 @{ $self->_daemon_peer_quit(
                     $target,
                     "Killed ($nick ($comment))"
@@ -2192,7 +2191,7 @@ sub _daemon_cmd_nick {
             }
         }
         my @peers = $self->_state_connected_peers();
-        $self->{ircd}->send_output(
+        $self->send_output(
             {
                 prefix  => $nick,
                 command => 'NICK',
@@ -2201,7 +2200,7 @@ sub _daemon_cmd_nick {
             @peers,
         );
 
-        $self->{ircd}->send_output(
+        $self->send_output(
             {
                 prefix  => $full,
                 command => 'NICK',
@@ -2209,7 +2208,7 @@ sub _daemon_cmd_nick {
             },
             map{ $common->{$_} } keys %$common,
         );
-        $self->{ircd}->send_event("daemon_nick", $full, $new);
+        $self->send_event("daemon_nick", $full, $new);
     }
 
     return @$ref if wantarray;
@@ -2227,7 +2226,7 @@ sub _daemon_cmd_away {
         my $record = $self->{state}{users}{uc_irc($nick)};
         if (!$msg) {
             delete $record->{away};
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix => $nick,
                     command => 'AWAY',
@@ -2244,7 +2243,7 @@ sub _daemon_cmd_away {
         }
 
         $record->{away} = $msg;
-        $self->{ircd}->send_output(
+        $self->send_output(
             {
                 prefix   => $nick,
                 command  => 'AWAY',
@@ -2320,7 +2319,7 @@ sub _daemon_cmd_info {
             last SWITCH;
         }
         if ($target && uc $server ne uc $target) {
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $nick,
                     command => 'INFO',
@@ -2363,7 +2362,7 @@ sub _daemon_cmd_version {
             last SWITCH;
         }
         if ($target && uc $server ne uc $target) {
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $nick,
                     command => 'VERSION',
@@ -2405,7 +2404,7 @@ sub _daemon_cmd_admin {
             last SWITCH;
         }
         if ($target && uc $server ne uc $target) {
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $nick,
                     command => 'ADMIN',
@@ -2468,7 +2467,7 @@ sub _daemon_cmd_time {
             last SWITCH;
         }
         if ($target && uc $server ne uc $target) {
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $nick,
                     command => 'TIME',
@@ -2604,7 +2603,7 @@ sub _daemon_cmd_motd {
             last SWITCH;
         }
         if ($target && uc $server ne uc $target) {
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $nick,
                     command => 'MOTD',
@@ -2671,7 +2670,7 @@ sub _daemon_cmd_stats {
             last SWITCH;
         }
         if ($target && uc $server ne uc $target) {
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $nick,
                     command => 'STATS',
@@ -2855,7 +2854,7 @@ sub _daemon_cmd_list {
             last SWITCH;
         }
         if ($count && $last !~ /^[#&]/ && uc $last ne uc $server) {
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $self->state_user_full($nick),
                     command => 'LIST',
@@ -2948,7 +2947,7 @@ sub _daemon_cmd_names {
             last SWITCH;
         }
         if ($count && $last !~ /^[#&]/ & uc $last ne uc $server) {
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $nick,
                     command => 'NAMES',
@@ -3056,7 +3055,7 @@ sub _daemon_cmd_whois {
             last SWITCH;
         }
         if ($target) {
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $nick,
                     command => 'WHOIS',
@@ -3645,7 +3644,7 @@ sub _daemon_cmd_join {
                 $self->{state}{chans}{$uchannel} = $record;
                 $self->{state}{users}{$unick}{chans}{$uchannel} = 'o';
                 my @peers = $self->_state_connected_peers();
-                $self->{ircd}->send_output(
+                $self->send_output(
                     {
                         command => 'SJOIN',
                         params  => [
@@ -3662,13 +3661,13 @@ sub _daemon_cmd_join {
                     command => 'JOIN',
                     params  => [$channel],
                 };
-                $self->{ircd}->send_output($output, $route_id);
-                $self->{ircd}->send_event(
+                $self->send_output($output, $route_id);
+                $self->send_event(
                     "daemon_join",
                     $output->{prefix},
                     $channel,
                 );
-                $self->{ircd}->send_output(
+                $self->send_output(
                     {
                         prefix  => $server,
                         command => 'MODE',
@@ -3727,7 +3726,7 @@ sub _daemon_cmd_join {
             $self->{state}{users}{$unick}{chans}{$uchannel} = '';
             $self->{state}{chans}{$uchannel}{users}{$unick} = '';
             # Send JOIN message to peers and local users.
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $server,
                     command => 'SJOIN',
@@ -3967,7 +3966,7 @@ sub _daemon_cmd_invite {
             colonify => 0,
         };
         if ($route_id eq 'spoofed') {
-            $self->{ircd}->send_event(
+            $self->send_event(
                 "daemon_invite",
                 $output->{prefix},
                 @{ $output->{params} }
@@ -3978,7 +3977,7 @@ sub _daemon_cmd_invite {
                 $output->{prefix} = $nick;
                 push @{ $output->{params} }, time;
             }
-            $self->{ircd}->send_output($output, $route_id);
+            $self->send_output($output, $route_id);
         }
         push @$ref, {
             prefix  => $server,
@@ -4046,7 +4045,7 @@ sub _daemon_cmd_umode {
                 if ($char eq 'o') {
                     $self->{state}->{stats}{ops_online}--;
                     delete $self->{state}{localops}{$route_id};
-                    $self->{ircd}->antiflood( $route_id, 1);
+                    $self->antiflood( $route_id, 1);
                 }
                 if ($char eq 'w') {
                     delete $self->{state}{wallops}{$route_id};
@@ -4073,7 +4072,7 @@ sub _daemon_cmd_umode {
                 command => 'MODE',
                 params  => [$nick, $pset],
             };
-            $self->{ircd}->send_output(
+            $self->send_output(
                 $hashref,
                 $self->_state_connected_peers(),
             );
@@ -4084,7 +4083,7 @@ sub _daemon_cmd_umode {
                 command => 'MODE',
                 params  => [$nick, $set],
             };
-            $self->{ircd}->send_event(
+            $self->send_event(
                 "daemon_umode",
                 $self->state_user_full($nick),
                 $set
@@ -4193,7 +4192,7 @@ sub _daemon_cmd_links {
             last SWITCH;
         }
         if ($target && uc $server ne uc $target) {
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $nick,
                     command => 'LINKS',
@@ -4238,7 +4237,7 @@ sub _daemon_peer_squit {
 
     SWITCH: {
         if ($peer_id ne $self->_state_peer_route($args->[0])) {
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     command => 'SQUIT',
                     params  => $args,
@@ -4248,14 +4247,14 @@ sub _daemon_peer_squit {
             last SWITCH;
         }
         if ($peer_id eq $self->_state_peer_route($args->[0])) {
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     command => 'SQUIT',
                     params  => $args,
                 },
                 grep { $_ ne $peer_id } $self->_state_connected_peers(),
             );
-            $self->{ircd}->send_event("daemon_squit", @$args);
+            $self->send_event("daemon_squit", @$args);
             my $quit_msg = join ' ',
                 $self->_state_peer_for_peer($args->[0]), $args->[0];
 
@@ -4277,8 +4276,8 @@ sub _daemon_peer_squit {
                         delete $self->{state}{chans}{$uchan};
                     }
                 }
-                $self->{ircd}->send_output($output, values %$common);
-                $self->{ircd}->send_event(
+                $self->send_output($output, values %$common);
+                $self->send_event(
                     "daemon_quit",
                     $output->{prefix},
                     $output->{params}->[0],
@@ -4330,7 +4329,7 @@ sub _daemon_peer_rkline {
         }
 
         delete $targets{$peer_id};
-        $self->{ircd}->send_output(
+        $self->send_output(
             {
                 prefix   => $nick,
                 command  => 'RKLINE',
@@ -4341,7 +4340,7 @@ sub _daemon_peer_rkline {
         );
 
         if ($us) {
-            $self->{ircd}->send_event("daemon_rkline", $full, @$args);
+            $self->send_event("daemon_rkline", $full, @$args);
             push @{ $self->{state}->{rklines} }, {
                 setby    => $full,
                 setat    => time,
@@ -4390,7 +4389,7 @@ sub _daemon_peer_kline {
             }
         }
         delete $targets{$peer_id};
-        $self->{ircd}->send_output(
+        $self->send_output(
             {
                 prefix   => $nick,
                 command  => 'KLINE',
@@ -4400,7 +4399,7 @@ sub _daemon_peer_kline {
             grep { $self->_state_peer_capab($_, 'KLN') } keys %targets,
         );
         if ($us) {
-            $self->{ircd}->send_event("daemon_kline", $full, @$args);
+            $self->send_event("daemon_kline", $full, @$args);
             push @{ $self->{state}->{klines} }, {
                 setby    => $full,
                 setat    => time(),
@@ -4450,7 +4449,7 @@ sub _daemon_peer_unkline {
             }
         }
         delete $targets{$peer_id};
-        $self->{ircd}->send_output(
+        $self->send_output(
             {
                 prefix   => $nick,
                 command  => 'UNKLINE',
@@ -4461,7 +4460,7 @@ sub _daemon_peer_unkline {
         );
 
         if ($us) {
-            $self->{ircd}->send_event("daemon_unkline", $full, @$args);
+            $self->send_event("daemon_unkline", $full, @$args);
             my $i = 0;
             for (@{ $self->{state}{klines} }) {
                 if ($_->{user} eq $args->[1] && $_->{host} eq $args->[2]) {
@@ -4499,7 +4498,7 @@ sub _daemon_peer_gline {
             host   => $args->[1],
             reason => $args->[2],
         };
-        $self->{ircd}->send_output(
+        $self->send_output(
             {
                 prefix  => $nick,
                 command => 'GLINE',
@@ -4509,7 +4508,7 @@ sub _daemon_peer_gline {
             grep { $_ ne $peer_id && $self->_state_peer_capab($_, 'GLN') }
                 $self->_state_connected_peers(),
         );
-        $self->{ircd}->send_event("daemon_gline", $full, @$args);
+        $self->send_event("daemon_gline", $full, @$args);
         $self->_terminate_conn_error($_, 'G-Lined')
             for $self->_state_local_users_match_gline($args->[0], $args->[1]);
     }
@@ -4528,7 +4527,7 @@ sub _daemon_peer_wallops {
 
     SWITCH: {
         my $full = $self->state_user_full($prefix) || $prefix;
-        $self->{ircd}->send_output(
+        $self->send_output(
             {
                 prefix  => $prefix,
                 command => 'WALLOPS',
@@ -4537,17 +4536,17 @@ sub _daemon_peer_wallops {
             grep { $_ ne $peer_id } $self->_state_connected_peers(),
         );
         if ($self->state_peer_exists($full)) {
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $full,
                     command => 'WALLOPS',
                     params  => ['OPERWALL - ' . $args->[0]],
                 }, keys %{ $self->{state}{wallops} },
             );
-            $self->{ircd}->send_event("daemon_wallops", $full, $args->[0]);
+            $self->send_event("daemon_wallops", $full, $args->[0]);
         }
         else {
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $full,
                     command => 'WALLOPS',
@@ -4555,7 +4554,7 @@ sub _daemon_peer_wallops {
                 },
                 keys %{ $self->{state}{operwall} },
             );
-            $self->{ircd}->send_event("daemon_operwall", $full, $args->[0]);
+            $self->send_event("daemon_operwall", $full, $args->[0]);
         }
     }
 
@@ -4573,7 +4572,7 @@ sub _daemon_peer_operwall {
 
     SWITCH: {
         my $full = $self->state_user_full($prefix) || $prefix;
-        $self->{ircd}->send_output(
+        $self->send_output(
             {
                 prefix  => $prefix,
                 command => 'WALLOPS',
@@ -4582,7 +4581,7 @@ sub _daemon_peer_operwall {
             grep { $_ ne $peer_id } $self->_state_connected_peers(),
         );
         if ($self->state_peer_exists($full)) {
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $full,
                     command => 'WALLOPS',
@@ -4590,10 +4589,10 @@ sub _daemon_peer_operwall {
                 },
                 keys %{ $self->{state}{wallops} },
             );
-            $self->{ircd}->send_event("daemon_wallops", $full, $args->[0]);
+            $self->send_event("daemon_wallops", $full, $args->[0]);
         }
         else {
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $full,
                     command => 'WALLOPS',
@@ -4601,7 +4600,7 @@ sub _daemon_peer_operwall {
                 },
                 keys %{ $self->{state}{operwall} },
             );
-            $self->{ircd}->send_event("daemon_operwall", $full, $args->[0]);
+            $self->send_event("daemon_operwall", $full, $args->[0]);
         }
     }
 
@@ -4614,7 +4613,7 @@ sub _daemon_peer_eob {
     my $peer_id = shift || return;
     my $peer    = shift || return;
     my $ref     = [ ];
-    $self->{ircd}->send_event("daemon_eob", $peer);
+    $self->send_event("daemon_eob", $peer);
     return @$ref if wantarray;
     return $ref;
 }
@@ -4723,14 +4722,14 @@ sub _daemon_peer_ping {
             last SWITCH;
         }
         if ($count >= 2 && uc $server ne uc $args->[1]) {
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     command => 'PING',
                     params  => $args,
                 },
                 $self->_state_peer_route($args->[1]),
             ) if $self->state_peer_exists($args->[1]);
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     command => 'PING',
                     params  => $args,
@@ -4739,7 +4738,7 @@ sub _daemon_peer_ping {
             ) if $self->state_nick_exists($args->[1]);
             last SWITCH;
         }
-        $self->{ircd}->send_output(
+        $self->send_output(
             {
                 command => 'PONG',
                 params  => [$server, $args->[0]],
@@ -4764,14 +4763,14 @@ sub _daemon_peer_pong {
             last SWITCH;
         }
         if ($count >= 2 && uc $self->server_name() ne uc $args->[1]) {
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     command => 'PONG',
                     params => $args,
                 },
                 $self->_state_peer_route($args->[1]),
             ) if $self->state_peer_exists($args->[1]);
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     command => 'PONG',
                     params => $args,
@@ -4818,7 +4817,7 @@ sub _daemon_peer_server {
         my $uname = uc $record->{name};
         $self->{state}{peers}{$uname} = $record;
         $self->{state}{peers}{uc $prefix}{peers}{$uname} = $record;
-        $self->{ircd}->send_output(
+        $self->send_output(
             {
                 prefix  => $prefix,
                 command => 'SERVER',
@@ -4830,7 +4829,7 @@ sub _daemon_peer_server {
             },
             grep { $_ ne $peer_id } $self->_state_connected_peers(),
         );
-        $self->{ircd}->send_event(
+        $self->send_event(
             "daemon_server",
             $record->{name},
             $prefix,
@@ -4853,7 +4852,7 @@ sub _daemon_peer_quit {
     $nick = uc_irc($nick);
     my $record = delete $self->{state}{users}{$nick};
     return $ref if !$record;
-    $self->{ircd}->send_output(
+    $self->send_output(
         {
             prefix  => $record->{nick},
             command => 'QUIT',
@@ -4917,7 +4916,7 @@ sub _daemon_peer_nick {
             last SWITCH;
         }
         if ($prefix && $self->state_nick_exists($args->[0])) {
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $server,
                     command => 'KILL',
@@ -4931,7 +4930,7 @@ sub _daemon_peer_nick {
             last SWITCH;
         }
         if ($prefix && length($args->[0]) > $nicklen) {
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $server,
                     command => 'KILL',
@@ -4981,7 +4980,7 @@ sub _daemon_peer_nick {
                     $common->{$user} = $self->_state_user_route($user);
                 }
             }
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $prefix,
                     command => 'NICK',
@@ -4989,7 +4988,7 @@ sub _daemon_peer_nick {
                 },
                 grep { $_ ne $peer_id } $self->_state_connected_peers(),
             );
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $full,
                     command => 'NICK',
@@ -4997,7 +4996,7 @@ sub _daemon_peer_nick {
                 },
                 map{ $common->{$_} } keys %{ $common },
             );
-            $self->{ircd}->send_event("daemon_nick", $full, $new);
+            $self->send_event("daemon_nick", $full, $new);
             last SWITCH;
         }
         if ($self->state_nick_exists($args->[0])
@@ -5038,7 +5037,7 @@ sub _daemon_peer_nick {
             last SWITCH;
         }
         if (length( $args->[0] ) > $nicklen) {
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $server,
                     command => 'KILL',
@@ -5070,14 +5069,14 @@ sub _daemon_peer_nick {
         $self->{state}{peers}{uc $record->{server}}{users}{$unick}
             = $record;
         $self->_state_update_stats();
-         $self->{ircd}->send_output(
+         $self->send_output(
              {
                  command => 'NICK',
                  params  => $args,
              },
              grep { $_ ne $peer_id } $self->_state_connected_peers(),
          );
-        $self->{ircd}->send_event("daemon_nick", @$args);
+        $self->send_event("daemon_nick", @$args);
     }
 
     return @$ref if wantarray;
@@ -5215,12 +5214,12 @@ sub _daemon_peer_sjoin {
                 $chanrec->{users}{$unick} = $umode;
                 $self->{state}{users}{$unick}{chans}{$uchan} = $umode;
 
-                $self->{ircd}->send_event(
+                $self->send_event(
                     "daemon_join",
                     $self->state_user_full($nick),
                     $chan,
                 );
-                $self->{ircd}->send_event(
+                $self->send_event(
                     "daemon_mode",
                     $server,
                     $chan,
@@ -5229,7 +5228,7 @@ sub _daemon_peer_sjoin {
                 ) if $umode;
             }
             $self->{state}{chans}{$uchan} = $chanrec;
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix  => $prefix,
                     command => 'SJOIN',
@@ -5267,7 +5266,7 @@ sub _daemon_peer_sjoin {
 
                 if (keys %$common && @deop) {
                     my $server = $self->server_name();
-                    $self->{ircd}->send_event(
+                    $self->send_event(
                         "daemon_mode",
                         $server,
                         $chanrec->{name},
@@ -5316,7 +5315,7 @@ sub _daemon_peer_sjoin {
                             split /\s+/, $buffer[1],
                         ],
                     };
-                    $self->{ircd}->send_output($_, values %$common)
+                    $self->send_output($_, values %$common)
                         for @output_modes;
                 }
                 my $origmode = $chanrec->{mode};
@@ -5369,7 +5368,7 @@ sub _daemon_peer_sjoin {
                     if ($origmode and $origmode =~ /l/) {
                         delete $chanrec->{climit};
                     }
-                    $self->{ircd}->send_output(
+                    $self->send_output(
                         {
                             prefix   => $self->server_name(),
                             command  => 'MODE',
@@ -5384,7 +5383,7 @@ sub _daemon_peer_sjoin {
                         ) if $reply;
                     }
                     # NOTICE HERE
-                    $self->{ircd}->send_output(
+                    $self->send_output(
                     {
                         prefix  => $self->server_name(),
                         command => 'NOTICE',
@@ -5404,7 +5403,7 @@ sub _daemon_peer_sjoin {
             }
             else {
                 # NOTICE HERE
-                $self->{ircd}->send_output(
+                $self->send_output(
                     {
                         prefix  => $self->server_name(),
                         command => 'NOTICE',
@@ -5438,7 +5437,7 @@ sub _daemon_peer_sjoin {
         }
         # Propagate SJOIN to connected peers except the one that told us.
         push @$args, $nicks;
-        $self->{ircd}->send_output(
+        $self->send_output(
             {
                 prefix  => $prefix,
                 command => 'SJOIN',
@@ -5471,8 +5470,8 @@ sub _daemon_peer_sjoin {
                 command => 'JOIN',
                 params  => [$chanrec->{name}],
             };
-            $self->{ircd}->send_output($output, @local_users);
-            $self->{ircd}->send_event(
+            $self->send_output($output, @local_users);
+            $self->send_event(
                 "daemon_join",
                 $output->{prefix},
                 $chanrec->{name},
@@ -5484,7 +5483,7 @@ sub _daemon_peer_sjoin {
         }
         if ($modes) {
             my $server = $self->server_name();
-            $self->{ircd}->send_event(
+            $self->send_event(
                 "daemon_mode",
                 $server,
                 $chanrec->{name},
@@ -5531,7 +5530,7 @@ sub _daemon_peer_sjoin {
                     $buffer[1],
                 ],
             };
-            $self->{ircd}->send_output($_, @local_users)
+            $self->send_output($_, @local_users)
                 for @output_modes;
         }
     }
@@ -5700,7 +5699,7 @@ sub _daemon_peer_mode {
             unshift @$args, $record->{name};
             if ($reply) {
             my $parsed_line = unparse_mode_line($reply);
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix   => $nick,
                     command  => 'MODE',
@@ -5713,7 +5712,7 @@ sub _daemon_peer_mode {
                 },
                 grep { $_ ne $peer_id } $self->_state_connected_peers(),
             );
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix   => ($full || $server),
                     command  => 'MODE',
@@ -5728,7 +5727,7 @@ sub _daemon_peer_mode {
                     grep { $self->_state_is_local_user($_) }
                     keys %{ $record->{users} },
             );
-            $self->{ircd}->send_event(
+            $self->send_event(
                 "daemon_mode",
                 ($full || $server),
                 $record->{name},
@@ -5770,7 +5769,7 @@ sub _daemon_peer_umode {
             }
         }
     }
-    $self->{ircd}->send_output(
+    $self->send_output(
         {
             prefix  => $prefix,
             command => 'MODE',
@@ -5778,7 +5777,7 @@ sub _daemon_peer_umode {
         },
         grep { $_ ne $peer_id } $self->_state_connected_peers(),
     );
-    $self->{ircd}->send_event(
+    $self->send_event(
         "daemon_umode",
         $self->state_user_full($nick),
         $umode,
@@ -5869,7 +5868,7 @@ sub _daemon_peer_message {
                     }
                 }
                 delete $targets{$peer_id};
-                $self->{ircd}->send_output(
+                $self->send_output(
                     {
                         prefix  => $nick,
                         command => $type,
@@ -5889,7 +5888,7 @@ sub _daemon_peer_message {
                             push @local, $luser->{route_id};
                         }
                     }
-                    $self->{ircd}->send_output(
+                    $self->send_output(
                         {
                             prefix  => $full,
                             command => $type,
@@ -5897,7 +5896,7 @@ sub _daemon_peer_message {
                         },
                         @local,
                     );
-                    $self->{ircd}->send_event(
+                    $self->send_event(
                         "daemon_" . lc $type,
                         $full,
                         $target,
@@ -5925,7 +5924,7 @@ sub _daemon_peer_message {
                     }
                 }
                 delete $targets{$peer_id};
-                $self->{ircd}->send_output(
+                $self->send_output(
                     {
                         prefix  => $nick,
                         command => $type,
@@ -5933,7 +5932,7 @@ sub _daemon_peer_message {
                     },
                     keys %targets,
                 );
-                $self->{ircd}->send_output(
+                $self->send_output(
                     {
                         prefix  => $full,
                         command => $type,
@@ -5941,7 +5940,7 @@ sub _daemon_peer_message {
                     },
                     @local,
                 );
-                $self->{ircd}->send_event(
+                $self->send_event(
                     "daemon_" . lc $type,
                     $full,
                     $target,
@@ -5958,7 +5957,7 @@ sub _daemon_peer_message {
                     next LOOP;
                 }
                 if ($targs->{$target}[1] ne $self->server_name()) {
-                    $self->{ircd}->send_output(
+                    $self->send_output(
                         {
                             prefix  => $nick,
                             command => $type,
@@ -5973,7 +5972,7 @@ sub _daemon_peer_message {
                         push @$ref, ['481'];
                         next LOOP;
                     }
-                    $self->{ircd}->send_output(
+                    $self->send_output(
                         {
                             prefix  => $full,
                             command => $type,
@@ -5992,7 +5991,7 @@ sub _daemon_peer_message {
                 if (@local == 1) {
                     my $ref = shift @local;
                     if ($ref->[0] eq 'spoofed') {
-                        $self->{ircd}->send_event(
+                        $self->send_event(
                             "daemon_" . lc $type,
                             $full,
                             $ref->[1],
@@ -6000,7 +5999,7 @@ sub _daemon_peer_message {
                         );
                     }
                     else {
-                        $self->{ircd}->send_output(
+                        $self->send_output(
                             {
                                 prefix  => $full,
                                 command => $type,
@@ -6064,13 +6063,13 @@ sub _daemon_peer_message {
                             $msg->{prefix} = $full;
                         }
                         if ($route_id ne 'spoofed') {
-                            $self->{ircd}->send_output($msg, $route_id);
+                            $self->send_output($msg, $route_id);
                         }
                         else {
                             my $tmsg = $type eq 'PRIVMSG'
                                 ? 'public'
                                 : 'notice';
-                            $self->{ircd}->send_event(
+                            $self->send_event(
                                 "daemon_$tmsg",
                                 $full,
                                 $channel,
@@ -6112,7 +6111,7 @@ sub _daemon_peer_message {
                             || (time - $targ_rec->{last_caller} ) >= 60) {
                             my ($n, $uh) = split /!/,
                                 $self->state_user_full($nick);
-                                $self->{ircd}->send_output(
+                                $self->send_output(
                                     {
                                         prefix  => $server,
                                         command => '718',
@@ -6146,7 +6145,7 @@ sub _daemon_peer_message {
                 my $route_id = $self->_state_user_route($target);
                 if ($route_id eq 'spoofed') {
                     $msg->{prefix} = $full;
-                    $self->{ircd}->send_event(
+                    $self->send_event(
                         "daemon_" . lc $type,
                         $full,
                         $target,
@@ -6157,7 +6156,7 @@ sub _daemon_peer_message {
                     if ($self->_connection_is_client($route_id)) {
                         $msg->{prefix} = $full;
                     }
-                    $self->{ircd}->send_output($msg, $route_id);
+                    $self->send_output($msg, $route_id);
                 }
                 next LOOP;
             }
@@ -6233,7 +6232,7 @@ sub _daemon_peer_invite {
             colonify => 0,
         };
         if ($route_id eq 'spoofed') {
-            $self->{ircd}->send_event(
+            $self->send_event(
                 "daemon_invite",
                 $output->{prefix},
                 @{ $output->{params} },
@@ -6244,7 +6243,7 @@ sub _daemon_peer_invite {
                 $output->{prefix} = $nick;
                 push @{ $output->{params} }, $args->[2];
             }
-            $self->{ircd}->send_output($output, $route_id);
+            $self->send_output($output, $route_id);
         }
     }
 
@@ -6264,7 +6263,7 @@ sub _daemon_peer_away {
         my $record = $self->{state}{users}{uc_irc($nick)};
         if (!$msg) {
             delete $record->{away};
-            $self->{ircd}->send_output(
+            $self->send_output(
                 {
                     prefix   => $nick,
                     command  => 'AWAY',
@@ -6275,7 +6274,7 @@ sub _daemon_peer_away {
             last SWITCH;
         }
         $record->{away} = $msg;
-        $self->{ircd}->send_output(
+        $self->send_output(
             {
                 prefix   => $nick,
                 command  => 'AWAY',
@@ -6580,7 +6579,7 @@ sub _state_send_credentials {
     return if !$self->{config}{peers}{uc $name};
 
     my $peer = $self->{config}{peers}{uc $name};
-    $self->{ircd}->send_output(
+    $self->send_output(
         {
             command => 'PASS',
             params  => [$peer->{rpass}, 'TS'],
@@ -6588,7 +6587,7 @@ sub _state_send_credentials {
         $conn_id,
     );
 
-    $self->{ircd}->send_output(
+    $self->send_output(
         {
             command => 'CAPAB',
             params  => [
@@ -6601,7 +6600,7 @@ sub _state_send_credentials {
     );
 
     my $rec = $self->{state}{peers}{uc $self->server_name()};
-    $self->{ircd}->send_output(
+    $self->send_output(
         {
             command => 'SERVER',
             params  => [$rec->{name}, $rec->{hops} + 1, $rec->{desc}],
@@ -6609,7 +6608,7 @@ sub _state_send_credentials {
         $conn_id,
     );
 
-    $self->{ircd}->send_output(
+    $self->send_output(
         {
             command => 'SVINFO',
             params  => [5, 5, 0, time],
@@ -6637,7 +6636,7 @@ sub _state_send_burst {
 
     # Send SERVER burst
     for ($self->_state_server_burst($server, $conn->{name})) {
-        $self->{ircd}->send_output($_, $conn_id );
+        $self->send_output($_, $conn_id );
     }
 
     # Send NICK burst
@@ -6656,7 +6655,7 @@ sub _state_send_burst {
             $record->{auth}{hostname},
             $record->{server}, $record->{ircname},
         ];
-        $self->{ircd}->send_output(
+        $self->send_output(
             {
                 command => 'NICK',
                 params  => $arrayref,
@@ -6683,7 +6682,7 @@ sub _state_send_burst {
             join ' ', @nicks,
         ];
 
-        $self->{ircd}->send_output(
+        $self->send_output(
             {
                 prefix  => $server,
                 command => 'SJOIN',
@@ -6738,10 +6737,10 @@ sub _state_send_burst {
                 ],
             } if $buffer[0];
         }
-        $self->{ircd}->send_output($_, $conn_id) for @output_modes;
+        $self->send_output($_, $conn_id) for @output_modes;
     }
 
-    $self->{ircd}->send_output(
+    $self->send_output(
         {
             prefix  => $server,
             command => 'EOB',
@@ -6857,8 +6856,8 @@ sub _state_register_peer {
     $record->{peers} = { };
     $self->{state}{peers}{uc $server}{peers}{uc $record->{name}} = $record;
     $self->{state}->{peers}->{ uc $record->{name} } = $record;
-    $self->{ircd}->antiflood($conn_id, 0);
-    $self->{ircd}->send_output(
+    $self->antiflood($conn_id, 0);
+    $self->send_output(
         {
             prefix  => $server,
             command => 'SERVER',
@@ -6871,7 +6870,7 @@ sub _state_register_peer {
         grep { $_ ne $conn_id } $self->_state_connected_peers(),
     );
 
-    $self->{ircd}->send_event(
+    $self->send_event(
         "daemon_server",
         $record->{name},
         $server,
@@ -6921,14 +6920,14 @@ sub _state_register_client {
         $record->{ircname},
     ];
     delete $self->{state}{pending}{uc_irc($record->{nick})};
-    $self->{ircd}->send_output(
+    $self->send_output(
         {
             command => 'NICK',
             params  => $arrayref,
         },
         $self->_state_connected_peers(),
     );
-    $self->{ircd}->send_event("daemon_nick", @$arrayref);
+    $self->send_event("daemon_nick", @$arrayref);
     $self->_state_update_stats();
     return 1;
 }
@@ -7566,7 +7565,7 @@ sub _send_output_to_client {
 
     SWITCH: {
         if (ref $err eq 'HASH') {
-            $self->{ircd}->send_output($err, $wheel_id);
+            $self->send_output($err, $wheel_id);
             last SWITCH;
         }
         if (defined $self->{Error_Codes}{$err}) {
@@ -7587,7 +7586,7 @@ sub _send_output_to_client {
             else {
             push @{ $input->{params} }, $self->{Error_Codes}{$err}[1];
             }
-            $self->{ircd}->send_output($input, $wheel_id);
+            $self->send_output($input, $wheel_id);
         }
     }
 
@@ -7617,11 +7616,11 @@ sub _send_output_to_channel {
         my $nick = (split /!/, $full)[0];
         my $output2 = { %$output }; 
         $output2->{prefix} = $nick;
-        $self->{ircd}->send_output($output2, keys %$peers);
+        $self->send_output($output2, keys %$peers);
     }
 
-    $self->{ircd}->send_output($output, @$ref);
-    $self->{ircd}->send_event(
+    $self->send_output($output, @$ref);
+    $self->send_event(
         "daemon_" . lc $output->{command},
         $output->{prefix},
         @{ $output->{params} },
@@ -7722,7 +7721,7 @@ sub add_peer {
     $parms->{zip} = 0 if !$parms->{zip};
     my $name = $parms->{name};
     $self->{config}{peers}{uc $name} = $parms;
-    $self->{ircd}->add_connector(
+    $self->add_connector(
         remoteaddress => $parms->{raddress},
         remoteport    => $parms->{rport},
         name          => $name,
@@ -7745,8 +7744,8 @@ sub _terminate_conn_error {
     my $msg     = shift;
     return if !$self->_connection_exists($conn_id);
 
-    $self->{ircd}->disconnect($conn_id, $msg);
-    $self->{ircd}->send_output(
+    $self->disconnect($conn_id, $msg);
+    $self->send_output(
         {
             command => 'ERROR',
             params  => [
@@ -7786,7 +7785,7 @@ sub daemon_server_kill {
 
         if ($self->_state_is_local_user($target)) {
         my $route_id = $self->_state_user_route($target);
-        $self->{ircd}->send_output(
+        $self->send_output(
             {
                 prefix  => $server,
                 command => 'KILL',
@@ -7815,7 +7814,7 @@ sub daemon_server_kill {
     }
     else {
         $self->{state}{users}{uc_irc($target)}{killed} = 1;
-        $self->{ircd}->send_output(
+        $self->send_output(
             {
                 prefix  => $server,
                 command => 'KILL',
@@ -7824,7 +7823,7 @@ sub daemon_server_kill {
             grep { !$conn_id || $_ ne $conn_id }
                 $self->_state_connected_peers(),
         );
-        $self->{ircd}->send_output(
+        $self->send_output(
             @{ $self->_daemon_peer_quit(
                 $target,
                 "Killed ($server ($comment))"
@@ -7963,7 +7962,7 @@ sub daemon_server_mode {
         } # while
 
         unshift @$args, $record->{name};
-        $self->{ircd}->send_output(
+        $self->send_output(
             {
                 prefix   => $server,
                 command  => 'MODE',
@@ -7972,7 +7971,7 @@ sub daemon_server_mode {
             },
             $self->_state_connected_peers(),
         );
-        $self->{ircd}->send_output(
+        $self->send_output(
             {
                 prefix   => ($full || $server),
                 command  => 'MODE',
@@ -7983,7 +7982,7 @@ sub daemon_server_mode {
                 grep { $self->_state_is_local_user($_) }
                     keys %{ $record->{users} },
         );
-        $self->{ircd}->send_event("daemon_mode", $server, @$args);
+        $self->send_event("daemon_mode", $server, @$args);
     } # SWITCH
 
     return @$ref if wantarray;
@@ -8092,7 +8091,7 @@ sub daemon_server_wallops {
     my $count  = @$args;
 
     if ($count) {
-        $self->{ircd}->send_output(
+        $self->send_output(
             {
                 prefix  => $server,
                 command => 'WALLOPS',
@@ -8101,7 +8100,7 @@ sub daemon_server_wallops {
             $self->_state_connected_peers(), 
             keys %{ $self->{state}->{operwall} },
         );
-        $self->{ircd}->send_event("daemon_wallops", $server, $args->[0]);
+        $self->send_event("daemon_wallops", $server, $args->[0]);
     }
 
     return @$ref if wantarray;
@@ -8151,14 +8150,14 @@ sub add_spoofed_nick {
         $record->{ircname},
     ];
 
-    $self->{ircd}->send_output(
+    $self->send_output(
         {
             command => 'NICK',
             params  => $arrayref,
         },
         $self->_state_connected_peers(),
     );
-    $self->{ircd}->send_event("daemon_nick", @$arrayref);
+    $self->send_event("daemon_nick", @$arrayref);
     $self->_state_update_stats();
     return;
 }
@@ -8169,7 +8168,7 @@ sub del_spoofed_nick {
     return if $self->_state_user_route($nick) ne 'spoofed';
 
     my $message = $_[ARG1] || 'Client Quit';
-    $self->{ircd}->send_output(
+    $self->send_output(
         @{ $self->_daemon_cmd_quit($nick, qq{"$message"}) },
         qq{"$message"},
     );
