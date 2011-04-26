@@ -15,7 +15,6 @@ use base qw(POE::Component::Server::IRC::Backend);
 sub spawn {
     my $package = shift;
     my $self = $package->create(prefix => 'ircd_', @_);
-    #$self->{prefix} = 'ircd_';
 
     $self->configure($self->{config} ? delete $self->{config} : ());
     $self->_state_create();
