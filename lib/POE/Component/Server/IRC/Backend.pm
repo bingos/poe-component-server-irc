@@ -8,7 +8,7 @@ use POE qw(Wheel::SocketFactory Wheel::ReadWrite Filter::Stackable
 use POE::Component::Server::IRC::Plugin qw(:ALL);
 use Net::Netmask;
 use Socket;
-use base qw(Object::Pluggable);
+use base qw(POE::Component::Syndicator);
 
 sub create {
     my $package = shift;
@@ -23,27 +23,23 @@ sub create {
     my $sslify_options = delete $self->{sslify_options};
     my $plugin_debug   = delete $self->{plugin_debug};
 
-    $self->_pluggable_init(
+    $self->_syndicator_init(
         prefix     => $self->{prefix},
         reg_prefix => 'PCSI_',
-        types      => { SERVER => 'IRCD' },
+        types      => [ SERVER => 'IRCD', USER => 'U' ],
         ($plugin_debug ? (debug => 1) : () ),
-    );
-
-    $self->{session_id} = POE::Session->create(
         object_states => [
             $self => {
-                _start        => '_start',
-                add_connector => '_add_connector',
-                add_filter    => '_add_filter',
-                add_listener  => '_add_listener',
-                del_filter    => '_del_filter',
-                del_listener  => '_del_listener',
-                send_output   => '_send_output',
-                shutdown      => '_shutdown',
+                syndicator_started => '_start',
+                add_connector      => '_add_connector',
+                add_filter         => '_add_filter',
+                add_listener       => '_add_listener',
+                del_filter         => '_del_filter',
+                del_listener       => '_del_listener',
+                send_output        => '_send_output',
+                shutdown           => '_shutdown',
             },
             $self => [qw(
-                __send_event
                 __send_output
                 _accept_connection
                 _accept_failed
@@ -58,16 +54,12 @@ sub create {
                 _got_ip_response
                 _sock_failed
                 _sock_up
-                _start
                 ident_agent_error
                 ident_agent_reply
-                register
-                unregister)
-            ],
+            )],
         ],
-        heap => $self,
         (ref $options eq 'HASH' ? (options => $options) : ()),
-    )->ID();
+    );
 
     $self->{got_zlib} = 0;
     eval {
@@ -96,34 +88,8 @@ sub create {
     return $self;
 }
 
-sub session_id {
-    my $self = shift;
-    return $self->{session_id};
-}
-
-sub yield {
-    my $self = shift;
-    $poe_kernel->post($self->session_id(), @_);
-    return;
-}
-
-sub call {
-    my $self = shift;
-    $poe_kernel->call($self->session_id(), @_);
-    return;
-}
-
 sub _start {
     my ($kernel, $self, $sender) = @_[KERNEL, OBJECT, SENDER];
-
-    $self->{session_id} = $_[SESSION]->ID();
-
-    if ($self->{alias}) {
-        $kernel->alias_set( $self->{alias} );
-    }
-    else {
-        $kernel->refcount_increment($self->{session_id} => __PACKAGE__);
-    }
 
     $self->{ircd_filter} = POE::Filter::IRCD->new(
         DEBUG    => $self->{debug},
@@ -144,7 +110,7 @@ sub _start {
     };
     if (!$@) {
         $self->{resolver} = POE::Component::Client::DNS->spawn(
-            Alias   => 'poco_dns_' . $self->{session_id},
+            Alias   => 'poco_dns_' . $self->session_id(),
             Timeout => 10,
         );
         $self->{can_do_auth} = 1;
@@ -157,11 +123,6 @@ sub _start {
 
     $self->_load_our_plugins();
 
-    if ($kernel != $sender) {
-        $self->{sessions}{$sender->ID}++;
-        $kernel->post($sender, "$self->{prefix}registered", $self);
-    }
-
     return;
 }
 
@@ -173,36 +134,6 @@ sub _load_our_plugins {
 # Control methods #
 ###################
 
-sub register {
-    my ($kernel, $self, $session, $sender)
-        = @_[KERNEL, OBJECT, SESSION, SENDER];
-    $session = $session->ID();
-    $sender = $sender->ID();
-
-    $self->{sessions}{$sender}++;
-    if ($self->{sessions}{$sender} == 1 && $sender ne $session) {
-        $kernel->refcount_increment($sender, __PACKAGE__);
-    }
-
-    $kernel->post($sender, "$self->{prefix}registered", $self);
-    return;
-}
-
-sub unregister {
-    my ($kernel, $self, $session, $sender)
-        = @_[KERNEL, OBJECT, SESSION, SENDER];
-    $session = $session->ID();
-    $sender = $sender->ID();
-
-    delete $self->{sessions}{$sender};
-    if ($sender ne $session) {
-        $kernel->refcount_decrement($sender, __PACKAGE__);
-    }
-
-    $kernel->post($sender, "$self->{prefix}unregistered");
-    return;
-}
-
 sub shutdown {
     my ($self) = shift;
     $self->yield('shutdown', @_);
@@ -212,57 +143,17 @@ sub shutdown {
 sub _shutdown {
     my ($kernel, $self) = @_[KERNEL, OBJECT];
 
-    $kernel->alias_remove($_) for $kernel->alias_list();
-    if (!defined $self->{alias}) {
-        $kernel->refcount_decrement($self->{session_id}, __PACKAGE__);
-    }
-
     $self->{terminating} = 1;
     delete $self->{listeners};
     delete $self->{connectors};
     delete $self->{wheels}; # :)
-    $kernel->alarm_remove_all();
-    for my $session (keys %{ $self->{sessions} }) {
-        $kernel->refcount_decrement($session, __PACKAGE__);
-    }
-    $self->_pluggable_destroy();
+    $self->_syndicator_destroy();
     $self->_unload_our_plugins();
     return;
 }
 
 sub _unload_our_plugins {
     return 1;
-}
-
-sub send_event {
-    my $self  = shift;
-    my $event = shift;
-
-    return if !$event;
-    my $prefix = $self->{prefix};
-    $event = "$prefix$event" if $event !~ /^(_|\Q$prefix\E)/;
-    $self->yield('__send_event', $event, @_);
-    return 1;
-}
-
-sub __send_event {
-    my ($self, $event, @args) = @_[OBJECT, ARG0, ARG1..$#_];
-    $self->_send_event($event, @args);
-    return 1;
-}
-
-sub _send_event {
-    my ($self, $event, @args) = @_;
-    return 1 if $self->_pluggable_process('SERVER', $event, \@args)
-        == PCSI_EAT_ALL;
-    $poe_kernel->post($_, $event, @args) for keys %{ $self->{sessions} };
-    return 1;
-}
-
-sub _pluggable_event {
-    my ($self, @args) = @_;
-    $self->yield('__send_event', @args);
-    return;
 }
 
 ############################
@@ -274,7 +165,7 @@ sub _accept_failed {
         = @_[KERNEL, OBJECT, ARG0..ARG3];
 
     delete $self->{listeners}{$listener_id};
-    $self->_send_event(
+    $self->send_event(
         "$self->{prefix}listener_failure",
         $listener_id,
         $operation,
@@ -324,7 +215,7 @@ sub _accept_connection {
             compress  => 0
         };
 
-        $self->_send_event(
+        $self->send_event(
             "$self->{prefix}connection",
             $wheel_id,
             $peeraddr,
@@ -337,7 +228,7 @@ sub _accept_connection {
             $kernel->yield('_auth_client', $wheel_id);
         }
         else {
-            $self->_send_event(
+            $self->send_event(
                 "$self->{prefix}auth_done",
                 $wheel_id => {
                     ident    => '',
@@ -391,7 +282,7 @@ sub _add_listener {
     if ($listener) {
         my $port = (unpack_sockaddr_in($listener->getsockname))[0];
         my $listener_id = $listener->ID();
-        $self->_send_event(
+        $self->send_event(
             $self->{prefix} . 'listener_add',
             $port,
             $listener_id,
@@ -427,7 +318,7 @@ sub _del_listener {
         $port = delete $self->{listeners}{$listener_id}{port};
         delete $self->{listening_ports}{$port};
         delete $self->{listeners}{$listener_id};
-        $self->_send_event(
+        $self->send_event(
             $self->{prefix} . 'listener_del',
             $port,
             $listener_id,
@@ -437,7 +328,7 @@ sub _del_listener {
     if ($self->_port_exists($port)) {
         $listener_id = delete $self->{listening_ports}{$port};
         delete $self->{listeners}{$listener_id};
-        $self->_send_event(
+        $self->send_event(
             $self->{prefix} . 'listener_del',
             $port,
             $listener_id,
@@ -508,7 +399,7 @@ sub _sock_failed {
 
     my $ref = delete $self->{connectors}{$connector_id};
     delete $ref->{wheel};
-    $self->_send_event("$self->{prefix}socketerr",$ref);
+    $self->send_event("$self->{prefix}socketerr",$ref);
     return;
 }
 
@@ -552,7 +443,7 @@ sub _sock_up {
     };
 
     $self->{wheels}{$wheel_id} = $ref;
-    $self->_send_event(
+    $self->send_event(
         "$self->{prefix}connected",
         $wheel_id,
         $peeraddr,
@@ -592,7 +483,7 @@ sub _add_filter {
         $stackable->unshift(POE::Filter::Zlib::Stream->new());
     }
     $self->{wheels}{$wheel_id}{wheel}->set_filter($stackable);
-    $self->_send_event("$self->{prefix}filter_add", $wheel_id, $filter);
+    $self->send_event("$self->{prefix}filter_add", $wheel_id, $filter);
     return;
 }
 
@@ -611,7 +502,7 @@ sub _anti_flood {
 
             $self->{wheels}{$wheel_id}{timer} = $current_time;
             my $event = "$self->{prefix}cmd_" . lc $input->{command};
-            $self->_send_event($event, $wheel_id, $input);
+            $self->send_event($event, $wheel_id, $input);
             last SWITCH;
         }
         if ($self->{wheels}{$wheel_id}{timer} <= $current_time + 10) {
@@ -627,7 +518,7 @@ sub _anti_flood {
         }
 
         $self->{wheels}{$wheel_id}{flooded} = 1;
-        $self->_send_event("$self->{prefix}connection_flood", $wheel_id);
+        $self->send_event("$self->{prefix}connection_flood", $wheel_id);
     }
 
     return 1;
@@ -648,7 +539,7 @@ sub _conn_alarm {
     return if !$self->_wheel_exists($wheel_id);
     my $conn = $self->{wheels}{$wheel_id};
 
-    $self->_send_event(
+    $self->send_event(
         "$self->{prefix}connection_idle",
         $wheel_id,
         $conn->{freq},
@@ -679,7 +570,7 @@ sub _conn_flushed {
         $self->{wheels}{$wheel_id}{wheel}->get_input_filter()->unshift(
             POE::Filter::Zlib::Stream->new(),
         );
-        $self->_send_event("$self->{prefix}compressed_conn", $wheel_id);
+        $self->send_event("$self->{prefix}compressed_conn", $wheel_id);
         return;
     }
     return;
@@ -690,7 +581,7 @@ sub _conn_input {
     my $conn = $self->{wheels}{$wheel_id};
 
     if ($self->{raw_events}) {
-        $self->_send_event(
+        $self->send_event(
             "$self->{prefix}raw_input",
             $wheel_id,
             $input->{raw_line},
@@ -705,7 +596,7 @@ sub _conn_input {
     }
     else {
         my $event = "$self->{prefix}cmd_" . lc $input->{command};
-        $self->_send_event($event, $wheel_id, $input);
+        $self->send_event($event, $wheel_id, $input);
     }
     return;
 }
@@ -721,7 +612,7 @@ sub _del_filter {
     return if !$self->_wheel_exists($wheel_id);
 
     $self->{wheels}{$wheel_id}{wheel}->set_filter($self->{filter});
-    $self->_send_event("$self->{prefix}filter_del", $wheel_id);
+    $self->send_event("$self->{prefix}filter_del", $wheel_id);
     return;
 }
 
@@ -738,7 +629,7 @@ sub _event_dispatcher {
 
     if ($input) {
         my $event = "$self->{prefix}cmd_" . lc $input->{command};
-        $self->_send_event($event, $wheel_id, $input);
+        $self->send_event($event, $wheel_id, $input);
     }
     return;
 }
@@ -852,7 +743,7 @@ sub _auth_done {
         && defined $self->{wheels}{$wheel_id}{auth}{hostname}) {
 
         if (!$self->{wheels}{$wheel_id}{auth}{done}) {
-            $self->_send_event(
+            $self->send_event(
                 "$self->{prefix}auth_done",
                 $wheel_id => {
                     ident    => $self->{wheels}{$wheel_id}{auth}{ident},
@@ -1059,7 +950,7 @@ sub antiflood {
 
             if ($input) {
                 my $event = "$self->{prefix}cmd_" . lc $input->{command};
-                $self->_send_event($event, $wheel_id, $input);
+                $self->send_event($event, $wheel_id, $input);
             }
         }
     }
@@ -1079,7 +970,7 @@ sub compressed_link {
             $self->{wheels}{$wheel_id}{wheel}->get_input_filter()->unshift(
                 POE::Filter::Zlib::Stream->new()
             );
-            $self->_send_event(
+            $self->send_event(
                 "$self->{prefix}compressed_conn",
                 $wheel_id,
             );
@@ -1111,7 +1002,7 @@ sub _disconnected {
     for my $alarm_id ($conn->{alarm}, @{ $conn->{alarm_ids} }) {
         $poe_kernel->alarm_remove($_);
     }
-    $self->_send_event(
+    $self->send_event(
         "$self->{prefix}disconnected",
         $wheel_id,
         $errstr || 'Client Quit',

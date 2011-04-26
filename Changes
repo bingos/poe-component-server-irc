@@ -1,6 +1,7 @@
 Revision history for POE-Component-Server-IRC
 
 {{$NEXT}}
+    - Inherit from POE::Component::Syndicator
 
 1.44  Mon Apr 4 20:44:51 GMT 2011
     - Fix to work with latest IRC::Utils
