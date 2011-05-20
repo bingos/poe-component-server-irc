@@ -15,7 +15,6 @@ use constant {
     OBJECT_STATES_HASHREF => {
         syndicator_started => '_start',
         add_connector      => '_add_connector',
-        add_filter         => '_add_filter',
         add_listener       => '_add_listener',
         del_listener       => '_del_listener',
         send_output        => '_send_output',
@@ -57,11 +56,6 @@ sub create {
     $self->{auth} = defined $args{auth}
         ? $args{auth}
         : 1;
-
-    eval {
-        require POE::Filter::Zlib::Stream;
-        $self->{got_zlib} = 1;
-    };
 
     if ($self->{auth}) {
         eval {
@@ -474,28 +468,6 @@ sub _sock_up {
         $sockport,
         $cntr->{name}
     );
-    return;
-}
-
-sub _add_filter {
-    my ($kernel, $self, $sender) = @_[KERNEL, OBJECT, SENDER];
-    my $wheel_id = $_[ARG0] || croak("You must supply a connection id\n");
-    my $filter = $_[ARG1] || croak("You must supply a filter object\n");
-    return if !$self->_wheel_exists($wheel_id);
-
-    my $stackable = POE::Filter::Stackable->new(
-        Filters => [
-            $self->{line_filter},
-            $self->{ircd_filter},
-            $filter,
-        ],
-    );
-
-    if ($self->compressed_link($wheel_id)) {
-        $stackable->unshift(POE::Filter::Zlib::Stream->new());
-    }
-    $self->{wheels}{$wheel_id}{wheel}->set_filter($stackable);
-    $self->send_event("$self->{prefix}filter_add", $wheel_id, $filter);
     return;
 }
 
@@ -961,12 +933,19 @@ sub antiflood {
 }
 
 sub compressed_link {
-    my ($self, $wheel_id, $value, $cntr) = splice @_, 0, 4;
+    my ($self, $wheel_id, $value, $cntr) = @_;
     return if !$self->_wheel_exists($wheel_id);
-    return 0 if !$self->{got_zlib};
     return $self->{wheels}{$wheel_id}{compress} if !defined $value;
 
     if ($value) {
+        if (!$self->{got_zlib}) {
+            eval {
+                require POE::Filter::Zlib::Stream;
+                $self->{got_zlib} = 1;
+            };
+            chomp $@;
+            croak($@) if !$self->{got_zlib};
+        }
         if ($cntr) {
             $self->{wheels}{$wheel_id}{wheel}->get_input_filter()->unshift(
                 POE::Filter::Zlib::Stream->new()
@@ -1701,6 +1680,24 @@ period;
 =item * C<ARG0>, the connection id;
 
 =item * C<ARG1>, the number of seconds period we consider as idle;
+
+=back
+
+=back
+
+=head2 C<ircd_compressed_conn>
+
+=over
+
+=item Emitted: when compression has been enabled for a connection
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>, the connection id;
 
 =back
 
