@@ -1177,8 +1177,6 @@ I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/session
 Takes no arguments. Returns the ID of the component's session. Ideal for
 posting events to the component.
 
- $kernel->post($irc->session_id() => 'mode' => $channel => '+o' => $dude);
-
 =head3 C<session_alias>
 
 I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/session_alias>>
@@ -1193,8 +1191,6 @@ I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/yield>>
 This method provides an alternative object based means of posting events
 to the component. First argument is the event to post, following arguments
 are sent as arguments to the resultant post.
-
- $irc->yield(mode => $channel => '+o' => $dude);
 
 =head3 C<call>
 
@@ -1213,8 +1209,6 @@ first argument is an arrayref consisting of the delayed command to post and
 any command arguments. The second argument is the time in seconds that one
 wishes to delay the command being posted.
 
- my $alarm_id = $ircd->delay( [ mode => $channel => '+o' => $dude ], 60 );
-
 Returns an alarm ID that can be used with L<C<delay_remove>|/delay_remove>
 to cancel the delayed event. This will be undefined if something went
 wrong.
@@ -1226,8 +1220,6 @@ I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/delay_r
 This method removes a previously scheduled delayed event from the
 component. Takes one argument, the C<alarm_id> that was returned by a
 L<C<delay>|/delay> method call.
-
- my $arrayref = $ircd->delay_remove( $alarm_id );
 
 Returns an arrayref that was originally requested to be delayed.
 
@@ -1271,10 +1263,10 @@ antiflood protection is returned. Returns undef on error.
 
 =head3 C<compressed_link>
 
-Takes two arguments, a connection id and true/false value. If value is
-specified compression is enabled or disabled accordingly for the specified
-connection. If a value is not specified the current status of compression
-is returned. Returns undef on error.
+Takes two arguments, a connection id and true/false value. If a value is
+specified, compression will be enabled or disabled accordingly for the
+specified connection. If a value is not specified the current status of
+compression is returned. Returns undef on error.
 
 =head3 C<disconnect>
 
@@ -1289,19 +1281,19 @@ Takes one argument, a connection_id. Returns a list consisting of: the IP
 address of the peer; the port on the peer; our socket address; our socket
 port. Returns undef on error.
 
- my ($peeraddr, $peerport, $sockaddr, $sockport) = $object->connection_info($conn_id);
+ my ($peeraddr, $peerport, $sockaddr, $sockport) = $ircd->connection_info($conn_id);
 
 =head3 C<add_denial>
 
 Takes one mandatory argument and one optional. The first mandatory
-argument is a L<Net::Netmask> object that will be used to check
+argument is a L<Net::Netmask|Net::Netmask> object that will be used to check
 connecting IP addresses against. The second optional argument is a reason
 string for the denial.
 
 =head3 C<del_denial>
 
-Takes one mandatory argument, a L<Net::Netmask> object to remove from the
-current denial list.
+Takes one mandatory argument, a L<Net::Netmask|Net::Netmask> object to remove
+from the current denial list.
 
 =head3 C<denied>
 
@@ -1310,13 +1302,13 @@ whether that IP is denied or not.
 
 =head3 C<add_exemption>
 
-Takes one mandatory argument, a L<Net::Netmask> object that will be
-checked against connecting IP addresses for exemption from denials.
+Takes one mandatory argument, a L<Net::Netmask|Net::Netmask> object that will
+be checked against connecting IP addresses for exemption from denials.
 
 =head3 C<del_exemption>
 
-Takes one mandatory argument, a L<Net::Netmask> object to remove from the
-current exemption list.
+Takes one mandatory argument, a L<Net::Netmask|Net::Netmask> object to remove
+from the current exemption list.
 
 =head3 C<exempted>
 
@@ -1505,8 +1497,7 @@ Opens a TCP connection to specified address and port.
 
 Takes a hashref and one or more connection IDs.
 
- $poe_kernel->post(
-     $object->session_id(),
+ $ircd->yield(
      'send_output',
      {
          prefix  => 'blah!~blah@blah.blah.blah',
