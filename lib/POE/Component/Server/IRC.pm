@@ -654,102 +654,152 @@ sub _daemon_cmd_message {
             last SWITCH;
         }
 
-    my $targets     = 0;
-    my $max_targets = $self->server_config('MAXTARGETS');
-    my $full        = $self->state_user_full($nick);
-    my $targs       = $self->_state_parse_msg_targets($args->[0]);
+        my $targets     = 0;
+        my $max_targets = $self->server_config('MAXTARGETS');
+        my $full        = $self->state_user_full($nick);
+        my $targs       = $self->_state_parse_msg_targets($args->[0]);
 
-    LOOP: for my $target (keys %$targs) {
-        my $targ_type = shift @{ $targs->{$target} };
+        LOOP: for my $target (keys %$targs) {
+            my $targ_type = shift @{ $targs->{$target} };
 
-        if ($targ_type =~ /(server|host)mask/
-                && !$self->state_user_is_operator($nick)) {
-            push @$ref, ['481'];
-            next LOOP;
-        }
-
-        if ($targ_type =~ /(server|host)mask/
-                && $targs->{$target}->[0] !~ /\./) {
-            push @$ref, ['413', $target];
-            next LOOP;
-        }
-
-        if ($targ_type =~ /(server|host)mask/
-                && $targs->{$target}->[0] =~ /\x2E.*[\x2A\x3F]+.*$/) {
-            push @$ref, ['414', $target];
-            next LOOP;
-        }
-
-        if ($targ_type eq 'channel_ext'
-                && !$self->state_chan_exists($targs->{$target}[1])) {
-            push @$ref, ['401', $targs->{$target}[1]];
-            next LOOP;
-        }
-
-        if ($targ_type eq 'channel'
-                && !$self->state_chan_exists($target)) {
-            push @$ref, ['401', $target];
-            next LOOP;
-        }
-
-        if ($targ_type eq 'nick'
-                && !$self->state_nick_exists($target)) {
-            push @$ref, ['401', $target];
-            next LOOP;
-        }
-
-        if ($targ_type eq 'nick_ext'
-                && !$self->state_peer_exists($targs->{$target}->[1])) {
-            push @$ref, ['402', $targs->{$target}[1]];
-            next LOOP;
-        }
-
-        $targets++;
-        if ($targets > $max_targets) {
-            push @$ref, ['407', $target];
-            last SWITCH;
-        }
-
-        # $$whatever
-        if ($targ_type eq 'servermask') {
-            my $us = 0;
-            my %targets;
-            my $ucserver = uc $self->server_name();
-
-            for my $peer (keys %{ $self->{state}{peers} }) {
-                if (matches_mask( $targs->{$target}[0], $peer)) {
-                    if ($ucserver eq $peer) {
-                        $us = 1;
-                    }
-                    else {
-                        $targets{ $self->_state_peer_route($peer) }++;
-                    }
-                }
+            if ($targ_type =~ /(server|host)mask/
+                    && !$self->state_user_is_operator($nick)) {
+                push @$ref, ['481'];
+                next LOOP;
             }
 
-            $self->send_output(
-                {
-                    prefix  => $nick,
-                    command => $type,
-                    params  => [$target, $args->[1]],
-                },
-                keys %targets,
-            );
+            if ($targ_type =~ /(server|host)mask/
+                && $targs->{$target}->[0] !~ /\./) {
+                push @$ref, ['413', $target];
+                next LOOP;
+            }
 
-            if ($us) {
-                my $local
-                    = $self->{state}{peers}{uc $self->server_name()}{users};
-                my @local;
+            if ($targ_type =~ /(server|host)mask/
+                    && $targs->{$target}->[0] =~ /\x2E.*[\x2A\x3F]+.*$/) {
+                push @$ref, ['414', $target];
+                next LOOP;
+            }
+
+            if ($targ_type eq 'channel_ext'
+                    && !$self->state_chan_exists($targs->{$target}[1])) {
+                push @$ref, ['401', $targs->{$target}[1]];
+                next LOOP;
+            }
+
+            if ($targ_type eq 'channel'
+                    && !$self->state_chan_exists($target)) {
+                push @$ref, ['401', $target];
+                next LOOP;
+            }
+
+            if ($targ_type eq 'nick'
+                    && !$self->state_nick_exists($target)) {
+                push @$ref, ['401', $target];
+                next LOOP;
+            }
+
+            if ($targ_type eq 'nick_ext'
+                    && !$self->state_peer_exists($targs->{$target}->[1])) {
+                push @$ref, ['402', $targs->{$target}[1]];
+                next LOOP;
+            }
+
+            $targets++;
+            if ($targets > $max_targets) {
+                push @$ref, ['407', $target];
+                last SWITCH;
+            }
+
+            # $$whatever
+            if ($targ_type eq 'servermask') {
+                my $us = 0;
+                my %targets;
+                my $ucserver = uc $self->server_name();
+
+                for my $peer (keys %{ $self->{state}{peers} }) {
+                    if (matches_mask( $targs->{$target}[0], $peer)) {
+                        if ($ucserver eq $peer) {
+                            $us = 1;
+                        }
+                        else {
+                            $targets{ $self->_state_peer_route($peer) }++;
+                        }
+                    }
+                }
+
+                $self->send_output(
+                    {
+                        prefix  => $nick,
+                        command => $type,
+                        params  => [$target, $args->[1]],
+                    },
+                    keys %targets,
+                );
+
+                if ($us) {
+                    my $local
+                        = $self->{state}{peers}{uc $self->server_name()}{users};
+                    my @local;
+                    my $spoofed = 0;
+
+                    for my $luser (values %$local) {
+                        if ($luser->{route_id} eq 'spoofed') {
+                            $spoofed = 1;
+                        }
+                        else {
+                            push @local, $luser->{route_id};
+                        }
+                    }
+
+                    $self->send_output(
+                        {
+                            prefix  => $full,
+                            command => $type,
+                            params  => [$target, $args->[1]],
+                        },
+                        @local,
+                    );
+
+                    $self->send_event(
+                        "daemon_" . lc $type,
+                        $full,
+                        $target,
+                        $args->[1],
+                    ) if $spoofed;
+                }
+                next LOOP;
+            }
+
+            # $#whatever
+            if ($targ_type eq 'hostmask') {
                 my $spoofed = 0;
+                my %targets; my @local;
 
-                for my $luser (values %$local) {
+                HOST: for my $luser (values %{ $self->{state}{users} }) {
+                    if (!matches_mask($targs->{$target}->[0],
+                            $luser->{auth}{hostname})) {;
+                            next HOST;
+                        }
+
                     if ($luser->{route_id} eq 'spoofed') {
                         $spoofed = 1;
+                    }
+                    elsif ($luser->{type} eq 'r') {
+                        $targets{ $luser->{route_id} }++;
                     }
                     else {
                         push @local, $luser->{route_id};
                     }
                 }
+
+                $self->send_output(
+                    {
+                        prefix  => $nick,
+                        command => $type,
+                        params  => [$target, $args->[1]],
+                    },
+                    keys %targets,
+                );
 
                 $self->send_output(
                     {
@@ -766,210 +816,160 @@ sub _daemon_cmd_message {
                     $target,
                     $args->[1],
                 ) if $spoofed;
-            }
-            next LOOP;
-        }
 
-        # $#whatever
-        if ($targ_type eq 'hostmask') {
-            my $spoofed = 0;
-            my %targets; my @local;
-
-            HOST: for my $luser (values %{ $self->{state}{users} }) {
-                if (!matches_mask($targs->{$target}->[0],
-                        $luser->{auth}{hostname})) {;
-                    next HOST;
-                }
-
-                if ($luser->{route_id} eq 'spoofed') {
-                    $spoofed = 1;
-                }
-                elsif ($luser->{type} eq 'r') {
-                    $targets{ $luser->{route_id} }++;
-                }
-                else {
-                    push @local, $luser->{route_id};
-                }
-            }
-
-            $self->send_output(
-                {
-                    prefix  => $nick,
-                    command => $type,
-                    params  => [$target, $args->[1]],
-                },
-                keys %targets,
-            );
-
-            $self->send_output(
-                {
-                    prefix  => $full,
-                    command => $type,
-                    params  => [$target, $args->[1]],
-                },
-                @local,
-            );
-
-            $self->send_event(
-                "daemon_" . lc $type,
-                $full,
-                $target,
-                $args->[1],
-            ) if $spoofed;
-
-            next LOOP;
-        }
-
-        if ($targ_type eq 'nick_ext') {
-            $targs->{$target}[1] = $self->_state_peer_name(
-                $targs->{$target}[1]);
-
-            if ($targs->{$target}[2]
-                    && !$self->state_user_is_operator($nick)) {
-                push @$ref, ['481'];
                 next LOOP;
             }
 
-            if ($targs->{$target}[1] ne $self->server_name()) {
-                $self->send_output(
-                    {
-                        prefix  => $nick,
-                        command => $type,
-                        params  => [$target, $args->[1]],
-                    },
-                    $self->_state_peer_route($targs->{$target}[1]),
-                );
-                next LOOP;
-            }
+            if ($targ_type eq 'nick_ext') {
+                $targs->{$target}[1] = $self->_state_peer_name(
+                    $targs->{$target}[1]);
 
-            if (uc $targs->{$target}[0] eq 'OPERS') {
-                if (!$self->state_user_is_operator($nick)) {
+                if ($targs->{$target}[2]
+                        && !$self->state_user_is_operator($nick)) {
                     push @$ref, ['481'];
                     next LOOP;
                 }
 
-                $self->send_output(
-                    {
-                        prefix  => $full,
-                        command => $type,
-                        params  => [$target, $args->[1]],
-                    },
-                    keys %{ $self->{state}{localops} },
-                );
-                next LOOP;
-            }
-
-            my @local = $self->_state_find_user_host(
-                $targs->{$target}->[0],
-                $targs->{$target}->[2],
-            );
-
-            if (@local == 1) {
-                my $ref = shift @local;
-                if ($ref->[0] eq 'spoofed') {
-                    $self->send_event(
-                        "daemon_" . lc $type,
-                        $full,
-                        $ref->[1],
-                        $args->[1],
-                    );
-                }
-                else {
+                if ($targs->{$target}[1] ne $self->server_name()) {
                     $self->send_output(
                         {
-                            prefix  => $full,
+                            prefix  => $nick,
                             command => $type,
                             params  => [$target, $args->[1]],
                         },
-                        $ref->[0],
+                        $self->_state_peer_route($targs->{$target}[1]),
                     );
+                    next LOOP;
                 }
-            }
-            else {
-                push @$ref, ['407', $target];
-                next LOOP;
-            }
-        }
 
-        my ($channel, $status_msg);
-        if ($targ_type eq 'channel') {
-            $channel = $self->_state_chan_name($target);
-        }
-        if ($targ_type eq 'channel_ext') {
-            $channel = $self->_state_chan_name($targs->{target}[1]);
-            $status_msg = $targs->{target}[0];
-        }
-        if ($channel && $status_msg
-                && !$self->state_user_chan_mode($nick, $channel)) {
-            push @$ref, ['482', $target];
-            next LOOP;
-        }
-        if ($channel && $self->state_chan_mode_set($channel, 'n')
-                && !$self->state_is_chan_member($nick, $channel)) {
-            push @$ref, ['404', $channel];
-            next LOOP;
-        }
-        if ($channel && $self->state_chan_mode_set($channel, 'm')
-                && !$self->state_user_chan_mode($nick, $channel)) {
-            push @$ref, ['404', $channel];
-            next LOOP;
-        }
-        if ($channel && $self->_state_user_banned($nick, $channel)
-                && !$self->state_user_chan_mode($nick, $channel)) {
-            push @$ref, ['404', $channel];
-            next LOOP;
-        }
-        if ($channel) {
-            my $common = { };
-            my $msg = {
-                command => $type,
-                params  => [
-                    ($status_msg ? $target : $channel), $args->[1]
-                ],
-            };
-            for my $member ($self->state_chan_list($channel, $status_msg)) {
-                next if $self->_state_user_is_deaf($member);
-                $common->{ $self->_state_user_route($member) }++;
-            }
-            delete $common->{ $self->_state_user_route($nick) };
-            for my $route_id (keys %$common) {
-                $msg->{prefix} = $nick;
-                if ($self->_connection_is_client($route_id)) {
-                    $msg->{prefix} = $full;
+                if (uc $targs->{$target}[0] eq 'OPERS') {
+                    if (!$self->state_user_is_operator($nick)) {
+                        push @$ref, ['481'];
+                        next LOOP;
+                    }
+
+                    $self->send_output(
+                        {
+                        prefix  => $full,
+                        command => $type,
+                        params  => [$target, $args->[1]],
+                        },
+                        keys %{ $self->{state}{localops} },
+                    );
+                    next LOOP;
                 }
-                if (!$route_id eq 'spoofed') {
-                    $self->send_output($msg, $route_id);
+
+                my @local = $self->_state_find_user_host(
+                    $targs->{$target}->[0],
+                    $targs->{$target}->[2],
+                );
+
+                if (@local == 1) {
+                    my $ref = shift @local;
+                    if ($ref->[0] eq 'spoofed') {
+                        $self->send_event(
+                            "daemon_" . lc $type,
+                            $full,
+                            $ref->[1],
+                            $args->[1],
+                        );
+                    }
+                    else {
+                        $self->send_output(
+                            {
+                                prefix  => $full,
+                                command => $type,
+                                params  => [$target, $args->[1]],
+                            },
+                            $ref->[0],
+                        );
+                    }
                 }
                 else {
-                    my $tmsg = $type eq 'PRIVMSG' ? 'public' : 'notice';
-                    $self->send_event(
-                        "daemon_$tmsg",
-                        $full,
-                        $channel,
-                        $args->[1],
-                    );
+                    push @$ref, ['407', $target];
+                    next LOOP;
                 }
             }
-            next LOOP;
-        }
 
-        my $server = $self->server_name();
-        if ($self->state_nick_exists($target)) {
-            $target = $self->state_user_nick($target);
-
-            if (my $away = $self->_state_user_away_msg($target)) {
-                push @$ref, {
-                    prefix  => $server,
-                    command => '301',
-                    params  => [$nick, $target, $away],
+            my ($channel, $status_msg);
+            if ($targ_type eq 'channel') {
+                $channel = $self->_state_chan_name($target);
+            }
+            if ($targ_type eq 'channel_ext') {
+                $channel = $self->_state_chan_name($targs->{target}[1]);
+                $status_msg = $targs->{target}[0];
+            }
+            if ($channel && $status_msg
+                    && !$self->state_user_chan_mode($nick, $channel)) {
+                push @$ref, ['482', $target];
+                next LOOP;
+            }
+            if ($channel && $self->state_chan_mode_set($channel, 'n')
+                    && !$self->state_is_chan_member($nick, $channel)) {
+                push @$ref, ['404', $channel];
+                next LOOP;
+            }
+            if ($channel && $self->state_chan_mode_set($channel, 'm')
+                    && !$self->state_user_chan_mode($nick, $channel)) {
+                push @$ref, ['404', $channel];
+                next LOOP;
+            }
+            if ($channel && $self->_state_user_banned($nick, $channel)
+                    && !$self->state_user_chan_mode($nick, $channel)) {
+                push @$ref, ['404', $channel];
+                next LOOP;
+            }
+            if ($channel) {
+                my $common = { };
+                my $msg = {
+                    command => $type,
+                    params  => [
+                        ($status_msg ? $target : $channel), $args->[1]
+                    ],
                 };
+                for my $member ($self->state_chan_list($channel, $status_msg)) {
+                    next if $self->_state_user_is_deaf($member);
+                    $common->{ $self->_state_user_route($member) }++;
+                }
+                delete $common->{ $self->_state_user_route($nick) };
+                for my $route_id (keys %$common) {
+                    $msg->{prefix} = $nick;
+                    if ($self->_connection_is_client($route_id)) {
+                        $msg->{prefix} = $full;
+                    }
+                    if (!$route_id eq 'spoofed') {
+                        $self->send_output($msg, $route_id);
+                    }
+                    else {
+                        my $tmsg = $type eq 'PRIVMSG' ? 'public' : 'notice';
+                        $self->send_event(
+                            "daemon_$tmsg",
+                            $full,
+                            $channel,
+                            $args->[1],
+                        );
+                    }
+                }
+                next LOOP;
             }
 
-            my $targ_umode = $self->state_user_umode($target);
+            my $server = $self->server_name();
+            if ($self->state_nick_exists($target)) {
+                $target = $self->state_user_nick($target);
 
-            # Target user has CALLERID on
-            if ($targ_umode && $targ_umode =~ /[Gg]/) {
-                my $targ_rec = $self->{state}{users}{uc_irc($target)};
+                if (my $away = $self->_state_user_away_msg($target)) {
+                    push @$ref, {
+                        prefix  => $server,
+                        command => '301',
+                        params  => [$nick, $target, $away],
+                    };
+                }
+
+                my $targ_umode = $self->state_user_umode($target);
+
+                # Target user has CALLERID on
+                if ($targ_umode && $targ_umode =~ /[Gg]/) {
+                    my $targ_rec = $self->{state}{users}{uc_irc($target)};
                     if (($targ_umode =~ /G/
                         && (!$self->state_users_share_chan($target, $nick)
                         || !$targ_rec->{accepts}{uc_irc($nick)}))
@@ -999,7 +999,7 @@ sub _daemon_cmd_message {
                                         $target,
                                         "$n\[$uh\]",
                                         'is messaging you, and you are umode +g.',
-                                    ]
+                                ]
                                 },
                                 $targ_rec->{route_id},
                             ) if $targ_rec->{route_id} ne 'spoofed';
