@@ -1,6 +1,8 @@
 Revision history for POE-Component-Server-IRC
 
 {{$NEXT}}
+
+1.45  Fri May 20 09:23:17 GMT 2011
     - Inherit from POE::Component::Syndicator
     - Make the DNS/Ident dependencies optional, and die if their use is
       requested when they are unavailable
