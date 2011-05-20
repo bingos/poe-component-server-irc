@@ -1128,8 +1128,8 @@ is auth is enabled;
 
 =item * B<'antiflood'>, set to 0 to globally disable flood protection;
 
-=item * B<'prefix'>, this is the prefix that is used to generate event names
-that the component produces. The default is 'ircd_backend_'.
+=item * B<'prefix'>, this is the prefix that is used to generate event
+names that the component produces. The default is 'ircd_backend_'.
 
 =item * B<'states'>, an array reference of extra objects states for the IRC
 daemon's POE sessions. The elements can be array references of states
@@ -1266,14 +1266,14 @@ port. Returns undef on error.
 =head3 C<add_denial>
 
 Takes one mandatory argument and one optional. The first mandatory
-argument is a L<Net::Netmask|Net::Netmask> object that will be used to check
-connecting IP addresses against. The second optional argument is a reason
-string for the denial.
+argument is a L<Net::Netmask|Net::Netmask> object that will be used to
+check connecting IP addresses against. The second optional argument is a
+reason string for the denial.
 
 =head3 C<del_denial>
 
-Takes one mandatory argument, a L<Net::Netmask|Net::Netmask> object to remove
-from the current denial list.
+Takes one mandatory argument, a L<Net::Netmask|Net::Netmask> object to
+remove from the current denial list.
 
 =head3 C<denied>
 
@@ -1282,13 +1282,13 @@ whether that IP is denied or not.
 
 =head3 C<add_exemption>
 
-Takes one mandatory argument, a L<Net::Netmask|Net::Netmask> object that will
-be checked against connecting IP addresses for exemption from denials.
+Takes one mandatory argument, a L<Net::Netmask|Net::Netmask> object that
+will be checked against connecting IP addresses for exemption from denials.
 
 =head3 C<del_exemption>
 
-Takes one mandatory argument, a L<Net::Netmask|Net::Netmask> object to remove
-from the current exemption list.
+Takes one mandatory argument, a L<Net::Netmask|Net::Netmask> object to
+remove from the current exemption list.
 
 =head3 C<exempted>
 
@@ -1320,8 +1320,8 @@ multiple plugins of the same kind active in one Object::Pluggable object.
 This method goes through the pipeline's C<push()> method, which will call
 C<< $plugin->plugin_register($pluggable, @args) >>.
 
-Returns the number of plugins now in the pipeline if plugin was initialized,
-C<undef>/an empty list if not.
+Returns the number of plugins now in the pipeline if plugin was
+initialized, C<undef>/an empty list if not.
 
 =head3 C<plugin_del>
 
@@ -1386,8 +1386,8 @@ names.
 
 It is possible to register for all events by specifying 'all' as an event.
 
-Returns 1 if everything checked out fine, C<undef>/an empty list if something
-is seriously wrong.
+Returns 1 if everything checked out fine, C<undef>/an empty list if
+something is seriously wrong.
 
 =head3 C<plugin_unregister>
 
@@ -1416,7 +1416,8 @@ These are POE events that the component will accept:
 
 =head2 C<register>
 
-Takes no arguments. Registers a session to receive events from the component.
+Takes no arguments. Registers a session to receive events from the
+component.
 
 =head2 C<unregister>
 
