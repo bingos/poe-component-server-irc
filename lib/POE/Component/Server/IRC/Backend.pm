@@ -1112,6 +1112,8 @@ sub exempted {
 
 1;
 
+=encoding utf8
+
 =head1 NAME
 
 POE::Component::Server::IRC::Backend - A POE component class that provides network connection abstraction for POE::Component::Server::IRC
@@ -1149,19 +1151,19 @@ for details.
 
 Returns an object. Accepts the following parameters, all are optional:
 
-=over
+=over 4
 
-=item B<'alias'>, a POE::Kernel alias to set;
+=item * B<'alias'>, a POE::Kernel alias to set;
 
-=item B<'auth'>, set to 0 to globally disable IRC authentication, default
+=item * B<'auth'>, set to 0 to globally disable IRC authentication, default
 is auth is enabled;
 
-=item B<'antiflood'>, set to 0 to globally disable flood protection;
+=item * B<'antiflood'>, set to 0 to globally disable flood protection;
 
-=item B<'prefix'>, this is the prefix that is used to generate event names
+=item * B<'prefix'>, this is the prefix that is used to generate event names
 that the component produces. The default is 'ircd_backend_'.
 
-=item B<'states'>, an array reference of extra objects states for the IRC
+=item * B<'states'>, an array reference of extra objects states for the IRC
 daemon's POE sessions. The elements can be array references of states
 as well as hash references of state => handler pairs.
 
@@ -1173,110 +1175,48 @@ an 'ircd_backend_registered' event.
 
 =head1 METHODS
 
-These are the methods that may be invoked on our object.
+=head2 General
 
-=head2 C<shutdown>
+=head3 C<shutdown>
 
 Takes no arguments. Terminates the component. Removes all listeners and
 connectors. Disconnects all current client and server connections.
 
-=head2 C<antiflood>
-
-Takes two arguments, a connection id and true/false value. If value is
-specified antiflood protection is enabled or disabled accordingly for the
-specified connection. If a value is not specified the current status of
-antiflood protection is returned. Returns undef on error.
-
-=head2 C<compressed_link>
-
-Takes two arguments, a connection id and true/false value. If value is
-specified compression is enabled or disabled accordingly for the specified
-connection. If a value is not specified the current status of compression
-is returned. Returns undef on error.
-
-=head2 C<disconnect>
-
-Requires on argument, the connection id you wish to disconnect. The
-component will terminate the connection the next time that the wheel input
-is flushed, so you may send some sort of error message to the client on
-that connection. Returns true on success, undef on error.
-
-=head2 C<connection_info>
-
-Takes one argument, a connection_id. Returns a list consisting of: the IP
-address of the peer; the port on the peer; our socket address; our socket
-port. Returns undef on error.
-
- my ($peeraddr, $peerport, $sockaddr, $sockport) = $object->connection_info($conn_id);
-
-=head2 C<add_denial>
-
-Takes one mandatory argument and one optional. The first mandatory
-argument is a L<Net::Netmask> object that will be used to check
-connecting IP addresses against. The second optional argument is a reason
-string for the denial.
-
-=head2 C<del_denial>
-
-Takes one mandatory argument, a L<Net::Netmask> object to remove from the
-current denial list.
-
-=head2 C<denied>
-
-Takes one argument, an IP address. Returns true or false depending on
-whether that IP is denied or not.
-
-=head2 C<add_exemption>
-
-Takes one mandatory argument, a L<Net::Netmask> object that will be
-checked against connecting IP addresses for exemption from denials.
-
-=head2 C<del_exemption>
-
-Takes one mandatory argument, a L<Net::Netmask> object to remove from the
-current exemption list.
-
-=head2 C<exempted>
-
-Takes one argument, an IP address. Returns true or false depending on
-whether that IP is exempt from denial or not.
-
-=head2 C<session_id>
+=head3 C<session_id>
 
 I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/session_id>>
 
-Takes no arguments. Returns the ID of the component's session. Ideal for posting
-events to the component.
+Takes no arguments. Returns the ID of the component's session. Ideal for
+posting events to the component.
 
  $kernel->post($irc->session_id() => 'mode' => $channel => '+o' => $dude);
 
-=head2 C<session_alias>
+=head3 C<session_alias>
 
 I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/session_alias>>
 
 Takes no arguments. Returns the session alias that has been set through
-L<C<spawn>|/spawn>'s alias argument.
+L<C<create>|/create>'s B<'alias'> argument.
 
-=head2 C<yield>
+=head3 C<yield>
 
 I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/yield>>
 
-This method provides an alternative object based means of posting events to the
-component. First argument is the event to post, following arguments are sent as
-arguments to the resultant post.
+This method provides an alternative object based means of posting events
+to the component. First argument is the event to post, following arguments
+are sent as arguments to the resultant post.
 
  $irc->yield(mode => $channel => '+o' => $dude);
 
-=head2 C<call>
+=head3 C<call>
 
 I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/call>>
 
-This method provides an alternative object based means of calling events to the
-component. First argument is the event to call, following arguments are sent as
-arguments to the resultant
-call.
+This method provides an alternative object based means of calling events
+to the component. First argument is the event to call, following arguments
+are sent as arguments to the resultant call.
 
-=head2 C<delay>
+=head3 C<delay>
 
 I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/delay>>
 
@@ -1288,56 +1228,123 @@ wishes to delay the command being posted.
  my $alarm_id = $ircd->delay( [ mode => $channel => '+o' => $dude ], 60 );
 
 Returns an alarm ID that can be used with L<C<delay_remove>|/delay_remove>
-to cancel the delayed event. This will be undefined if something went wrong.
+to cancel the delayed event. This will be undefined if something went
+wrong.
 
-=head2 C<delay_remove>
+=head3 C<delay_remove>
 
 I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/delay_remove>>
 
-This method removes a previously scheduled delayed event from the component.
-Takes one argument, the C<alarm_id> that was returned by a
+This method removes a previously scheduled delayed event from the
+component. Takes one argument, the C<alarm_id> that was returned by a
 L<C<delay>|/delay> method call.
 
  my $arrayref = $ircd->delay_remove( $alarm_id );
 
 Returns an arrayref that was originally requested to be delayed.
 
-=head2 C<send_event>
+=head3 C<send_event>
 
 I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/send_event>>
 
-Sends an event through the component's event handling system. These will get
-processed by plugins then by registered sessions. First argument is the event
-name, followed by any parameters for that event.
+Sends an event through the component's event handling system. These will
+get processed by plugins then by registered sessions. First argument is
+the event name, followed by any parameters for that event.
 
-=head2 C<send_event_next>
+=head3 C<send_event_next>
 
 I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/send_event_next>>
 
 This sends an event right after the one that's currently being processed.
 Useful if you want to generate some event which is directly related to
 another event so you want them to appear together. This method can only be
-called when POE::Component::IRC is processing an event, e.g. from one of your
-event handlers. Takes the same arguments as L<C<send_event>/send_event>.
+called when POE::Component::IRC is processing an event, e.g. from one of
+your event handlers. Takes the same arguments as
+L<C<send_event>|/send_event>.
 
-=head2 C<send_event_now>
+=head3 C<send_event_now>
 
 I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/send_event_now>>
 
 This will send an event to be processed immediately. This means that if an
 event is currently being processed and there are plugins or sessions which
-will receive it after you do, then an event sent with C<send_event_now> will
-be received by those plugins/sessions I<before> the current event. Takes the
-same arguments as L<C<send_event>/send_event>.
+will receive it after you do, then an event sent with C<send_event_now>
+will be received by those plugins/sessions I<before> the current event.
+Takes the same arguments as L<C<send_event>|/send_event>.
 
-=head2 C<pipeline>
+=head2 Connections
+
+=head3 C<antiflood>
+
+Takes two arguments, a connection id and true/false value. If value is
+specified antiflood protection is enabled or disabled accordingly for the
+specified connection. If a value is not specified the current status of
+antiflood protection is returned. Returns undef on error.
+
+=head3 C<compressed_link>
+
+Takes two arguments, a connection id and true/false value. If value is
+specified compression is enabled or disabled accordingly for the specified
+connection. If a value is not specified the current status of compression
+is returned. Returns undef on error.
+
+=head3 C<disconnect>
+
+Requires on argument, the connection id you wish to disconnect. The
+component will terminate the connection the next time that the wheel input
+is flushed, so you may send some sort of error message to the client on
+that connection. Returns true on success, undef on error.
+
+=head3 C<connection_info>
+
+Takes one argument, a connection_id. Returns a list consisting of: the IP
+address of the peer; the port on the peer; our socket address; our socket
+port. Returns undef on error.
+
+ my ($peeraddr, $peerport, $sockaddr, $sockport) = $object->connection_info($conn_id);
+
+=head3 C<add_denial>
+
+Takes one mandatory argument and one optional. The first mandatory
+argument is a L<Net::Netmask> object that will be used to check
+connecting IP addresses against. The second optional argument is a reason
+string for the denial.
+
+=head3 C<del_denial>
+
+Takes one mandatory argument, a L<Net::Netmask> object to remove from the
+current denial list.
+
+=head3 C<denied>
+
+Takes one argument, an IP address. Returns true or false depending on
+whether that IP is denied or not.
+
+=head3 C<add_exemption>
+
+Takes one mandatory argument, a L<Net::Netmask> object that will be
+checked against connecting IP addresses for exemption from denials.
+
+=head3 C<del_exemption>
+
+Takes one mandatory argument, a L<Net::Netmask> object to remove from the
+current exemption list.
+
+=head3 C<exempted>
+
+Takes one argument, an IP address. Returns true or false depending on
+whether that IP is exempt from denial or not.
+
+=head2 Plugins
+
+=head3 C<pipeline>
 
 I<Inherited from L<Object::Pluggable|Object::Pluggable/pipeline>>
 
 Returns the L<Object::Pluggable::Pipeline|Object::Pluggable::Pipeline>
 object.
 
-=head2 C<plugin_add>
+=head3 C<plugin_add>
 
 I<Inherited from L<Object::Pluggable|Object::Pluggable/plugin_add>>
 
@@ -1356,7 +1363,7 @@ C<< $plugin->plugin_register($pluggable, @args) >>.
 Returns the number of plugins now in the pipeline if plugin was initialized,
 C<undef>/an empty list if not.
 
-=head2 C<plugin_del>
+=head3 C<plugin_del>
 
 I<Inherited from L<Object::Pluggable|Object::Pluggable/plugin_del>>
 
@@ -1371,7 +1378,7 @@ C<< $plugin->plugin_unregister($pluggable, @args) >>.
 Returns the plugin object if the plugin was removed, C<undef>/an empty list
 if not.
 
-=head2 C<plugin_get>
+=head3 C<plugin_get>
 
 I<Inherited from L<Object::Pluggable|Object::Pluggable/plugin_get>>
 
@@ -1383,7 +1390,7 @@ This method goes through the pipeline's C<get()> method.
 
 Returns the plugin object if it was found, C<undef>/an empty list if not.
 
-=head2 C<plugin_list>
+=head3 C<plugin_list>
 
 I<Inherited from L<Object::Pluggable|Object::Pluggable/plugin_list>>
 
@@ -1392,7 +1399,7 @@ Takes no arguments.
 Returns a hashref of plugin objects, keyed on alias, or an empty list if
 there are no plugins loaded.
 
-=head2 C<plugin_order>
+=head3 C<plugin_order>
 
 I<Inherited from L<Object::Pluggable|Object::Pluggable/plugin_order>>
 
@@ -1401,7 +1408,7 @@ Takes no arguments.
 Returns an arrayref of plugin objects, in the order which they are
 encountered in the pipeline.
 
-=head2 C<plugin_register>
+=head3 C<plugin_register>
 
 I<Inherited from L<Object::Pluggable|Object::Pluggable/plugin_register>>
 
@@ -1422,7 +1429,7 @@ It is possible to register for all events by specifying 'all' as an event.
 Returns 1 if everything checked out fine, C<undef>/an empty list if something
 is seriously wrong.
 
-=head2 C<plugin_unregister>
+=head3 C<plugin_unregister>
 
 I<Inherited from L<Object::Pluggable|Object::Pluggable/plugin_unregister>>
 
@@ -1459,16 +1466,16 @@ Takes no arguments. Unregisters a previously registered session.
 
 Takes a number of arguments. Adds a new listener.
 
-=over
+=over 4
 
-=item B<'port'>, the TCP port to listen on. Default is a random port;
+=item * B<'port'>, the TCP port to listen on. Default is a random port;
 
-=item B<'auth'>, enable or disable auth sub-system for this listener. Default
+=item * B<'auth'>, enable or disable auth sub-system for this listener. Default
 enabled;
 
-=item B<'bindaddr'>, specify a local address to bind the listener to;
+=item * B<'bindaddr'>, specify a local address to bind the listener to;
 
-=item B<'listenqueue'>, change the SocketFactory's ListenQueue;
+=item * B<'listenqueue'>, change the SocketFactory's ListenQueue;
 
 =back
 
@@ -1487,13 +1494,13 @@ will not be disconnected.
 Takes two mandatory arguments, B<'remoteaddress'> and B<'remoteport'>.
 Opens a TCP connection to specified address and port.
 
-=over
+=over 4
 
-=item B<'remoteaddress'>, hostname or IP address to connect to;
+=item * B<'remoteaddress'>, hostname or IP address to connect to;
 
-=item B<'remoteport'>, the TCP port on the remote host;
+=item * B<'remoteport'>, the TCP port on the remote host;
 
-=item B<'bindaddress'>, a local address to bind from (optional);
+=item * B<'bindaddress'>, a local address to bind from (optional);
 
 =back
 
@@ -1512,39 +1519,9 @@ Takes a hashref and one or more connection IDs.
      @list_of_connection_ids,
  );
 
-=head1 OUTPUT
+=head1 OUTPUT EVENTS
 
 These following events are sent to interested sessions.
-
-=head2 C<ircd_registered>
-
-=over
-
-=item Emitted: when a session registers with the component;
-
-=item Target: the registering session;
-
-=item Args:
-
-=over
-
-=item C<ARG0>: the component's object;
-
-=back
-
-=back
-
-=head2 C<ircd_unregistered>
-
-=over
-
-=item Emitted: when a session unregisters with the component;
-
-=item Target: the unregistering session;
-
-=item Args: none
-
-=back
 
 =head2 C<ircd_connection>
 
@@ -1556,17 +1533,17 @@ These following events are sent to interested sessions.
 
 =item Args:
 
-=over
+=over 4
 
-=item C<ARG0>: the conn id;
+=item * C<ARG0>: the conn id;
 
-=item C<ARG1>: their ip address;
+=item * C<ARG1>: their ip address;
 
-=item C<ARG2>: their tcp port;
+=item * C<ARG2>: their tcp port;
 
-=item C<ARG3>: our ip address;
+=item * C<ARG3>: our ip address;
 
-=item C<ARG4>: our socket port;
+=item * C<ARG4>: our socket port;
 
 =back
 
@@ -1583,11 +1560,11 @@ hostname and ident;
 
 =item Args:
 
-=over
+=over 4
 
-=item C<ARG0>, the connection id;
+=item * C<ARG0>, the connection id;
 
-=item C<ARG1>, a HASHREF with the following keys: 'ident' and 'hostname';
+=item * C<ARG1>, a HASHREF with the following keys: 'ident' and 'hostname';
 
 =back
 
@@ -1597,17 +1574,17 @@ hostname and ident;
 
 =over
 
-=item Emitted: on a successful add_listener() call;
+=item Emitted: on a successful L<C<add_listener>|/add_listener> call;
 
 =item Target: all plugins and registered sessions;
 
 =item Args:
 
-=over
+=over 4
 
-=item C<ARG0>, the listening port;
+=item * C<ARG0>, the listening port;
 
-=item C<ARG1>, the listener id;
+=item * C<ARG1>, the listener id;
 
 =back
 
@@ -1617,17 +1594,17 @@ hostname and ident;
 
 =over
 
-=item Emitted: on a successful del_listener() call;
+=item Emitted: on a successful L<C<del_listener>|/del_listener> call;
 
 =item Target: all plugins and registered sessions;
 
 =item Args:
 
-=over
+=over 4
 
-=item C<ARG0>, the listening port;
+=item * C<ARG0>, the listening port;
 
-=item C<ARG1>, the listener id;
+=item * C<ARG1>, the listener id;
 
 =back
 
@@ -1643,15 +1620,15 @@ hostname and ident;
 
 =item Args:
 
-=over
+=over 4
 
-=item C<ARG0>, the listener id;
+=item * C<ARG0>, the listener id;
 
-=item C<ARG1>, the name of the operation that failed;
+=item * C<ARG1>, the name of the operation that failed;
 
-=item C<ARG2>, numeric value for $!;
+=item * C<ARG2>, numeric value for $!;
 
-=item C<ARG3>, string value for $!;
+=item * C<ARG3>, string value for $!;
 
 =back
 
@@ -1661,15 +1638,15 @@ hostname and ident;
 
 =over
 
-=item Emitted: on the failure of an add_connector()
+=item Emitted: on the failure of an L<C<add_connector>|/add_connector> call
 
 =item Target: all plugins and registered sessions;
 
 =item Args:
 
-=over
+=over 4
 
-=item C<ARG0>, a HASHREF containing the params that add_connector() was
+=item * C<ARG0>, a HASHREF containing the params that add_connector() was
 called with;
 
 =back
@@ -1686,17 +1663,17 @@ called with;
 
 =item Args:
 
-=over
+=over 4
 
-=item C<ARG0>, the connection id;
+=item * C<ARG0>, the connection id;
 
-=item C<ARG1>, their ip address;
+=item * C<ARG1>, their ip address;
 
-=item C<ARG2>, their tcp port;
+=item * C<ARG2>, their tcp port;
 
-=item C<ARG3>, our ip address;
+=item * C<ARG3>, our ip address;
 
-=item C<ARG4>, our socket port;
+=item * C<ARG4>, our socket port;
 
 =back
 
@@ -1712,9 +1689,9 @@ called with;
 
 =item Args:
 
-=over
+=over 4
 
-=item C<ARG0>, the connection id;
+=item * C<ARG0>, the connection id;
 
 =back
 
@@ -1731,11 +1708,11 @@ period;
 
 =item Args:
 
-=over
+=over 4
 
-=item C<ARG0>, the connection id;
+=item * C<ARG0>, the connection id;
 
-=item C<ARG1>, the number of seconds period we consider as idle;
+=item * C<ARG1>, the number of seconds period we consider as idle;
 
 =back
 
@@ -1751,11 +1728,11 @@ period;
 
 =item Args:
 
-=over
+=over 4
 
-=item C<ARG0>, the connection id;
+=item * C<ARG0>, the connection id;
 
-=item C<ARG1>, the error or reason for disconnection;
+=item * C<ARG1>, the error or reason for disconnection;
 
 =back
 
@@ -1771,11 +1748,11 @@ period;
 
 =item Args:
 
-=over
+=over 4
 
-=item C<ARG0>, the connection id;
+=item * C<ARG0>, the connection id;
 
-=item C<ARG1>, a HASHREF containing the output record from
+=item * C<ARG1>, a HASHREF containing the output record from
 POE::Filter::IRCD:
 
  {
@@ -1784,6 +1761,162 @@ POE::Filter::IRCD:
      params  => [ '#moo', 'cows go moo, not fish :D' ],
      raw_line => ':blah!~blah@blah.blah.blah.blah PRIVMSG #moo :cows go moo, not fish :D'
  }
+
+=back
+
+=back
+
+=head2 C<ircd_registered>
+
+I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/syndicator_registered>>
+
+=over
+
+=item Emitted: when a session registers with the component;
+
+=item Target: the registering session;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>: the component's object;
+
+=back
+
+=back
+
+=head2 C<ircd_shutdown>
+
+I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/syndicator_shutdown>>
+
+=over
+
+=item Emitted: when the component has been asked to L<C<shutdown>|/shutdown>
+
+=item Target: all registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>: the session ID of the requesting component
+
+=back
+
+=back
+
+=head2 C<ircd_delay_set>
+
+I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/syndicator_delay_set>>
+
+=over
+
+=item Emitted: on a successful addition of a delayed event using the
+L<C<delay>|/delay> method
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>: the alarm id which can be used later with
+L<C<delay_remove>|/delay_remove>
+
+=item * C<ARG1..$#_>: subsequent arguments are those which were passed to
+L<C<delay>|/delay>
+
+=back
+
+=back
+
+=head2 C<ircd_delay_removed>
+
+I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/syndicator_delay_removed>>
+
+=over
+
+=item Emitted: when a delayed command is successfully removed
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>: the alarm id which was removed
+
+=item * C<ARG1..$#_>: subsequent arguments are those which were passed to
+L<C<delay>|/delay>
+
+=back
+
+=back
+
+=head2 C<ircd_plugin_add>
+
+I<Inherited from L<Object::Pluggable|Object::Pluggable/_pluggable_event>>
+
+=over
+
+=item Emitted: when a new plugin is added to the pipeline
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>: the plugin alias
+
+=item * C<ARG1>: the plugin object
+
+=back
+
+=back
+
+=head2 C<ircd_plugin_del>
+
+I<Inherited from L<Object::Pluggable|Object::Pluggable/_pluggable_event>>
+
+=over
+
+=item Emitted: when a plugin is removed from the pipeline
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>: the plugin alias
+
+=item * C<ARG1>: the plugin object
+
+=back
+
+=back
+
+=head2 C<ircd_plugin_error>
+
+I<Inherited from L<Object::Pluggable|Object::Pluggable/_pluggable_event>>
+
+=over
+
+=item Emitted: when an error occurs while executing a plugin handler
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>: the error message
+
+=item * C<ARG1>: the plugin alias
+
+=item * C<ARG2>: the plugin object
 
 =back
 

@@ -8212,1054 +8212,1168 @@ sub _spoofed_command {
 
 1;
 
+=encoding utf8
+
 =head1 NAME
 
 POE::Component::Server::IRC - A fully event-driven networkable IRC server daemon module.
 
 =head1 SYNOPSIS
 
-  # A fairly simple example:
-  use strict;
-  use warnings;
-  use POE qw(Component::Server::IRC);
+ # A fairly simple example:
+ use strict;
+ use warnings;
+ use POE qw(Component::Server::IRC);
 
-  my %config = ( 
-		servername => 'simple.poco.server.irc', 
-		nicklen    => 15,
-		network    => 'SimpleNET'
-  );
+ my %config = (
+     servername => 'simple.poco.server.irc', 
+     nicklen    => 15,
+     network    => 'SimpleNET'
+ );
 
-  my $pocosi = POE::Component::Server::IRC->spawn( config => \%config );
+ my $pocosi = POE::Component::Server::IRC->spawn( config => \%config );
 
-  POE::Session->create(
-	package_states => [
-	   'main' => [qw(_start _default)],
-	],
-	heap => { ircd => $pocosi },
-  );
+ POE::Session->create(
+     package_states => [
+         'main' => [qw(_start _default)],
+     ],
+     heap => { ircd => $pocosi },
+ );
 
-  $poe_kernel->run();
-  exit 0;
+ $poe_kernel->run();
 
-  sub _start {
-    my ($kernel,$heap) = @_[KERNEL,HEAP];
-    $heap->{ircd}->yield( 'register' );
-    # Anyone connecting from the loopback gets spoofed hostname
-    $heap->{ircd}->add_auth( mask => '*@localhost', spoof => 'm33p.com', no_tilde => 1 );
-    # We have to add an auth as we have specified one above.
-    $heap->{ircd}->add_auth( mask => '*@*' );
-    # Start a listener on the 'standard' IRC port.
-    $heap->{ircd}->add_listener( port => 6667 );
-    # Add an operator who can connect from localhost
-    $heap->{ircd}->add_operator( { username => 'moo', password => 'fishdont' } );
-    undef;
-  }
+ sub _start {
+     my ($kernel, $heap) = @_[KERNEL, HEAP];
 
-  sub _default {
-     my ( $event, $args ) = @_[ ARG0 .. $#_ ];
-     print STDOUT "$event: ";
-     foreach (@$args) {
-     SWITCH: {
-              if ( ref($_) eq 'ARRAY' ) {
-                  print STDOUT "[", join ( ", ", @$_ ), "] ";
-                  last SWITCH;
-              }
-              if ( ref($_) eq 'HASH' ) {
-                  print STDOUT "{", join ( ", ", %$_ ), "} ";
-                  last SWITCH;
-              }
-              print STDOUT "'$_' ";
-          }
-      }
-      print STDOUT "\n";
-      return 0;    # Don't handle signals.
+     $heap->{ircd}->yield('register', 'all');
+
+     # Anyone connecting from the loopback gets spoofed hostname
+     $heap->{ircd}->add_auth(
+         mask     => '*@localhost',
+         spoof    => 'm33p.com',
+         no_tilde => 1,
+     );
+
+     # We have to add an auth as we have specified one above.
+     $heap->{ircd}->add_auth(mask => '*@*');
+
+     # Start a listener on the 'standard' IRC port.
+     $heap->{ircd}->add_listener(port => 6667);
+
+     # Add an operator who can connect from localhost
+     $heap->{ircd}->add_operator(
+         {
+             username => 'moo',
+             password => 'fishdont',
+         }
+     );
+ }
+
+ sub _default {
+     my ($event, $args) = @_[ARG0 .. $#_];
+
+     print "$event: ";
+     for my $arg (@$args) {
+
+     if (ref($arg) eq 'ARRAY') {
+         print "[", join ( ", ", @$arg ), "] ";
+     }
+     elsif (ref($arg) eq 'HASH') {
+         print "{", join ( ", ", %$arg ), "} ";
+     }
+     else {
+         print "'$arg' ";
+     }
+
+     print "\n";
   }
 
 =head1 DESCRIPTION
 
-POE::Component::Server::IRC is a POE component which implements an IRC server ( also referred to as
-an IRC daemon or IRCd ). It should be compliant with the pertient IRC RFCs and is based on reverse
-engineering Hybrid IRCd behaviour with regards to interactions with IRC clients and other IRC servers.
+POE::Component::Server::IRC is a POE component which implements an IRC
+server (also referred to as an IRC daemon or IRCd). It should be compliant
+with the pertient IRC RFCs and is based on reverse engineering Hybrid IRCd
+behaviour with regards to interactions with IRC clients and other IRC
+servers.
 
-Yes, that's right. POE::Component::Server::IRC is capable of linking to form IRC networks. It supports 
-the TS5 server to server protocol and has been tested with linking to Hybrid-7 based networks. It should
-in theory work with any TS5-based IRC network.
+Yes, that's right. POE::Component::Server::IRC is capable of linking to
+foreign IRC networks. It supports the TS5 server to server protocol and
+has been tested with linking to Hybrid-7 based networks. It should in
+theory work with any TS5-based IRC network.
 
-POE::Component::Server::IRC also has a services API, which enables one to extend the IRCd to create 
-IRC Services. This is fully event-driven ( of course =] ). There is also a Plugin system, similar to that
-sported by L<POE::Component::IRC>. 
+POE::Component::Server::IRC also has a services API, which enables one to
+extend the IRCd to create IRC Services. This is fully event-driven (of
+course =]). There is also a Plugin system, similar to that sported by
+L<POE::Component::IRC|POE::Component::IRC>.
+
+B<Note:> This is a subclass of
+L<POE::Component::Server::IRC::Backend|POE::Component::IRC::Server::Backend>.
+You should read its documentation too.
 
 =head1 CONSTRUCTOR
 
-=over
+=head2 C<spawn>
 
-=item C<spawn>
+Returns a new instance of the component. Takes the following parameters:
 
-Creates a L<POE::Session> and associated object. The session's heap is set to the object, so it is
-possible to retrieve the object in any of your event handlers by using $_[SENDER]->get_heap().
+=over 4
 
-Returns the object, takes the following parameters:
-
-  'alias', a POE::Kernel alias to set, no default;
-  'auth', set to 0 to globally disable IRC authentication, default is auth is enabled;
-  'antiflood', set to 0 to globally disable flood protection, default enabled;
-  'config', a hashref of configuration options, see configure() method for details;
-
-If the component is spawned from within another session then that session will automagically be 
-registered with the component to receive events and be sent an 'ircd_registered' event.
+=item * B<'config'>, a hashref of configuration options, see the
+L<C<configure>|/configure> method for details.
 
 =back
 
+Any other parameters will be passed along to
+L<POE::Component::Server::IRC::Backend|POE::Component::Server::IRC::Backend>'s
+L<C<create>|POE::Component::Server::IRC::Backend/create> method.
+
+If the component is spawned from within another session then that session
+will automagically be registered with the component to receive events and
+be sent an L<C<ircd_registered>|POE::Component::IRC::Server::Backend/ircd_registered>
+event.
+
 =head1 METHODS
 
-=head2 CONFIGURATION & CONTROL
+=head2 Information
 
-These methods provide mechanisms for configuring and controlling the IRCd component.
+=head3 C<server_name>
 
-=over
+No arguments, returns the name of the ircd.
 
-=item C<configure>
+=head3 C<server_version>
+
+No arguments, returns the software version of the ircd.
+
+=head3 C<server_created>
+
+No arguments, returns a string signifying when the ircd was created.
+
+=head3 C<server_config>
+
+Takes one argument, the server configuration value to query.
+
+=head2 Configuration
+
+These methods provide mechanisms for configuring and controlling the IRCd
+component.
+
+=head3 C<configure>
 
 Configures your new shiny IRCd.
 
 Takes a number of parameters:
 
-  'servername', a name to bless your shiny new IRCd with, default 'poco.server.irc';
-  'serverdesc', a description for your IRCd, default 'Poco? POCO? POCO!';
-  'network', the name of the IRC network you will be creating, default 'poconet';
-  'nicklen', the max length of nicknames to support, default is 9.
-	     NB: the nicklen must be the same on all servers on your IRC network;
-  'maxtargets', max number of targets a user can send PRIVMSG/NOTICE's to, default 4;
-  'maxchannels', max number of channels users may join, default 15;
-  'version', change the server version that is reported;
-  'admin', an arrayref consisting of the 3 lines that will be returned by ADMIN;
-  'info', an arrayref consisting of lines to be returned by INFO;
-  'ophacks', set to true to enable oper hacks;
-  'whoisactually', set this to 0 so only opers can see 338 replies to WHOIS queries, default is 1;
+=over 4
 
-=item C<session_id>
+=item * B<'servername'>, a name to bless your shiny new IRCd with,
+defaults to 'poco.server.irc';
 
-Takes no arguments. Returns the ID of the component's session. Ideal for posting events to the component.
+=item * B<'serverdesc'>, a description for your IRCd, defaults to
+'Poco? POCO? POCO!';
 
-=item C<yield>
+=item * B<'network'>, the name of the IRC network you will be creating,
+defaults tp 'poconet';
 
-This method provides an alternative object based means of posting events to the component. First argument is the event to post, following arguments are sent as arguments to the resultant post.
+=item * B<'nicklen'>, the max length of nicknames to support, defaults
+to 9. B<Note>: the nicklen must be the same on all servers on your IRC
+network;
 
-=item C<call>
+=item * B<'maxtargets'>, max number of targets a user can send
+PRIVMSG/NOTICE's to, defaults to 4;
 
-This method provides an alternative object based means of calling events to the component. First argument is the event to call, following arguments are sent as arguments to the resultant call.
+=item * B<'maxchannels'>, max number of channels users may join, defaults
+to 15;
 
-=item C<shutdown>
+=item * B<'version'>, change the server version that is reported;
 
-Takes no arguments. Terminates the component. Removes all listeners and connectors. Disconnects all current client and server connections.
+=item * B<'admin'>, an arrayref consisting of the 3 lines that will be
+returned by ADMIN;
 
-=item C<add_operator>
+=item * B<'info'>, an arrayref consisting of lines to be returned by INFO;
 
-This adds an O line to the IRCd. Takes a number of parameters:
+=item * B<'ophacks'>, set to true to enable oper hacks. Default is false;
 
-  'username', the username of the IRC oper, mandatory;
-  'password', the password, mandatory;
-  'ipmask', either a scalar ipmask or an arrayref of Net::Netmask objects;
+=item * B<'whoisactually'>, setting this to a false value means that only
+opers can see 338. Defaults to true;
 
-A scalar ipmask can be contain '*' to match any number of characters or '?' to match one character. If no 'ipmask' is provided, operators are only allowed to OPER from the loopback interface.
+=back
 
-'password' can be either plain-text, C<crypt>'d or unix/apache md5. See C<mkpasswd> function in L<POE::Component::Server::IRC::Common> for generating passwords.
+=head3 C<add_auth>
 
-=item C<del_operator>
+By default the IRCd allows any user to connect to the server without a
+password. Configuring auths enables you to control who can connect and
+set passwords required to connect.
 
-Takes a single argument, the username to remove.
+Takes the following parameters:
 
-=item C<add_peer>
+=over 4
 
-Adds peer servers that we will allow to connect to us and who we will connect to. Takes the following parameters:
+=item * B<'mask'>, a user@host or user@ipaddress mask to match against,
+mandatory;
 
-  'name', the name of the server. This is the IRC name, not hostname, mandatory;
-  'pass', the password they must supply to us, mandatory;
-  'rpass', the password we need to supply to them, mandatory;
-  'type', the type of server, 'c' for a connecting server, 'r' for one
-	  that we will connect to;
-  'raddress', the remote address to connect to, implies 'type' eq 'r';
-  'rport', the remote port to connect to, default is 6667;
-  'ipmask', either a scalar ipmask or an arrayref of Net::Netmask objects;
-  'auto', if set to true value will automatically connect to remote server if type is 'r';
+=item * B<'password'>, if specified, any client matching the mask must
+provide this to connect;
 
-Additionally, if L<POE::Filter::Zlib::Stream> is installed, ziplinks between L<POE::Component::Server::IRC> ircds are
-supported: 
+=item * B<'spoof'>, if specified, any client matching the mask will have
+their hostname changed to this;
 
-  'zip', set to a true value to enable ziplink support. This must be done on both ends of the connection;
+=item * B<'no_tilde'>, if specified, the '~' prefix is removed from their
+username;
 
-=item C<del_peer>
-
-Takes a single argument, the peer to remove. This does not disconnect the said peer if it is currently connected.
-
-=item C<add_auth>
-
-By default the IRCd allows any user@host to connect to the server without a password. Configuring auths enables you to
-control who can connect and set passwords required to connect.
-
-Takes a number of parameters:
-
-  'mask', a user@host or user@ipaddress mask to match against, mandatory;
-  'password', if specified any client matching the mask must provide this to connect;
-  'spoof', if specified any client matching the mask will have their hostname changed to this;
-  'no_tilde', if specified the '~' prefix is removed from their username;
+=back
 
 Auth masks are processed in order of addition.
 
-If auth masks have been defined, then a connecting user *must* match one of the masks in order to be authorised
-to connect. This is a feature >;)
+If auth masks have been defined, then a connecting user *must* match one
+of the masks in order to be authorised to connect. This is a feature >;)
 
-=item C<del_auth>
+=head3 C<del_auth>
 
 Takes a single argument, the mask to remove.
 
-=item C<add_denial>
+=head3 C<add_operator>
 
-Takes one mandatory argument and one optional. The first mandatory argument is a L<Net::Netmask> object that will be used to check connecting IP addresses against. The second optional argument is a reason string for the denial.
+This adds an O line to the IRCd. Takes a number of parameters:
 
-=item C<del_denial>
+=over 4
 
-Takes one mandatory argument, a L<Net::Netmask> object to remove from the current denial list.
+=item * B<'username'>, the username of the IRC oper, mandatory;
 
-=item C<add_exemption>
+=item * B<'password'>, the password, mandatory;
 
-Takes one mandatory argument, a L<Net::Netmask> object that will be checked against connecting IP addresses for exemption from denials.
-
-=item C<del_exemption>
-
-Takes one mandatory argument, a L<Net::Netmask> object to remove from the current exemption list.
+=item * B<'ipmask'>, either a scalar ipmask or an arrayref of Net::Netmask
+objects;
 
 =back
 
-=head2 STATE MANIPULATION
+A scalar ipmask can be contain '*' to match any number of characters or
+'?' to match one character. If no 'ipmask' is provided, operators are only
+allowed to OPER from the loopback interface.
 
-The STATE contains all the salient information regarding nicknames, channels and peers. These methods allow you to query and manipulate this information.
+B<'password'> can be either plain-text, L<C<crypt>|crypt>'d or unix/apache
+md5. See the C<mkpasswd> function in
+L<POE::Component::Server::IRC::Common|POE::Component::Server::IRC::Common>
+for how to generate passwords.
 
-=over
+=head3 C<del_operator>
 
-=item C<server_name>
+Takes a single argument, the username to remove.
 
-No arguments, returns the name of the ircd.
+=head3 C<add_peer>
 
-=item C<server_version>
+Adds peer servers that we will allow to connect to us and who we will
+connect to. Takes the following parameters:
 
-No arguments, returns the software version of the ircd.
+=over 4
 
-=item C<server_created>
+=item * B<'name'>, the name of the server. This is the IRC name, not
+hostname, mandatory;
 
-No arguments, returns a string signifying when the ircd was created.
+=item * B<'pass'>, the password they must supply to us, mandatory;
 
-=item C<server_config>
+=item * B<'rpass'>, the password we need to supply to them, mandatory;
 
-Takes one argument, the server configuration value to query.
+=item * B<'type'>, the type of server, 'c' for a connecting server, 'r'
+for one that we will connect to;
 
-=item C<state_nicks>
+=item * B<'raddress'>, the remote address to connect to, implies 'type'
+eq 'r';
+
+=item * B<'rport'>, the remote port to connect to, default is 6667;
+
+=item * B<'ipmask'>, either a scalar ipmask or an arrayref of Net::Netmask
+objects;
+
+=item * B<'auto'>, if set to true value will automatically connect to
+remote server if type is 'r';
+
+=item * B<'zip'>, set to a true value to enable ziplink support. This must
+be done on both ends of the connection. Requires
+L<POE::Filter::Zlib::Stream|POE::Filter::Zlib::Stream>;
+
+=back
+
+=head3 C<del_peer>
+
+Takes a single argument, the peer to remove. This does not disconnect the
+said peer if it is currently connected.
+
+=head2 State queries
+
+The following methods allow you to query state information regarding
+nicknames, channels, and peers.
+
+=head3 C<state_nicks>
 
 Takes no arguments, returns a list of all nicknames in the state.
 
-=item C<state_chans>
+=head3 C<state_chans>
 
 Takes no arguments, returns a list of all channels in the state.
 
-=item C<state_peers>
+=head3 C<state_peers>
 
 Takes no arguments, returns a list of all irc servers in the state.
 
-=item C<state_nick_exists>
+=head3 C<state_nick_exists>
 
-Takes one argument, a nickname, returns true or false dependent on whether the given nickname exists or not.
+Takes one argument, a nickname, returns true or false dependent on whether
+the given nickname exists or not.
 
-=item C<state_chan_exists>
+=head3 C<state_chan_exists>
 
-Takes one argument, a channel name, returns true or false dependent on whether the given channel exists or not.
+Takes one argument, a channel name, returns true or false dependent on
+whether the given channel exists or not.
 
-=item C<state_peer_exists>
+=head3 C<state_peer_exists>
 
-Takes one argument, a peer server name, returns true or false dependent on whether the given peer exists or not.
+Takes one argument, a peer server name, returns true or false dependent
+on whether the given peer exists or not.
 
-=item C<state_user_full>
+=head3 C<state_user_full>
 
-Takes one argument, a nickname, returns that users full nick!user@host if they exist, undef if they don't.
+Takes one argument, a nickname, returns that users full nick!user@host
+if they exist, undef if they don't.
 
-=item C<state_user_nick>
+=head3 C<state_user_nick>
 
-Takes one argument, a nickname, returns the proper nickname for that user. Returns undef if the nick doesn't exist.
+Takes one argument, a nickname, returns the proper nickname for that user.
+Returns undef if the nick doesn't exist.
 
-=item C<state_user_umode>
+=head3 C<state_user_umode>
 
 Takes one argument, a nickname, returns that users mode setting.
 
-=item C<state_user_is_operator>
+=head3 C<state_user_is_operator>
 
-Takes one argument, a nickname, returns true or false dependent on whether the given nickname is an IRC operator or not.
+Takes one argument, a nickname, returns true or false dependent on whether
+the given nickname is an IRC operator or not.
 
-=item C<state_user_chans>
+=head3 C<state_user_chans>
 
-Takes one argument, a nickname, returns a list of channels that that nick is a member of.
+Takes one argument, a nickname, returns a list of channels that that nick
+is a member of.
 
-=item C<state_user_server>
+=head3 C<state_user_server>
 
-Takes one argument, a nickname, returns the name of the peer server that that user is connected from.
+Takes one argument, a nickname, returns the name of the peer server that
+that user is connected from.
 
-=item C<state_chan_list>
+=head3 C<state_chan_list>
 
-Takes one argument, a channel name, returns a list of the member nicks on that channel.
+Takes one argument, a channel name, returns a list of the member nicks on
+that channel.
 
-=item C<state_chan_list_prefixed>
+=head3 C<state_chan_list_prefixed>
 
-Takes one argument, a channel name, returns a list of the member nicks on that channel, nicknames will be prefixed with @%+ if they are +o +h or +v, respectively.
+Takes one argument, a channel name, returns a list of the member nicks on
+that channel, nicknames will be prefixed with @%+ if they are +o +h or +v,
+respectively.
 
-=item C<state_chan_topic>
+=head3 C<state_chan_topic>
 
-Takes one argument, a channel name, returns undef if no topic is set on that channel, or an arrayref consisting of the topic, who set it and the time they set it.
+Takes one argument, a channel name, returns undef if no topic is set on
+that channel, or an arrayref consisting of the topic, who set it and the
+time they set it.
 
-=item C<state_chan_mode_set>
+=head3 C<state_chan_mode_set>
 
-Takes two arguments, a channel name and a channel mode character. Returns true if that channel mode is set, false otherwise.
+Takes two arguments, a channel name and a channel mode character. Returns
+true if that channel mode is set, false otherwise.
 
-=item C<state_is_chan_member>
+=head3 C<state_is_chan_member>
 
-Takes two arguments, a nick and a channel name. Returns true if that nick is on channel, false otherwise.
+Takes two arguments, a nick and a channel name. Returns true if that nick
+is on channel, false otherwise.
 
-=item C<state_user_chan_mode>
+=head3 C<state_user_chan_mode>
 
-Takes two arguments, a nick and a channel name. Returns that nicks status ( +ohv or '' ) on that channel.
+Takes two arguments, a nick and a channel name. Returns that nicks status
+(+ohv or '') on that channel.
 
-=item C<state_is_chan_op>
+=head3 C<state_is_chan_op>
 
-Takes two arguments, a nick and a channel name. Returns true if that nick is an channel operator, false otherwise.
+Takes two arguments, a nick and a channel name. Returns true if that nick
+is an channel operator, false otherwise.
 
-=item C<state_is_chan_hop>
+=head3 C<state_is_chan_hop>
 
-Takes two arguments, a nick and a channel name. Returns true if that nick is an channel half-operator, false otherwise.
+Takes two arguments, a nick and a channel name. Returns true if that nick
+is an channel half-operator, false otherwise.
 
-=item C<state_has_chan_voice>
+=head3 C<state_has_chan_voice>
 
-Takes two arguments, a nick and a channel name. Returns true if that nick has channel voice, false otherwise.
+Takes two arguments, a nick and a channel name. Returns true if that nick
+has channel voice, false otherwise.
 
-=item C<daemon_server_kill>
+=head2 Server actions
 
-Takes two arguments, a nickname and a comment ( which is optional ); Issues a SERVER KILL of the given nick;
+=head3 C<daemon_server_kill>
 
-=item C<daemon_server_mode>
+Takes two arguments, a nickname and a comment (which is optional); Issues
+a SERVER KILL of the given nick;
 
-First argument is a channel name, remaining arguments are channel modes and their parameters to apply.
+=head3 C<daemon_server_mode>
 
-=item C<daemon_server_kick>
+First argument is a channel name, remaining arguments are channel modes
+and their parameters to apply.
 
-Takes two arguments that are mandatory and an optional one: channel name, nickname of the user to kick and a pithy comment.
+=head3 C<daemon_server_kick>
 
-=item C<daemon_server_remove>
+Takes two arguments that are mandatory and an optional one: channel name,
+nickname of the user to kick and a pithy comment.
 
-Takes two arguments that are mandatory and an optional one: channel name, nickname of the user to remove and a pithy comment.
+=head3 C<daemon_server_remove>
 
-=item C<daemon_server_wallops>
+Takes two arguments that are mandatory and an optional one: channel name,
+nickname of the user to remove and a pithy comment.
+
+=head3 C<daemon_server_wallops>
 
 Takes one argument, the message text to send.
-
-=back
 
 =head1 INPUT EVENTS
 
 These are POE events that can be sent to the component.
 
-=over
-
-=item C<register>
-
-Takes no arguments. Registers a session to receive events from the component.
-
-=item C<unregister>
-
-Takes no arguments. Unregisters a previously registered session.
-
-=item C<add_listener>
-
-Takes a number of arguments. Adds a new listener.
-
-        'port', the TCP port to listen on. Default is a random port;
-        'auth', enable or disable auth sub-system for this listener. Default enabled;
-        'bindaddr', specify a local address to bind the listener to;
-        'listenqueue', change the SocketFactory's ListenQueue;
-
-A listener is required to accept connections from clients.
-
-=item C<del_listener>
-
-Takes either 'port' or 'listener':
-
-        'listener' is a previously returned listener ID;
-        'port', listening TCP port;
-
-The listener will be deleted. Note: any connected clients on that port will not be disconnected.
-
-=item C<add_spoofed_nick>
+=head2 C<add_spoofed_nick>
 
 Takes a single argument a hashref which should have the following keys:
 
-  'nick', the nickname to add, mandatory;
-  'user', the ident you want the nick to have, default same as nick;
-  'hostname', the hostname, defaults to the server name;
-  'umode', specify whether this is to be an IRCop etc, default 'i';
-  'ts', unixtime, default is time(), best not to meddle;
+=over 4
 
-Note: spoofed nicks are currently only really functional for use as IRC services;
+=item * B<'nick'>, the nickname to add, mandatory;
 
-=item C<del_spoofed_nick>
+=item * B<'user'>, the ident you want the nick to have, defaults to the
+same as the nick;
 
-Takes a single mandatory argument, the spoofed nickname to remove. Optionally, you may
-specify a quit message for the spoofed nick.
+=item * B<'hostname'>, the hostname, defaults to the server name;
+
+=item * B<'umode'>, specify whether this is to be an IRCop etc, defaults
+to 'i';
+
+=item * B<'ts'>, unixtime, default is time(), best not to meddle;
 
 =back
 
-The following input events are for the benefit of spoofed nicks. All require a nickname
-of a spoofed nick as the first argument. 
+B<Note:> spoofed nicks are currently only really functional for use as IRC
+services.
 
-=over
+=head2 C<del_spoofed_nick>
 
-=item C<daemon_cmd_join>
+Takes a single mandatory argument, the spoofed nickname to remove.
+Optionally, you may specify a quit message for the spoofed nick.
+
+=head2 Spoofed commands
+
+The following input events are for the benefit of spoofed nicks. All
+require a nickname of a spoofed nick as the first argument.
+
+=head3 C<daemon_cmd_join>
 
 Takes two arguments, a spoofed nick and a channel name to join.
 
-=item C<daemon_cmd_part>
+=head3 C<daemon_cmd_part>
 
 Takes two arguments, a spoofed nick and a channel name to part from.
 
-=item C<daemon_cmd_mode>
+=head3 C<daemon_cmd_mode>
 
-Takes at least three arguments, a spoofed nick, a channel and a channel mode to apply.
-Additional arguments are parameters for the channel modes.
+Takes at least three arguments, a spoofed nick, a channel and a channel
+mode to apply. Additional arguments are parameters for the channel modes.
 
-=item C<daemon_cmd_kick>
+=head3 C<daemon_cmd_kick>
 
-Takes at least three arguments, a spoofed nick, a channel name and the nickname of a 
-user to kick from that channel. You may supply a fourth argument which will be the 
-kick comment.
+Takes at least three arguments, a spoofed nick, a channel name and the
+nickname of a user to kick from that channel. You may supply a fourth
+argument which will be the kick comment.
 
-=item C<daemon_cmd_topic>
+=head3 C<daemon_cmd_topic>
 
-Takes three arguments, a spoofed nick, a channel name and the topic to set on that 
-channel. If the third argument is an empty string then the channel topic will be unset.
+Takes three arguments, a spoofed nick, a channel name and the topic to
+set on that channel. If the third argument is an empty string then the
+channel topic will be unset.
 
-=item C<daemon_cmd_nick>
+=head3 C<daemon_cmd_nick>
 
 Takes two arguments, a spoofed nick and a new nickname to change to.
 
-=item C<daemon_cmd_gline>
+=head3 C<daemon_cmd_gline>
 
-Takes three arguments, a spoofed nick, a user@host mask to gline and a reason for the
-gline.
+Takes three arguments, a spoofed nick, a user@host mask to gline and a
+reason for the gline.
 
-=item C<daemon_cmd_kline>
+=head3 C<daemon_cmd_kline>
 
-Takes a number of arguments depending on where the KLINE is to be applied and for how long:
+Takes a number of arguments depending on where the KLINE is to be applied
+and for how long:
 
 To set a permanent KLINE:
 
-  $poe_kernel->post( 'ircd', 
-		     'daemon_cmd_kline', 
-		     $spoofed_nick,
-		     $nick || $user_host_mask,
-		     $reason,
-  );
+ $ircd->yield(
+     'daemon_cmd_kline',
+     $spoofed_nick,
+     $nick || $user_host_mask,
+     $reason,
+ );
 
 To set a temporary 10 minute KLINE:
 
-  $poe_kernel->post( 'ircd', 
-		     'daemon_cmd_kline', 
-		     $spoofed_nick,
-		     10,
-		     $nick || $user_host_mask,
-		     $reason,
-  );
+ $ircd->yield(
+     'daemon_cmd_kline',
+     $spoofed_nick,
+     10,
+     $nick || $user_host_mask,
+     $reason,
+ );
 
 To set a temporary 10 minute KLINE on all servers:
 
-  $poe_kernel->post( 'ircd', 
-		     'daemon_cmd_kline', 
-		     $spoofed_nick,
-		     10,
-		     $nick || $user_host_mask,
-		     'on',
-		     '*',
-		     $reason,
-  );
+ $ircd->yield(
+     'daemon_cmd_kline',
+     $spoofed_nick,
+     10,
+     $nick || $user_host_mask,
+     'on',
+     '*',
+     $reason,
+ );
 
-=item C<daemon_cmd_unkline>
+=head3 C<daemon_cmd_unkline>
 
 Removes a KLINE as indicated by the user@host mask supplied. 
 
 To remove a KLINE:
 
-  $poe_kernel->post( 'ircd', 
-		     'daemon_cmd_unkline', 
-		     $spoofed_nick,
-		     $user_host_mask,
-  );
+ $ircd->yield(
+     'daemon_cmd_unkline',
+     $spoofed_nick,
+     $user_host_mask,
+ );
 
 To remove a KLINE from all servers:
 
-  $poe_kernel->post( 'ircd', 
-		     'daemon_cmd_unkline', 
-		     $spoofed_nick,
-		     $user_host_mask,
-		     'on',
-		     '*',
-  );
+ $ircd->yield(
+     'daemon_cmd_unkline',
+     $spoofed_nick,
+     $user_host_mask,
+     'on',
+     '*',
+ );
 
-=item C<daemon_cmd_rkline>
+=head3 C<daemon_cmd_rkline>
 
-Used to set a regex based KLINE. The regex given must be based on a user@host mask.
+Used to set a regex based KLINE. The regex given must be based on a
+user@host mask.
 
 To set a permanent RKLINE:
 
-  $poe_kernel->post( 'ircd', 
-		     'daemon_cmd_rkline', 
-		     $spoofed_nick,
-		     '^.*$@^(yahoo|google|microsoft)\.com$',
-		     $reason,
-  );
+ $ircd->yield(
+     'daemon_cmd_rkline',
+     $spoofed_nick,
+     '^.*$@^(yahoo|google|microsoft)\.com$',
+     $reason,
+ );
 
 To set a temporary 10 minute RKLINE:
 
-  $poe_kernel->post( 'ircd', 
-		     'daemon_cmd_rkline', 
-		     $spoofed_nick,
-		     10,
-		     '^.*$@^(yahoo|google|microsoft)\.com$',
-		     $reason,
-  );
+ $ircd->yield(
+     'daemon_cmd_rkline',
+     $spoofed_nick,
+     10,
+     '^.*$@^(yahoo|google|microsoft)\.com$',
+     $reason,
+ );
 
 To set a temporary 10 minute RKLINE on all servers:
 
-  $poe_kernel->post( 'ircd', 
-		     'daemon_cmd_kline', 
-		     $spoofed_nick,
-		     10,
-		     '^.*$@^(yahoo|google|microsoft)\.com$',
-		     'on',
-		     '*',
-		     $reason,
-  );
+ $ircd->yield(
+     'daemon_cmd_kline',
+     $spoofed_nick,
+     10,
+     '^.*$@^(yahoo|google|microsoft)\.com$',
+     'on',
+     '*',
+     $reason,
+ );
 
-=item C<daemon_cmd_sjoin>
+=head3 C<daemon_cmd_sjoin>
 
-Takes two arguments a spoofed nickname and an existing channel name. This command will then
-manipulate the channel timestamp to clear all modes on that channel, including existing
-channel operators, reset the channel mode to '+nt', the spoofed nick will then join the 
-channel and gain channel ops.
+Takes two arguments a spoofed nickname and an existing channel name. This
+command will then manipulate the channel timestamp to clear all modes on
+that channel, including existing channel operators, reset the channel mode
+to '+nt', the spoofed nick will then join the channel and gain channel ops.
 
-=item C<daemon_cmd_privmsg>
+=head3 C<daemon_cmd_privmsg>
 
-Takes three arguments, a spoofed nickname, a target ( which can be a nickname or a channel name )
-and whatever text you wish to send. 
+Takes three arguments, a spoofed nickname, a target (which can be a
+nickname or a channel name) and whatever text you wish to send.
 
-=item C<daemon_cmd_notice>
+=head3 C<daemon_cmd_notice>
 
-Takes three arguments, a spoofed nickname, a target ( which can be a nickname or a channel name )
-and whatever text you wish to send. 
+Takes three arguments, a spoofed nickname, a target (which can be a
+nickname or a channel name) and whatever text you wish to send.
 
-=item C<daemon_cmd_locops>
+=head3 C<daemon_cmd_locops>
 
-Takes two arguments, a spoofed nickname and the text message to send to local operators.
+Takes two arguments, a spoofed nickname and the text message to send to
+local operators.
 
-=item C<daemon_cmd_wallops>
+=head3 C<daemon_cmd_wallops>
 
-Takes two arguments, a spoofed nickname and the text message to send to all operators.
+Takes two arguments, a spoofed nickname and the text message to send to
+all operators.
 
-=item C<daemon_cmd_operwall>
+=head3 C<daemon_cmd_operwall>
 
-Takes two arguments, a spoofed nickname and the text message to send to all operators.
-
-=back
+Takes two arguments, a spoofed nickname and the text message to send to
+all operators.
 
 =head1 OUTPUT EVENTS
 
-After a session has registered with the component it will receive the following events:
+=head2 C<ircd_daemon_server>
 
 =over
 
-=item C<ircd_registered>
+=item Emitted: when a server is introduced onto the network;
 
-  Emitted: when a session registers with the component;
-  Target: the registering session;
-  Args:
-        ARG0, the component's object;
+=item Target: all plugins and registered sessions;
 
-=item C<ircd_unregistered>
+=item Args:
 
-  Emitted: when a session unregisters with the component;
-  Target: the unregistering session;
-  Args: none
+=over 4
 
-=item ircd_listener_add
+=item * C<ARG0>, the server name;
 
-  Emitted: on a successful add_listener() call;
-  Target: all plugins and registered sessions;
-  Args:
-        ARG0, the listening port;
-        ARG1, the listener id;
+=item * C<ARG1>, the name of the server that is introducing them;
 
-=item ircd_listener_del
+=item * C<ARG2>, the hop count;
 
-  Emitted: on a successful del_listener() call;
-  Target: all plugins and registered sessions;
-  Args:
-        ARG0, the listening port;
-        ARG1, the listener id;
-
-=item ircd_listener_failure
-
-  Emitted: when a listener wheel fails;
-  Target: all plugins and registered sessions;
-  Args:
-        ARG0, the listener id;
-        ARG1, the name of the operation that failed;
-        ARG2, numeric value for $!;
-        ARG3, string value for $!;
-
-=item ircd_daemon_server
-
-  Emitted: when a server is introduced onto the network;
-  Target: all plugins and registered sessions;
-  Args:
-	ARG0, server name;
-	ARG1, the name of the server that is introducing them;
-	ARG2, Hop count;
-	ARG3, Server description;
-
-=item ircd_daemon_squit
-
-  Emitted: when a server quits the network;
-  Target: all plugins and registered sessions;
-  Args:
-	ARG0, the server name;
-
-=item ircd_daemon_nick
-
-  Emitted: when a user is introduced onto the network or a user changes nick;
-  Target: all plugins and registered sessions;
-  Args: ( new nick ):
-	ARG0, nickname;
-	ARG1, hop count;
-	ARG2, Time Stamp (TS);
-	ARG3, umode;
-	ARG4, ident;
-	ARG5, hostname;
-	ARG6, servername;
-	ARG7, Real Name;
-
-  Args: ( nick change ):
-	ARG0, the full user (nick!ident@host);
-	ARG1, the nickname they are changing to;
-
-=item ircd_daemon_umode
-
-  Emitted: when a user performs a umode change;
-  Target: all plugins and registered sessions;
-  Args:
-	ARG0, the full user (nick!ident@host);
-	ARG1, the umode changes they made;
-
-=item ircd_daemon_quit
-
-  Emitted: when a user quits or the server they are on squits;
-  Target: all plugins and registered sessions;
-  Args:
-	ARG0, the full user (nick!ident@host);
-	ARG1, Quit message;
-
-=item ircd_daemon_join
-
-  Emitted: when a user joins a channel;
-  Target: all plugins and registered sessions;
-  Args:
-	ARG0, the full user (nick!ident@host);
-	ARG1, the channel name;
-
-=item ircd_daemon_part
-
-  Emitted: when a user parts a channel;
-  Target: all plugins and registered sessions;
-  Args:
-	ARG0, the full user (nick!ident@host);
-	ARG1, the channel name;
-	ARG2, part message or nickname;
-
-=item ircd_daemon_kick
-
-  Emitted: when a user is kicked from a channel;
-  Target: all plugins and registered sessions;
-  Args:
-	ARG0, the full user (nick!ident@host) of the kicker;
-	ARG1, the channel name;
-	ARG2, the nick of the kicked person;
-	ARG3, some pithy comment;
-
-=item ircd_daemon_mode
-
-  Emitted: when a mode is changed on a channel;
-  Target: all plugins and registered sessions;
-  Args:
-	ARG0, the full user (nick!ident@host) or servername;
-	ARG1, Channel name;
-	ARG2 .. $#_: modes and arguments;
-
-=item ircd_daemon_topic
-
-  Emitted: when a topic changes on a channel;
-  Target: all plugins and registered sessions;
-  Args:
-	ARG0, the full user (nick!ident@host);
-	ARG1, Channel name;
-	ARG2, the new topic;
-
-=item ircd_daemon_public
-
-  Emitted: on channel targetted privmsg, a spoofed nick must be on the channel;
-  Target: all plugins and registered sessions;
-  Args:
-	ARG0, the full user (nick!ident@host);
-	ARG1, the channel name;
-	ARG2, what was said;
-
-=item ircd_daemon_privmsg
-
-  Emitted: when someone sends a privmsg to a spoofed nick;
-  Target: all plugins and registered sessions;
-  Args:
-	ARG0, the full user (nick!ident@host);
-	ARG1, the spoofed nick targetted;
-	ARG2, what was said;
-
-=item ircd_daemon_notice
-
-  Emitted: when someone sends a notice to a spoofed nick or channel;
-  Target: all plugins and registered sessions;
-  Args:
-	ARG0, the full user (nick!ident@host);
-	ARG1, the spoofed nick targetted or channel spoofed nick is on;
-	ARG2, what was said;
-
-=item ircd_daemon_invite
-
-  Emitted: when someone invites a spoofed nick to a channel;
-  Target: all plugins and registered sessions;
-  Args:
-	ARG0, the full user (nick!ident@host);
-	ARG1, the spoofed nick targetted;
-	ARG2, the channel invited to;
-
-=item ircd_daemon_rehash
-
-  Emitted: when an oper issues REHASH command;
-  Target: all plugins and registered sessions;
-  Args:
-	ARG0, the full user (nick!ident@host);
-
-=item ircd_daemon_die
-
-  Emitted: when an oper issues DIE command;
-  Target: all plugins and registered sessions;
-  Args:
-	ARG0, the full user (nick!ident@host);
-
-Note: the component will shutdown, this is a feature;
-
-=item ircd_daemon_gline
-
-  Emitted: when an oper issues GLINE command;
-  Target: all plugins and registered sessions;
-  Args:
-	ARG0, the full user (nick!ident@host);
-	ARG1, user mask;
-	ARG2, host mask;
-	ARG3, Reason;
-
-=item ircd_daemon_kline
-
-  Emitted: when an oper issues KLINE command;
-  Target: all plugins and registered sessions;
-  Args:
-	ARG0, the full user (nick!ident@host);
-	ARG1, target for the KLINE;
-	ARG2, duration in seconds;
-	ARG3, user mask;
-	ARG4, host mask;
-	ARG5, Reason;
-
-=item ircd_daemon_rkline
-
-  Emitted: when an oper issues RKLINE command;
-  Target: all plugins and registered sessions;
-  Args:
-	ARG0, the full user (nick!ident@host);
-	ARG1, target for the RKLINE;
-	ARG2, duration in seconds;
-	ARG3, user mask;
-	ARG4, host mask;
-	ARG5, Reason;
-
-=item ircd_daemon_unkline
-
-  Emitted: when an oper UNKLINEs a KLINE;
-  Target: all plugins and registered sessions;
-  Args:
-	ARG0, the full user (nick!ident@host);
-	ARG1, target for the UNKLINE;
-	ARG2, user mask;
-	ARG3, host mask;
-
-=item ircd_daemon_locops
-
-  Emitted: when an oper issues a LOCOPS;
-  Target: all plugins and registered sessions;
-  Args:
-	ARG0, the full user (nick!ident@host);
-	ARG1, the locops message;
-
-=item ircd_daemon_operwall
-
-  Emitted: when an oper issues a WALLOPS or OPERWALL;
-  Target: all plugins and registered sessions;
-  Args:
-	ARG0, the full user (nick!ident@host);
-	ARG1, the wallops or operwall message;
-
-=item ircd_daemon_wallops
-
-  Emitted: when a server issues a WALLOPS;
-  Target: all plugins and registered sessions;
-  Args:
-	ARG0, the server name;
-	ARG1, the wallops message;
+=item * C<ARG3>, the server description;
 
 =back
 
-=head1 PLUGIN SYSTEM
+=back
 
-Plugins are a way of handling output events from the component with plugin object
-handlers that are loaded and processed within the component event dispatch system.
-
-Events are processed with the dispatch system, first by plugin handlers within the 
-component itself, then by loaded plugins, then dispatched to registered sessions.
-
-The general architecture of using the plugins should be:
-
-	# Import the stuff...
-	use POE;
-	use POE::Component::Server::IRC;
-	use POE::Component::Server::IRC::Plugin::ExamplePlugin;
-
-	# Create the IRC server here
-	my $irc = POE::Component::Server::IRC->spawn() or die 'Nooo!';
-
-	# Create our session here
-	POE::Session->create( ... );
-
-	# Create the plugin
-	# Of course it could be something like $plugin = MyPlugin->new();
-	my $plugin = POE::Component::Server::IRC::Plugin::ExamplePlugin->new( ... );
-
-	# Hook it up!
-	$irc->plugin_add( 'ExamplePlugin', $plugin );
-
-	# OOPS, we lost the plugin object!
-	my $pluginobj = $irc->plugin_get( 'ExamplePlugin' );
-
-	# We want a list of plugins and objects
-	my $hashref = $irc->plugin_list();
-
-	# Oh! We want a list of plugin aliases.
-	my @aliases = keys %{ $irc->plugin_list() };
-
-	# Ah, we want to remove the plugin
-	$plugin = $irc->plugin_del( 'ExamplePlugin' );
-
-The plugins themselves will conform to the standard API described here:
-
-	# Import the constants
-	use POE::Component::Server::IRC::Plugin qw( :ALL );
-
-	# Our constructor
-	sub new {
-		...
-	}
-
-	# Required entry point for POE::Component::Server::IRC
-	sub PCSI_register {
-		my( $self, $irc ) = @_;
-
-		# Register events we are interested in
-		$irc->plugin_register( $self, 'SERVER', qw(all) );
-
-		# Return success
-		return 1;
-	}
-
-	# Required exit point for POE::Component::Server::IRC
-	sub PCSI_unregister {
-		my( $self, $irc ) = @_;
-
-		# PCSI will automatically unregister events for the plugin
-
-		# Do some cleanup...
-
-		# Return success
-		return 1;
-	}
-
-	# Registered events will be sent to methods starting with IRC_
-	# If the plugin registered for SERVER - daemon_join
-	sub IRCD_daemon_join {
-		my( $self, $irc, @args ) = @_;
-		
-		# @args will be an array of scalar references.
-
-		# Return an exit code
-		return PCSI_EAT_NONE;
-	}
-
-	# Default handler for events that do not have a corresponding plugin method defined.
-	sub _default {
-		my( $self, $irc, $event ) = splice @_, 0, 3;
-
-		print "Default called for $event\n";
-
-		# Return an exit code
-		return PCSI_EAT_NONE;
-	}
-
-Available methods to use on the POE::Component::Server::IRC object:
+=head2 C<ircd_daemon_squit>
 
 =over
 
-=item plugin_add
+=item Emitted: when a server quits the network;
 
-Accepts two arguments:
+=item Target: all plugins and registered sessions;
 
-  The alias for the plugin
-  The actual plugin object
+=item Args:
 
-The alias is there for the user to refer to it, as it is possible to have multiple
-plugins of the same kind active in one PCSI object.
+=over 4
 
-This method will call $plugin->PCSI_register( $ircd )
-
-Returns 1 if plugin was initialized, undef if not.
-
-=item plugin_get
-
-Accepts one argument:
-  The alias for the plugin
-
-Returns the plugin object if it was found, undef if not.
-
-=item plugin_del
-
-Accepts one argument:
-  The alias for the plugin or the plugin object itself
-
-This method will call $plugin->PCSI_unregister( $ircd )
-
-Returns the plugin object if the plugin was removed, undef if not.
-
-=item plugin_list
-
-Has no arguments.
-
-Returns a hashref of plugin objects, keyed on alias, or an empty list if there are no
-plugins loaded.
+=item * C<ARG0>, the server name;
 
 =back
 
-The following methods are called on the PCSI object from within the plugin object:
+=back
+
+=head2 C<ircd_daemon_nick>
 
 =over
 
-=item plugin_register
+=item Emitted: when a user is introduced onto the network or changes their
+nickname
 
-Accepts the following arguments:
-  The plugin object
-  The type of the hook ( 'SERVER' )
-  The event name(s) to watch
+=item Target: all plugins and registered sessions;
 
-The event names can be as many as possible, or an arrayref. They correspond
-to the ircd_* events listed in POE::Component::Server::IRC, 
-and naturally, arbitrary events too.
+=item Args (new user):
 
-You do not need to supply events with ircd_ in front of them, just the names.
+=over 4
 
-It is possible to register for all events by specifying 'all' as an event.
+=item * C<ARG0>, the nickname;
 
-Returns 1 if everything checked out fine, undef if something's seriously wrong
+=item * C<ARG1>, the hop count;
 
-=item plugin_unregister
+=item * C<ARG2>, the time stamp (TS);
 
-Accepts the following arguments:
-  The plugin object
-  The type of the hook ( 'SERVER' )
-  The event name(s) to unwatch
+=item * C<ARG3>, the user mode;
 
-The event names can be as many as possible, or an arrayref. They correspond
-to the ircd_* events listed in POE::Component::Server::IRC, and naturally, 
-arbitrary events too.
+=item * C<ARG4>, the ident;
 
-You do not need to supply events with ircd_ in front of them, just the names.
+=item * C<ARG5>, the hostname;
 
-Returns 1 if all the event name(s) was unregistered, undef if some was not found
+=item * C<ARG6>, the server name;
+
+=item * C<ARG7>, the real name;
 
 =back
 
-The following two OUTPUT events are generated on plugin registration/unregistration:
+=item Args (nick change):
+
+=over 4
+
+=item * C<ARG0>, the full nick!user@host;
+
+=item * C<ARG1>, the new nickname;
+
+=back
+
+=back
+
+=head2 C<ircd_daemon_umode>
 
 =over
 
-=item ircd_plugin_add
+=item Emitted: when a user changes their user mode;
 
-This event will be triggered after a plugin is added. It receives two arguments, the first being
-the plugin name, and the second being the plugin object.
+=item Target: all plugins and registered sessions;
 
-=item ircd_plugin_del
+=item Args:
 
-This event will be triggered after a plugin is deleted. It receives two arguments, the first being
-the plugin name, and the second being the plugin object.
+=over 4
+
+=item * C<ARG0>, the full nick!user@host;
+
+=item * C<ARG1>, the user mode change;
 
 =back
 
-Plugin handler methods receive the PCSI object as their first argument. The remaining 
-arguments are scalar references to the event arguments.
+=back
 
-The exit code of plugin handlers is important. Your handlers *must* return one of the
-following:
+=head2 C<ircd_daemon_quit>
 
 =over
 
-=item PCSI_EAT_NONE
+=item Emitted: when a user quits or the server they are on squits;
 
-	This means the event will continue to be processed by remaining plugins and
-	finally, sent to interested sessions that registered for it.
+=item Target: all plugins and registered sessions;
 
-=item PCSI_EAT_CLIENT
+=item Args:
 
-	This means the event will continue to be processed by remaining plugins but
-	it will not be sent to any sessions that registered for it.
+=over 4
 
-=item PCSI_EAT_PLUGIN
+=item * C<ARG0>, the full nick!user@host;
 
-	This means the event will not be processed by remaining plugins, it will go
-	straight to interested sessions.
-
-=item PCSI_EAT_ALL
-
-	This means the event will be completely discarded, no plugin or session will see it.
+=item * C<ARG1>, the quit message;
 
 =back
 
-The above constants can be included in your plugin packages by importing the :ALL tag
-from POE::Component::Server::IRC::Plugin as so:
+=back
 
-  use POE::Component::Server::IRC::Plugin qw(:ALL);
+=head2 C<ircd_daemon_join>
+
+=over
+
+=item Emitted: when a user joins a channel
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>, the full nick!user@host;
+
+=item * C<ARG1>, the channel name;
+
+=back
+
+=back
+
+=head2 C<ircd_daemon_part>
+
+=over
+
+=item Emitted: when a user parts a channel;
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>, the full nick!user@host;
+
+=item * C<ARG1>, the channel name;
+
+=item * C<ARG2>, the part message;
+
+=back
+
+=back
+
+=head2 C<ircd_daemon_kick>
+
+=over
+
+=item Emitted: when a user is kicked from a channel;
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>, the full nick!user@host of the kicker;
+
+=item * C<ARG1>, the channel name;
+
+=item * C<ARG2>, the nick of the kicked user;
+
+=item * C<ARG3>, the kick message;
+
+=back
+
+=back
+
+=head2 C<ircd_daemon_mode>
+
+=over
+
+=item Emitted: when a channel mode is changed;
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>, the full nick!user@host or server name;
+
+=item * C<ARG1>, the channel name;
+
+=item * C<ARG2..$#_>, the modes and their arguments;
+
+=back
+
+=back
+
+=head2 C<ircd_daemon_topic>
+
+=over
+
+=item Emitted: when a channel topic is changed
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>, the full nick!user@host of the changer;
+
+=item * C<ARG1>, the channel name;
+
+=item * C<ARG2>, the new topic;
+
+=back
+
+=back
+
+=head2 C<ircd_daemon_public>
+
+=over
+
+=item Emitted: when a channel message is sent (a spoofed nick must be in
+the channel)
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>, the full nick!user@host of the sender;
+
+=item * C<ARG1>, the channel name;
+
+=item * C<ARG2>, the message;
+
+=back
+
+=back
+
+=head2 C<ircd_daemon_privmsg>
+
+=over
+
+=item Emitted: when someone sends a private message to a spoofed nick
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>, the full nick!user@host of the sender;
+
+=item * C<ARG1>, the spoofed nick targeted;
+
+=item * C<ARG2>, the message;
+
+=back
+
+=back
+
+=head2 C<ircd_daemon_notice>
+
+=over
+
+=item Emitted: when someone sends a notice to a spoofed nick or channel
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>, the full nick!user@host of the sender;
+
+=item * C<ARG1>, the spoofed nick targeted or channel spoofed nick is in;
+
+=item * C<ARG2>, the message;
+
+=back
+
+=back
+
+=head2 C<ircd_daemon_invite>
+
+=over
+
+=item Emitted: when someone invites a spoofed nick to a channel;
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>, the full nick!user@host of the inviter;
+
+=item * C<ARG1>, the spoofed nick being invited;
+
+=item * C<ARG2>, the channel being invited to;
+
+=back
+
+=back
+
+=head2 C<ircd_daemon_rehash>
+
+=over
+
+=item Emitted: when an oper issues a REHASH command;
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>, the full nick!user@host of the oper;
+
+=back
+
+=back
+
+=head2 C<ircd_daemon_die>
+
+=over
+
+=item Emitted: when an oper issues a DIE command;
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>, the full nick!user@host of the oper;
+
+=back
+
+=back
+
+B<Note:> the component will shutdown, this is a feature;
+
+=head2 C<ircd_daemon_gline>
+
+=over
+
+=item Emitted: when an oper issues a GLINE command;
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>, the full nick!user@host;
+
+=item * C<ARG1>, the user mask;
+
+=item * C<ARG2>, the host mask;
+
+=item * C<ARG3>, the reason;
+
+=back
+
+=back
+
+=head2 C<ircd_daemon_kline>
+
+=over
+
+=item Emitted: when an oper issues a KLINE command;
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>, the full nick!user@host;
+
+=item * C<ARG1>, the target for the KLINE;
+
+=item * C<ARG2>, the duration in seconds;
+
+=item * C<ARG3>, the user mask;
+
+=item * C<ARG4>, the host mask;
+
+=item * C<ARG5>, the reason;
+
+=back
+
+=back
+
+=head2 C<ircd_daemon_rkline>
+
+=over
+
+=item Emitted: when an oper issues an RKLINE command;
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>, the full nick!user@host;
+
+=item * C<ARG1>, the target for the RKLINE;
+
+=item * C<ARG2>, the duration in seconds;
+
+=item * C<ARG3>, the user mask;
+
+=item * C<ARG4>, the host mask;
+
+=item * C<ARG5>, the reason;
+
+=back
+
+=back
+
+=head2 C<ircd_daemon_rkline>
+
+=over
+
+=item Emitted: when an oper issues an UNKLINE command;
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>, the full nick!user@host;
+
+=item * C<ARG1>, the target for the UNKLINE;
+
+=item * C<ARG2>, the user mask;
+
+=item * C<ARG3>, the host mask;
+
+=back
+
+=back
+
+=head2 C<ircd_daemon_locops>
+
+=over
+
+=item Emitted: when an oper issues a LOCOPS command;
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>, the full nick!user@host;
+
+=item * C<ARG1>, the locops message;
+
+=back
+
+=back
+
+=head2 C<ircd_daemon_operwall>
+
+=over
+
+=item Emitted: when an oper issues a WALLOPS or OPERWALL command;
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>, the full nick!user@host;
+
+=item * C<ARG1>, the wallops or operwall message;
+
+=back
+
+=back
+
+=head2 C<ircd_daemon_wallops>
+
+=over
+
+=item Emitted: when a server issues a WALLOPS;
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>, the server name;
+
+=item * C<ARG1>, the wallops message;
+
+=back
+
+=back
+
+=head1 BUGS
+
+A few have turned up in the past and they are sure to again. Please use
+L<http://rt.cpan.org/> to report any. Alternatively, email the current
+maintainer.
+
+=head1 DEVELOPMENT
+
+You can find the latest source on github:
+L<http://github.com/bingos/poe-component-server-irc>
+
+The project's developers usually hang out in the C<#poe> IRC channel on
+irc.perl.org. Do drop us a line.
+
+=head1 MAINTAINER
+
+Hinrik E<Ouml>rn SigurE<eth>sson <hinrik.sig@gmail.com>
 
 =head1 AUTHOR
 
@@ -9269,7 +9383,9 @@ Chris 'BinGOs' Williams
 
 Copyright C<(c)> Chris Williams
 
-This module may be used, modified, and distributed under the same terms as Perl itself. Please see the license that came with your Perl distribution for details.
+This module may be used, modified, and distributed under the same terms as
+Perl itself. Please see the license that came with your Perl distribution
+for details.
 
 =head1 KUDOS
 
@@ -9279,11 +9395,11 @@ Buu for pestering me when I started to procrastinate =]
 
 =head1 SEE ALSO
 
-L<Net::Netmask>
+L<POE|POE> L<http://poe.perl.org/>
 
-POE L<POE> L<http://poe.perl.org/>
+L<POE::Component::Server::IRC::Backend|POE::Component::IRC::Server::Backend>
 
-L<POE::Component::Server::IRC::Backend>
+L<Net::Netmask|Net::Netmask>
 
 Hybrid IRCD L<http://ircd-hybrid.com/>
 
@@ -9296,3 +9412,5 @@ RFC 2811 L<http://www.faqs.org/rfcs/rfc2811.html>
 RFC 2812 L<http://www.faqs.org/rfcs/rfc2812.html>
 
 RFC 2813 L<http://www.faqs.org/rfcs/rfc2813.html>
+
+=cut
