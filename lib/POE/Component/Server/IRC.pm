@@ -348,7 +348,7 @@ sub _connection_is_client {
 }
 
 sub _cmd_from_unknown {
-    my ($self, $wheel_id, $input) = splice @_, 0, 3;
+    my ($self, $wheel_id, $input) = @_;
 
     my $cmd     = uc $input->{command};
     my $params  = $input->{params} || [ ];
@@ -477,7 +477,7 @@ sub _cmd_from_unknown {
 }
 
 sub _cmd_from_peer {
-    my ($self, $conn_id, $input) = splice @_, 0, 3;
+    my ($self, $conn_id, $input) = @_;
 
     my $cmd     = $input->{command};
     my $params  = $input->{params};
@@ -569,7 +569,7 @@ sub _cmd_from_peer {
 }
 
 sub _cmd_from_client {
-    my ($self, $wheel_id, $input) = splice @_, 0, 3;
+    my ($self, $wheel_id, $input) = @_;
 
     my $cmd = uc $input->{command};
     my $params = $input->{params} || [ ];
@@ -638,7 +638,7 @@ sub _cmd_from_client {
         }
 
         $invalid = 1;
-        $self->_send_output_to_client($wheel_id, '421',$cmd);
+        $self->_send_output_to_client($wheel_id, '421', $cmd);
     }
 
     return 1 if $invalid;
@@ -3190,7 +3190,7 @@ sub _daemon_cmd_whois {
 sub _daemon_cmd_who {
     my $self   = shift;
     my $nick   = shift || return;
-    my ($who, $op_only) = splice @_, 0, 2;
+    my ($who, $op_only) = @_;
     my $server = $self->server_name();
     my $ref    = [ ];
     my $orig   = $who;

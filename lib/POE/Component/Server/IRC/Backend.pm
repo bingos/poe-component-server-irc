@@ -472,7 +472,7 @@ sub _sock_up {
 }
 
 sub _anti_flood {
-    my ($self, $wheel_id, $input) = splice @_, 0, 3;
+    my ($self, $wheel_id, $input) = @_;
     my $current_time = time();
 
     return if !$wheel_id || !$self->_wheel_exists($wheel_id) || !$input;
@@ -910,7 +910,8 @@ sub ident_agent_error {
 }
 
 sub antiflood {
-    my ($self, $wheel_id, $value) = splice @_, 0, 3;
+    my ($self, $wheel_id, $value) = @_;
+
     return if !$self->_wheel_exists($wheel_id);
     return 0 if !$self->{antiflood};
     return $self->{wheels}{$wheel_id}{antiflood} if !defined $value;
@@ -968,14 +969,14 @@ sub compressed_link {
 }
 
 sub disconnect {
-    my ($self, $wheel_id, $string) = splice @_, 0, 3;
+    my ($self, $wheel_id, $string) = @_;
     return if !$wheel_id || !$self->_wheel_exists($wheel_id);
     $self->{wheels}{$wheel_id}{disconnecting} = $string || 'Client Quit';
     return;
 }
 
 sub _disconnected {
-    my ($self, $wheel_id, $errstr) = splice @_, 0, 3;
+    my ($self, $wheel_id, $errstr) = @_;
     return if !$wheel_id || !$self->_wheel_exists($wheel_id);
 
     my $conn = delete $self->{wheels}{$wheel_id};
@@ -992,7 +993,7 @@ sub _disconnected {
 }
 
 sub connection_info {
-    my ($self, $wheel_id) = splice @_, 0, 2;
+    my ($self, $wheel_id) = @_;
     return if !$self->_wheel_exists($wheel_id);
     return map {
         $self->{wheels}{$wheel_id}{$_}
