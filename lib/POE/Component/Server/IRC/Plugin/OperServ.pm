@@ -1,14 +1,19 @@
-package POE::Component::Server::IRC::OperServ;
+package POE::Component::Server::IRC::Plugin::OperServ;
 
 use strict;
 use warnings;
 use POE::Component::Server::IRC::Plugin qw(:ALL);
-use base qw(POE::Component::Server::IRC);
 
-sub _load_our_plugins {
-    my $self = shift;
-    $self->SUPER::_load_our_plugins();
-    $self->yield(
+sub new {
+    my ($package, %args) = @_;
+    return bless \%args, $package;
+}
+
+sub PCSI_register {
+    my ($self, $ircd) = splice @_, 0, 2;
+
+    $ircd->plugin_register($self, 'SERVER', qw(daemon_privmsg daemon_join));
+    $ircd->yield(
         'add_spoofed_nick',
         {
             nick    => 'OperServ',
@@ -16,12 +21,17 @@ sub _load_our_plugins {
             ircname => 'The OperServ bot',
         },
     );
-    return;
+    return 1;
+}
+
+sub PCSI_unregister {
+    return 1;
 }
 
 sub IRCD_daemon_privmsg {
     my ($self, $ircd) = splice @_, 0, 2;
     my $nick = (split /!/, ${ $_[0] })[0];
+
     return PCSI_EAT_NONE if !$ircd->state_user_is_operator($nick);
     my $request = ${ $_[2] };
 
@@ -73,79 +83,35 @@ sub IRCD_daemon_join {
 
 =head1 NAME
 
-POE::Component::Server::IRC::OperServ - a fully event-driven networkable IRC server daemon module with an OperServ.
+POE::Component::Server::IRC::Plugin::OperServ - An OperServ plugin for POE::Component::Server::IRC
 
 =head1 SYNOPSIS
 
- # A fairly simple example:
- use strict;
- use warnings;
- use POE qw(Component::Server::IRC::OperServ);
+ use POE::Component::Server::IRC::Plugin::OperServ;
 
- my %config = ( 
-     servername => 'simple.poco.server.irc', 
-     nicklen    => 15,
-     network    => 'SimpleNET'
+ $ircd->plugin_add(
+     'OperServ',
+     POE::Component::Server::IRC::Plugin::OperServ->new(),
  );
-
- my $pocosi = POE::Component::Server::IRC::OperServ->spawn( config => \%config );
-
- POE::Session->create(
-     package_states => [
-         main => [qw(_start _default)],
-     ],
-     heap => { ircd => $pocosi },
- );
-
- $poe_kernel->run();
-
- sub _start {
-     my ($kernel, $heap) = @_[KERNEL, HEAP];
-     $heap->{ircd}->yield( 'register' );
-     # Anyone connecting from the loopback gets spoofed hostname
-     $heap->{ircd}->add_auth(mask => '*@localhost', spoof => 'm33p.com', no_tilde => 1);
-     # We have to add an auth as we have specified one above.
-     $heap->{ircd}->add_auth(mask => '*@*');
-     # Start a listener on the 'standard' IRC port.
-     $heap->{ircd}->add_listener(port => 6667);
-     # Add an operator who can connect from localhost
-     $heap->{ircd}->add_operator({ username => 'moo', password => 'fishdont' });
- }
-
- sub _default {
-     my ($event, $args) = @_[ARG0..$#_];
-     print STDOUT "$event: ";
-
-     for (@$args) {
-         SWITCH: {
-             if (ref $_ eq 'ARRAY') {
-                 print STDOUT "[", join ( ", ", @$_ ), "] ";
-                 last SWITCH;
-             }
-             if (ref $_ eq 'HASH') {
-                 print STDOUT "{", join ( ", ", %$_ ), "} ";
-                 last SWITCH;
-             }
-             print STDOUT "'$_' ";
-          }
-     }
-     print STDOUT "\n";
-     return 0;    # Don't handle signals.
- }
 
 =head1 DESCRIPTION
 
-POE::Component::Server::IRC::OperServ is subclass of
-L<POE::Component::Server::IRC|POE::Component::Server::IRC> which provides
-simple operator services.
+POE::Component::Server::IRC::Plugin::OperServ is a
+L<POE::Component::Server::IRC|POE::Component::Server::IRC> plugin which
+provides simple operator services.
 
-The documentation is the same as for L<POE::Component::Server::IRC>,
-consult that for usage.
-
-This subclass provides a server user called OperServ. OperServ accepts
+This plugin provides a server user called OperServ. OperServ accepts
 PRIVMSG commands from operators.
 
  /msg OperServ <command> <parameters>
+
+=head1 METHODS
+
+=head2 C<new>
+
+Returns a plugin object suitable for feeding to
+L<POE::Component::Server::IRC|POE::Component::ServeR::IRC>'s C<plugin_add>
+method.
 
 =head1 COMMANDS
 

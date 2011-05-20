@@ -4,6 +4,7 @@ Revision history for POE-Component-Server-IRC
     - Inherit from POE::Component::Syndicator
     - Make the DNS/Ident dependencies optional, and die if their use is
       requested when they are unavailable
+    - Turn the OperServ subclass into a plugin instead
 
 1.44  Mon Apr 4 20:44:51 GMT 2011
     - Fix to work with latest IRC::Utils

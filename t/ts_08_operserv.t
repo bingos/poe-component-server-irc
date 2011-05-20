@@ -3,11 +3,17 @@ use warnings;
 use Test::More tests => 12;
 use POE;
 use POE::Component::IRC;
-use POE::Component::Server::IRC::OperServ;
+use POE::Component::Server::IRC;
+use POE::Component::Server::IRC::Plugin::OperServ;
 
-my $pocosi = POE::Component::Server::IRC::OperServ->spawn(
+my $pocosi = POE::Component::Server::IRC->spawn(
     auth      => 0,
     antiflood => 0,
+);
+
+$pocosi->plugin_add(
+    'OperServ',
+    POE::Component::Server::IRC::Plugin::OperServ->new(),
 );
 
 my $pocoirc = POE::Component::IRC->spawn(flood => 1);
