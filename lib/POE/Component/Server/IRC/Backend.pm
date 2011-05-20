@@ -1123,17 +1123,23 @@ Returns an object. Accepts the following parameters, all are optional:
 
 =item * B<'alias'>, a POE::Kernel alias to set;
 
-=item * B<'auth'>, set to 0 to globally disable IRC authentication, default
-is auth is enabled;
+=item * B<'auth'>, set to a false value to globally disable IRC
+authentication, default is auth is enabled;
 
-=item * B<'antiflood'>, set to 0 to globally disable flood protection;
+=item * B<'antiflood'>, set to a false value to globally disable flood
+protection, default is true;
 
 =item * B<'prefix'>, this is the prefix that is used to generate event
-names that the component produces. The default is 'ircd_backend_'.
+names that the component produces. The default is 'ircd_'.
 
 =item * B<'states'>, an array reference of extra objects states for the IRC
 daemon's POE sessions. The elements can be array references of states
 as well as hash references of state => handler pairs.
+
+=item * B<'plugin_debug'>, set to a true value to print plugin debug info.
+Default is false.
+
+=item * B<'options'>, a hashref of options to L<POE::Session|POE::Session>
 
 =back
 
