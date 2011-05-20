@@ -134,10 +134,6 @@ sub _load_our_plugins {
     return 1;
 }
 
-###################
-# Control methods #
-###################
-
 sub shutdown {
     my ($self) = shift;
     $self->yield('shutdown', @_);
@@ -150,7 +146,7 @@ sub _shutdown {
     $self->{terminating} = 1;
     delete $self->{listeners};
     delete $self->{connectors};
-    delete $self->{wheels}; # :)
+    delete $self->{wheels};
     $self->_syndicator_destroy();
     $self->_unload_our_plugins();
     return;
@@ -159,10 +155,6 @@ sub _shutdown {
 sub _unload_our_plugins {
     return 1;
 }
-
-############################
-# Listener related methods #
-############################
 
 sub _accept_failed {
     my ($kernel, $self, $operation, $errnum, $errstr, $listener_id)
@@ -262,26 +254,26 @@ sub add_listener {
 
 sub _add_listener {
     my ($kernel, $self) = @_[KERNEL, OBJECT];
-    my %parms = @_[ARG0..$#_];
+    my %args = @_[ARG0..$#_];
 
-    $parms{ lc($_) } = delete $parms{$_} for keys %parms;
+    $args{ lc($_) } = delete $args{$_} for keys %args;
 
-    my $bindport  = $parms{port} || 0;
-    my $freq      = $parms{freq} || 180;
+    my $bindport  = $args{port} || 0;
+    my $freq      = $args{freq} || 180;
     my $auth      = 1;
     my $antiflood = 1;
     my $usessl    = 0;
-    $usessl    = 1 if $parms{usessl};
-    $auth      = 0 if defined $parms{auth} && $parms{auth} eq '0';
-    $antiflood = 0 if defined $parms{antiflood} && $parms{antiflood} eq '0';
+    $usessl    = 1 if $args{usessl};
+    $auth      = 0 if defined $args{auth} && $args{auth} eq '0';
+    $antiflood = 0 if defined $args{antiflood} && $args{antiflood} eq '0';
 
     my $listener = POE::Wheel::SocketFactory->new(
         BindPort     => $bindport,
         SuccessEvent => '_accept_connection',
         FailureEvent => '_accept_failed',
         Reuse        => 'on',
-        ($parms{bindaddr} ? (BindAddress => $parms{bindaddr}) : ()),
-        ($parms{listenqueue} ? (ListenQueue => $parms{listenqueue}) : ()),
+        ($args{bindaddr} ? (BindAddress => $args{bindaddr}) : ()),
+        ($args{listenqueue} ? (ListenQueue => $args{listenqueue}) : ()),
     );
 
     if ($listener) {
@@ -312,12 +304,12 @@ sub del_listener {
 
 sub _del_listener {
     my ($kernel, $self) = @_[KERNEL, OBJECT];
-    my %parms = @_[ARG0..$#_];
+    my %args = @_[ARG0..$#_];
 
-    $parms{lc $_} = delete $parms{$_} for keys %parms;
+    $args{lc $_} = delete $args{$_} for keys %args;
 
-    my $listener_id = delete $parms{listener};
-    my $port = delete $parms{port};
+    my $listener_id = delete $args{listener};
+    my $port = delete $args{port};
 
     if ($self->_listener_exists($listener_id)) {
         $port = delete $self->{listeners}{$listener_id}{port};
@@ -357,10 +349,6 @@ sub _port_exists {
     return;
 }
 
-#############################
-# Connector related methods #
-#############################
-
 sub add_connector {
     my $self = shift;
     croak("add_connector requires an even number of parameters") if @_ & 1;
@@ -370,13 +358,12 @@ sub add_connector {
 
 sub _add_connector {
     my ($kernel, $self, $sender) = @_[KERNEL, OBJECT, SENDER];
-    #croak "add_connector requires an even number of parameters" if @_[ARG0..$#_] & 1;
-    my %parms = @_[ARG0..$#_];
+    my %args = @_[ARG0..$#_];
 
-    $parms{lc $_} = delete $parms{$_} for keys %parms;
+    $args{lc $_} = delete $args{$_} for keys %args;
 
-    my $remoteaddress = $parms{remoteaddress};
-    my $remoteport = $parms{remoteport};
+    my $remoteaddress = $args{remoteaddress};
+    my $remoteport = $args{remoteport};
 
     return if !$remoteaddress || !$remoteport;
 
@@ -388,12 +375,12 @@ sub _add_connector {
         RemotePort     => $remoteport,
         SuccessEvent   => '_sock_up',
         FailureEvent   => '_sock_failed',
-        ($parms{bindaddress} ? (BindAddress => $parms{bindaddress}) : ()),
+        ($args{bindaddress} ? (BindAddress => $args{bindaddress}) : ()),
     );
 
     if ($wheel) {
-        $parms{wheel} = $wheel;
-        $self->{connectors}{$wheel->ID()} = \%parms;
+        $args{wheel} = $wheel;
+        $self->{connectors}{$wheel->ID()} = \%args;
     }
     return;
 }
@@ -427,7 +414,6 @@ sub _sock_up {
         InputEvent   => '_conn_input',
         ErrorEvent   => '_conn_error',
         FlushedEvent => '_conn_flushed',
-        #Filter       => $self->{filter},
         Filter       => POE::Filter::Stackable->new(
             Filters => [$self->{filter}],
         ),
@@ -460,16 +446,6 @@ sub _sock_up {
     );
     return;
 }
-
-##############################
-# Generic Connection Handler #
-##############################
-
-#sub add_filter {
-#    my $self = shift;
-#    croak("add_filter requires an even number of parameters") if @_ & 1;
-#    $self->call('add_filter', @_);
-#}
 
 sub _add_filter {
     my ($kernel, $self, $sender) = @_[KERNEL, OBJECT, SENDER];
@@ -607,11 +583,6 @@ sub _conn_input {
     return;
 }
 
-#sub del_filter {
-#    my $self = shift;
-#    $self->call('del_filter', @_);
-#}
-
 sub _del_filter {
     my ($kernel, $self, $sender) = @_[KERNEL, OBJECT, SENDER];
     my $wheel_id = $_[ARG0] || croak("You must supply a connection id\n");
@@ -674,10 +645,6 @@ sub _send_output {
     $_[OBJECT]->send_output(@_[ARG0..$#_]);
     return;
 }
-
-##########################
-# Auth subsystem methods #
-##########################
 
 sub _auth_client {
     my ($kernel, $self, $wheel_id) = @_[KERNEL, OBJECT, ARG0];
@@ -835,11 +802,23 @@ sub _got_ip_response {
     return if !$self->_wheel_exists($wheel_id);
 
     if (!defined $response->{response}) {
-       # Send NOTICE to client of failure.
-	$self->send_output( { command => 'NOTICE', params => [ 'AUTH', "*** Couldn\'t look up your hostname" ] }, $wheel_id ) unless $self->{wheels}->{ $wheel_id }->{auth}->{hostname};
-	$self->{wheels}->{ $wheel_id }->{auth}->{hostname} = '';
-	$self->yield( '_auth_done' => $wheel_id );
+        # Send NOTICE to client of failure.
+        if (!$self->{wheels}{$wheel_id}{auth}{hostname}) {
+            $self->send_output(
+                {
+                    command => 'NOTICE',
+                    params  => [
+                        'AUTH',
+                        "*** Couldn't look up your hostname",
+                    ],
+                },
+                $wheel_id,
+            );
+        }
+        $self->{wheels}{$wheel_id}{auth}{hostname} = '';
+        $self->yield('_auth_done', $wheel_id);
     }
+
     my @answers     = $response->{response}->answer();
     my $peeraddress = $response->{context}{peeraddress};
     my $hostname    = $response->{context}{hostname};
@@ -938,10 +917,6 @@ sub ident_agent_error {
     return;
 }
 
-######################
-# Connection methods #
-######################
-
 sub antiflood {
     my ($self, $wheel_id, $value) = splice @_, 0, 3;
     return if !$self->_wheel_exists($wheel_id);
@@ -1037,16 +1012,6 @@ sub _conn_flooded {
     return if !$self->_wheel_exists($conn_id);
     return $self->{wheels}{$conn_id}{flooded};
 }
-
-######################
-# Spoofed Client API #
-######################
-
-
-
-##################
-# Access Control #
-##################
 
 sub add_denial {
     my $self = shift;
@@ -1185,16 +1150,6 @@ These are the methods that may be invoked on our object.
 Takes no arguments. Terminates the component. Removes all listeners and
 connectors. Disconnects all current client and server connections.
 
-=head2 C<session_id>
-
-Takes no arguments. Returns the ID of the component's session. Ideal for
-posting events to the component.
-
-=head2 C<send_event>
-
-Seen an event through the component's event handling system. First argument
-is the event name, subsequent arguments are the event's parameters.
-
 =head2 C<antiflood>
 
 Takes two arguments, a connection id and true/false value. If value is
@@ -1256,17 +1211,207 @@ current exemption list.
 Takes one argument, an IP address. Returns true or false depending on
 whether that IP is exempt from denial or not.
 
+=head2 C<session_id>
+
+I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/session_id>>
+
+Takes no arguments. Returns the ID of the component's session. Ideal for posting
+events to the component.
+
+ $kernel->post($irc->session_id() => 'mode' => $channel => '+o' => $dude);
+
+=head2 C<session_alias>
+
+I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/session_alias>>
+
+Takes no arguments. Returns the session alias that has been set through
+L<C<spawn>|/spawn>'s alias argument.
+
 =head2 C<yield>
 
-This method provides an alternative object based means of posting events to
-the component. First argument is the event to post, following arguments
-are sent as arguments to the resultant post.
+I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/yield>>
+
+This method provides an alternative object based means of posting events to the
+component. First argument is the event to post, following arguments are sent as
+arguments to the resultant post.
+
+ $irc->yield(mode => $channel => '+o' => $dude);
 
 =head2 C<call>
 
-This method provides an alternative object based means of calling events
-to the component. First argument is the event to call, following arguments
-are sent as arguments to the resultant call.
+I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/call>>
+
+This method provides an alternative object based means of calling events to the
+component. First argument is the event to call, following arguments are sent as
+arguments to the resultant
+call.
+
+=head2 C<delay>
+
+I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/delay>>
+
+This method provides a way of posting delayed events to the component. The
+first argument is an arrayref consisting of the delayed command to post and
+any command arguments. The second argument is the time in seconds that one
+wishes to delay the command being posted.
+
+ my $alarm_id = $ircd->delay( [ mode => $channel => '+o' => $dude ], 60 );
+
+Returns an alarm ID that can be used with L<C<delay_remove>|/delay_remove>
+to cancel the delayed event. This will be undefined if something went wrong.
+
+=head2 C<delay_remove>
+
+I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/delay_remove>>
+
+This method removes a previously scheduled delayed event from the component.
+Takes one argument, the C<alarm_id> that was returned by a
+L<C<delay>|/delay> method call.
+
+ my $arrayref = $ircd->delay_remove( $alarm_id );
+
+Returns an arrayref that was originally requested to be delayed.
+
+=head2 C<send_event>
+
+I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/send_event>>
+
+Sends an event through the component's event handling system. These will get
+processed by plugins then by registered sessions. First argument is the event
+name, followed by any parameters for that event.
+
+=head2 C<send_event_next>
+
+I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/send_event_next>>
+
+This sends an event right after the one that's currently being processed.
+Useful if you want to generate some event which is directly related to
+another event so you want them to appear together. This method can only be
+called when POE::Component::IRC is processing an event, e.g. from one of your
+event handlers. Takes the same arguments as L<C<send_event>/send_event>.
+
+=head2 C<send_event_now>
+
+I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/send_event_now>>
+
+This will send an event to be processed immediately. This means that if an
+event is currently being processed and there are plugins or sessions which
+will receive it after you do, then an event sent with C<send_event_now> will
+be received by those plugins/sessions I<before> the current event. Takes the
+same arguments as L<C<send_event>/send_event>.
+
+=head2 C<pipeline>
+
+I<Inherited from L<Object::Pluggable|Object::Pluggable/pipeline>>
+
+Returns the L<Object::Pluggable::Pipeline|Object::Pluggable::Pipeline>
+object.
+
+=head2 C<plugin_add>
+
+I<Inherited from L<Object::Pluggable|Object::Pluggable/plugin_add>>
+
+Accepts two arguments:
+
+ The alias for the plugin
+ The actual plugin object
+ Any number of extra arguments
+
+The alias is there for the user to refer to it, as it is possible to have
+multiple plugins of the same kind active in one Object::Pluggable object.
+
+This method goes through the pipeline's C<push()> method, which will call
+C<< $plugin->plugin_register($pluggable, @args) >>.
+
+Returns the number of plugins now in the pipeline if plugin was initialized,
+C<undef>/an empty list if not.
+
+=head2 C<plugin_del>
+
+I<Inherited from L<Object::Pluggable|Object::Pluggable/plugin_del>>
+
+Accepts the following arguments:
+
+ The alias for the plugin or the plugin object itself
+ Any number of extra arguments
+
+This method goes through the pipeline's C<remove()> method, which will call
+C<< $plugin->plugin_unregister($pluggable, @args) >>.
+
+Returns the plugin object if the plugin was removed, C<undef>/an empty list
+if not.
+
+=head2 C<plugin_get>
+
+I<Inherited from L<Object::Pluggable|Object::Pluggable/plugin_get>>
+
+Accepts the following arguments:
+
+ The alias for the plugin
+
+This method goes through the pipeline's C<get()> method.
+
+Returns the plugin object if it was found, C<undef>/an empty list if not.
+
+=head2 C<plugin_list>
+
+I<Inherited from L<Object::Pluggable|Object::Pluggable/plugin_list>>
+
+Takes no arguments.
+
+Returns a hashref of plugin objects, keyed on alias, or an empty list if
+there are no plugins loaded.
+
+=head2 C<plugin_order>
+
+I<Inherited from L<Object::Pluggable|Object::Pluggable/plugin_order>>
+
+Takes no arguments.
+
+Returns an arrayref of plugin objects, in the order which they are
+encountered in the pipeline.
+
+=head2 C<plugin_register>
+
+I<Inherited from L<Object::Pluggable|Object::Pluggable/plugin_register>>
+
+Accepts the following arguments:
+
+ The plugin object
+ The type of the hook (the hook types are specified with _pluggable_init()'s 'types')
+ The event name[s] to watch
+
+The event names can be as many as possible, or an arrayref. They correspond
+to the prefixed events and naturally, arbitrary events too.
+
+You do not need to supply events with the prefix in front of them, just the
+names.
+
+It is possible to register for all events by specifying 'all' as an event.
+
+Returns 1 if everything checked out fine, C<undef>/an empty list if something
+is seriously wrong.
+
+=head2 C<plugin_unregister>
+
+I<Inherited from L<Object::Pluggable|Object::Pluggable/plugin_unregister>>
+
+Accepts the following arguments:
+
+ The plugin object
+ The type of the hook (the hook types are specified with _pluggable_init()'s 'types')
+ The event name[s] to unwatch
+
+The event names can be as many as possible, or an arrayref. They correspond
+to the prefixed events and naturally, arbitrary events too.
+
+You do not need to supply events with the prefix in front of them, just the
+names.
+
+It is possible to register for all events by specifying 'all' as an event.
+
+Returns 1 if all the event name[s] was unregistered, undef if some was not
+found.
 
 =head1 INPUT EVENTS
 
@@ -1632,10 +1777,10 @@ for details.
 
 =head1 SEE ALSO
 
+L<POE|POE>
+
 L<POE::Filter::IRCD|POE::Filter::IRCD>
 
-L<POE::Component::IRC|POE::Component::IRC>
-
-L<POE|POE>
+L<POE::Component::Server::IRC|POE::Component::Server::IRC>
 
 =cut
