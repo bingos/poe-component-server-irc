@@ -13,22 +13,24 @@ use POSIX 'strftime';
 use base qw(POE::Component::Server::IRC::Backend);
 
 sub spawn {
-    my $package = shift;
-    my $self = $package->create(prefix => 'ircd_', @_);
+    my ($package, %args) = @_;
+    my $config = delete $args{config};
+    my $self = $package->create(
+        prefix => 'ircd_',
+        %args,
+        states => [
+            [qw(add_spoofed_nick del_spoofed_nick)],
+            {
+                map { +"daemon_cmd_$_" => '_spoofed_command' }
+                    qw(join part mode kick topic nick privmsg notice gline
+                       kline unkline sjoin locops wallops operwall)
+            },
+        ],
+    );
 
-    $self->configure($self->{config} ? delete $self->{config} : ());
+    $self->configure($config ? $config : ());
     $self->_state_create();
     return $self;
-}
-
-sub _load_our_plugins {
-    my $self = shift;
-    $poe_kernel->state('add_spoofed_nick', $self);
-    $poe_kernel->state('del_spoofed_nick', $self);
-    $poe_kernel->state("daemon_cmd_$_", $self, '_spoofed_command')
-        for qw(join part mode kick topic nick privmsg notice gline kline
-               unkline rkline sjoin locops wallops operwall);
-    return;
 }
 
 sub IRCD_connection {

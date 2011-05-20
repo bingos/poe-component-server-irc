@@ -3,6 +3,7 @@ package POE::Component::Server::IRC::Backend;
 use strict;
 use warnings;
 use Carp qw(croak);
+use List::Util qw(first);
 use POE qw(Wheel::SocketFactory Wheel::ReadWrite Filter::Stackable
            Filter::Line Filter::IRCD);
 use POE::Component::Server::IRC::Plugin qw(:ALL);
@@ -10,18 +11,53 @@ use Net::Netmask;
 use Socket;
 use base qw(POE::Component::Syndicator);
 
+use constant {
+    OBJECT_STATES_HASHREF => {
+        syndicator_started => '_start',
+        add_connector      => '_add_connector',
+        add_filter         => '_add_filter',
+        add_listener       => '_add_listener',
+        del_filter         => '_del_filter',
+        del_listener       => '_del_listener',
+        send_output        => '_send_output',
+        shutdown           => '_shutdown',
+    },
+    OBJECT_STATES_ARRAYREF => [qw(
+        __send_output
+        _accept_connection
+        _accept_failed
+        _auth_client
+        _auth_done
+        _conn_alarm
+        _conn_input
+        _conn_error
+        _conn_flushed
+        _event_dispatcher
+        _got_hostname_response
+        _got_ip_response
+        _sock_failed
+        _sock_up
+        ident_agent_error
+        ident_agent_reply
+    )],
+};
+
 sub create {
     my $package = shift;
     croak("$package requires an even number of parameters") if @_ & 1;
-    my %parms = @_;
-    $parms{ lc $_ } = delete $parms{$_} for keys %parms;
-    my $self = bless \%parms, $package;
+    my %args = @_;
+    $args{ lc $_ } = delete $args{$_} for keys %args;
+    my $self = bless { }, $package;
 
-    $self->{prefix}    = 'ircd_backend_' if !defined $self->{prefix};
-    $self->{antiflood} = 1 if !defined $self->{antiflood};
-    my $options        = delete $self->{options};
-    my $sslify_options = delete $self->{sslify_options};
-    my $plugin_debug   = delete $self->{plugin_debug};
+    $self->{prefix} = defined $args{prefix}
+        ? $args{prefix}
+        : 'ircd_backend_';
+    $self->{antiflood} = defined $args{antiflood}
+        ? $args{antiflood}
+        : 1;
+    $self->{auth} = defined $args{auth}
+        ? $args{auth}
+        : 1;
 
     eval {
         require POE::Filter::Zlib::Stream;
@@ -45,7 +81,7 @@ sub create {
         }
     }
 
-    if ($sslify_options && ref $sslify_options eq 'ARRAY') {
+    if ($args{sslify_options} && ref $args{sslify_options} eq 'ARRAY') {
         eval {
             require POE::Component::SSLify;
             POE::Component::SSLify->import(
@@ -55,52 +91,61 @@ sub create {
         chomp $@;
         croak("Can't use ssl: $@") if $@;
 
-        eval { SSLify_Options(@$sslify_options); };
+        eval { SSLify_Options(@{ $args{sslify_options} }); };
         chomp $@;
         croak("Can't use ssl: $@") if $@;
         $self->{got_ssl} = 1;
     }
 
+    if ($args{states}) {
+        my $error = $self->_validate_states($args{states});
+        croak($error) if defined $error;
+    }
 
     $self->_syndicator_init(
-        prefix     => $self->{prefix},
-        reg_prefix => 'PCSI_',
-        types      => [ SERVER => 'IRCD', USER => 'U' ],
-        ($plugin_debug ? (debug => 1) : () ),
+        prefix        => $self->{prefix},
+        reg_prefix    => 'PCSI_',
+        types         => [ SERVER => 'IRCD', USER => 'U' ],
         object_states => [
-            $self => {
-                syndicator_started => '_start',
-                add_connector      => '_add_connector',
-                add_filter         => '_add_filter',
-                add_listener       => '_add_listener',
-                del_filter         => '_del_filter',
-                del_listener       => '_del_listener',
-                send_output        => '_send_output',
-                shutdown           => '_shutdown',
-            },
-            $self => [qw(
-                __send_output
-                _accept_connection
-                _accept_failed
-                _auth_client
-                _auth_done
-                _conn_alarm
-                _conn_input
-                _conn_error
-                _conn_flushed
-                _event_dispatcher
-                _got_hostname_response
-                _got_ip_response
-                _sock_failed
-                _sock_up
-                ident_agent_error
-                ident_agent_reply
-            )],
+            $self => OBJECT_STATES_HASHREF,
+            $self => OBJECT_STATES_ARRAYREF,
+            ($args{states}
+                ? map { $self => $_ } @{ $args{states} }
+                : ()
+            ),
         ],
-        (ref $options eq 'HASH' ? (options => $options) : ()),
+        ($args{plugin_debug} ? (debug => 1) : () ),
+        (ref $args{options} eq 'HASH' ? (options => $args{options}) : ()),
     );
 
     return $self;
+}
+
+sub _validate_states {
+    my ($self, $states) = @_;
+
+    for my $events (@$states) {
+        if (ref $events eq 'HASH') {
+            for my $event (keys $events) {
+                if (OBJECT_STATES_HASHREF->{$event}
+                    || first { $event eq $_ } @{ +OBJECT_STATES_ARRAYREF }) {
+                    return "Event $event is reserved by ". __PACKAGE__;
+                }
+            }
+        }
+        elsif (ref $events eq 'ARRAY') {
+            for my $event (@$events) {
+                for my $event (keys $events) {
+                    if (OBJECT_STATES_HASHREF->{$event}
+                        || first { $event eq $_ } @{ +OBJECT_STATES_ARRAYREF }) {
+                        return "Event $event is reserved by ". __PACKAGE__;
+                    }
+                }
+            }
+        }
+    }
+
+    return;
 }
 
 sub _start {
@@ -125,13 +170,7 @@ sub _start {
         );
     }
 
-    $self->_load_our_plugins();
-
     return;
-}
-
-sub _load_our_plugins {
-    return 1;
 }
 
 sub shutdown {
@@ -148,12 +187,7 @@ sub _shutdown {
     delete $self->{connectors};
     delete $self->{wheels};
     $self->_syndicator_destroy();
-    $self->_unload_our_plugins();
     return;
-}
-
-sub _unload_our_plugins {
-    return 1;
 }
 
 sub _accept_failed {
@@ -1086,21 +1120,21 @@ POE::Component::Server::IRC::Backend - A POE component class that provides netwo
 
 =head1 SYNOPSIS
 
- use POE qw(Component::Server::IRC::Backend);
+ package MyIRCD;
 
- my $object = POE::Component::Server::IRC::Backend->create();
+ use strict;
+ use warnings;
+ use base 'POE::Component::Server::IRC::Backend';
 
- POE::Session->create(
-     package_states => [
-         main => [qw(_start)],
-     ],
-     heap => { ircd => $object },
- );
+ sub spawn {
+     my ($package, %args) = @_;
 
- $poe_kernel->run();
+     my $self = $package->create(prefix => 'ircd_', @_);
 
-  sub _start {
-  }
+     # process %args ...
+
+     return $self;
+ }
 
 =head1 DESCRIPTION
 
@@ -1115,7 +1149,7 @@ for details.
 
 =head2 C<create>
 
-Returns an object. Accepts the following parameters, all are optional: 
+Returns an object. Accepts the following parameters, all are optional:
 
 =over
 
@@ -1129,13 +1163,11 @@ is auth is enabled;
 =item B<'prefix'>, this is the prefix that is used to generate event names
 that the component produces. The default is 'ircd_backend_'.
 
-=back
+=item B<'states'>, an array reference of extra objects states for the IRC
+daemon's POE sessions. The elements can be array references of states
+as well as hash references of state => handler pairs.
 
- my $object = POE::Component::Server::IRC::Backend->create( 
-     alias => 'ircd', # Set an alias, default, no alias set.
-     auth  => 0, # Disable auth globally, default enabled.
-     antiflood => 0, # Disable flood protection globally, default enabled.
- );
+=back
 
 If the component is created from within another session, that session will
 be automagcially registered with the component to receive events and get
