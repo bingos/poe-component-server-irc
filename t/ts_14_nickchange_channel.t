@@ -1,7 +1,7 @@
 use strict;
 use warnings;
 use POE qw(Wheel::SocketFactory);
-use Socket;
+use Socket qw(unpack_sockaddr_in);
 use POE::Component::IRC;
 use POE::Component::Server::IRC;
 use Test::More tests => 3;

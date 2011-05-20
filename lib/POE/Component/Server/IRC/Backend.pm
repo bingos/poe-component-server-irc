@@ -8,7 +8,7 @@ use POE qw(Wheel::SocketFactory Wheel::ReadWrite Filter::Stackable
            Filter::Line Filter::IRCD);
 use POE::Component::Server::IRC::Plugin qw(:ALL);
 use Net::Netmask;
-use Socket;
+use Socket qw(unpack_sockaddr_in inet_ntoa);
 use base qw(POE::Component::Syndicator);
 
 use constant {
@@ -402,8 +402,6 @@ sub _add_connector {
     return if !$remoteaddress || !$remoteport;
 
     my $wheel = POE::Wheel::SocketFactory->new(
-        SocketDomain   => AF_INET,
-        SocketType     => SOCK_STREAM,
         SocketProtocol => 'tcp',
         RemoteAddress  => $remoteaddress,
         RemotePort     => $remoteport,
