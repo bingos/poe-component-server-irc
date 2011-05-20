@@ -3,6 +3,8 @@ Revision history for POE-Component-Server-IRC
 {{$NEXT}}
     - Backend.pm: Document the 'idle', 'antiflood', and 'usessl' parameters
       to add_listener()
+    - Depend on POE::Component::Syndicator 0.04 so that 'register' with no
+      arguments will work.
 
 1.45  Fri May 20 09:23:17 GMT 2011
     - Inherit from POE::Component::Syndicator
