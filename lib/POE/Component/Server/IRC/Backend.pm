@@ -17,7 +17,6 @@ use constant {
         add_connector      => '_add_connector',
         add_filter         => '_add_filter',
         add_listener       => '_add_listener',
-        del_filter         => '_del_filter',
         del_listener       => '_del_listener',
         send_output        => '_send_output',
         shutdown           => '_shutdown',
@@ -611,16 +610,6 @@ sub _conn_input {
         my $event = "$self->{prefix}cmd_" . lc $input->{command};
         $self->send_event($event, $wheel_id, $input);
     }
-    return;
-}
-
-sub _del_filter {
-    my ($kernel, $self, $sender) = @_[KERNEL, OBJECT, SENDER];
-    my $wheel_id = $_[ARG0] || croak("You must supply a connection id\n");
-    return if !$self->_wheel_exists($wheel_id);
-
-    $self->{wheels}{$wheel_id}{wheel}->set_filter($self->{filter});
-    $self->send_event("$self->{prefix}filter_del", $wheel_id);
     return;
 }
 
