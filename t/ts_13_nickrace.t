@@ -1,7 +1,6 @@
 use strict;
 use warnings;
 use POE qw(Wheel::SocketFactory);
-use Socket qw(unpack_sockaddr_in);
 use POE::Component::IRC;
 use POE::Component::Server::IRC;
 use Test::More tests => 4;
@@ -23,7 +22,8 @@ POE::Session->create(
     package_states => [
         main => [qw(
             _start
-            _config_ircd
+            ircd_listener_add
+            ircd_listener_failure
             _shutdown
             irc_001
             irc_433
@@ -36,31 +36,18 @@ $poe_kernel->run();
 
 sub _start {
     my ($kernel, $heap) = @_[KERNEL, HEAP];
-
-    my $wheel = POE::Wheel::SocketFactory->new(
-        BindAddress  => '127.0.0.1',
-        BindPort     => 0,
-        SuccessEvent => '_fake_success',
-        FailureEvent => '_fake_failure',
-    );
-
-    if ($wheel) {
-        my $port = ( unpack_sockaddr_in( $wheel->getsockname ) )[0];
-        $kernel->yield('_config_ircd', $port);
-        $heap->{count} = 0;
-        $wheel = undef;
-        $kernel->delay('_shutdown', 60);
-        return;
-    }
-
-    $kernel->yield('_shutdown');
+    $ircd->yield('register', 'all');
+    $ircd->yield('add_listener');
+    $kernel->delay(_shutdown => 60, 'Timed out');
 }
 
-sub _config_ircd {
-    my ($kernel, $port) = @_[KERNEL, ARG0];
+sub ircd_listener_failure {
+    my ($kernel, $op, $reason) = @_[KERNEL, ARG1, ARG3];
+    $kernel->yield('_shutdown', "$op: $reason");
+}
 
-    $ircd->yield('add_i_line');
-    $ircd->yield(add_listener => Port => $port);
+sub ircd_listener_add {
+    my ($kernel, $port) = @_[KERNEL, ARG0];
 
     $bot1->yield(register => 'all');
     $bot1->yield(connect => {
