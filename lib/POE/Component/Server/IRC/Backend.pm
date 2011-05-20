@@ -51,7 +51,7 @@ sub create {
 
     $self->{prefix} = defined $args{prefix}
         ? $args{prefix}
-        : 'ircd_backend_';
+        : 'ircd_';
     $self->{antiflood} = defined $args{antiflood}
         ? $args{antiflood}
         : 1;
@@ -1512,13 +1512,11 @@ Takes a hashref and one or more connection IDs.
      @list_of_connection_ids,
  );
 
-=head1 OUTPUT EVENTS
+=head1 OUTPUT
 
-Once registered your session will receive these states, which will have the
-applicable prefix as specified to L<C<create>|/create> or the default which
-is 'ircd_backend_':
+These following events are sent to interested sessions.
 
-=head2 C<registered>
+=head2 C<ircd_registered>
 
 =over
 
@@ -1536,7 +1534,7 @@ is 'ircd_backend_':
 
 =back
 
-=head2 C<unregistered>
+=head2 C<ircd_unregistered>
 
 =over
 
@@ -1548,7 +1546,7 @@ is 'ircd_backend_':
 
 =back
 
-=head2 C<connection>
+=head2 C<ircd_connection>
 
 =over
 
@@ -1574,7 +1572,7 @@ is 'ircd_backend_':
 
 =back
 
-=head2 C<auth_done>
+=head2 C<ircd_auth_done>
 
 =over
 
@@ -1595,7 +1593,7 @@ hostname and ident;
 
 =back
 
-=head2 C<listener_add>
+=head2 C<ircd_listener_add>
 
 =over
 
@@ -1615,9 +1613,7 @@ hostname and ident;
 
 =back
 
-=head2 C<listener_del>
-
-=head2 C<registered>
+=head2 C<ircd_listener_del>
 
 =over
 
@@ -1637,7 +1633,7 @@ hostname and ident;
 
 =back
 
-=head2 C<listener_failure>
+=head2 C<ircd_listener_failure>
 
 =over
 
@@ -1661,7 +1657,7 @@ hostname and ident;
 
 =back
 
-=head2 C<socketerr>
+=head2 C<ircd_socketerr>
 
 =over
 
@@ -1680,7 +1676,7 @@ called with;
 
 =back
 
-=head2 C<connected>
+=head2 C<ircd_connected>
 
 =over
 
@@ -1706,7 +1702,7 @@ called with;
 
 =back
 
-=head2 C<connection_flood>
+=head2 C<ircd_connection_flood>
 
 =over
 
@@ -1724,7 +1720,7 @@ called with;
 
 =back
 
-=head2 C<connection_idle>
+=head2 C<ircd_connection_idle>
 
 =over
 
@@ -1745,7 +1741,7 @@ period;
 
 =back
 
-=head2 C<disconnected>
+=head2 C<ircd_disconnected>
 
 =over
 
@@ -1765,7 +1761,7 @@ period;
 
 =back
 
-=head2 C<cmd_*>
+=head2 C<ircd_cmd_*>
 
 =over
 

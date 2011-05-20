@@ -19,13 +19,13 @@ if ($pocosi && $pocoirc) {
             'main' => [qw(
                 _start
                 _shutdown
-                ircd_backend_auth_done
-                ircd_backend_connection
-                ircd_backend_cmd_nick
-                ircd_backend_cmd_user
-                ircd_backend_registered
-                ircd_backend_listener_add
-                ircd_backend_listener_del
+                ircd_auth_done
+                ircd_connection
+                ircd_cmd_nick
+                ircd_cmd_user
+                ircd_registered
+                ircd_listener_add
+                ircd_listener_del
             )],
         ],
         options => { trace => 0 },
@@ -54,14 +54,14 @@ sub _shutdown {
     $heap->{ircd}->yield('shutdown');
 }
 
-sub ircd_backend_registered {
+sub ircd_registered {
     my ($heap, $object) = @_[HEAP, ARG0];
     my $backend = $_[SENDER]->get_heap();
     isa_ok($object, 'POE::Component::Server::IRC::Backend');
     isa_ok($backend, 'POE::Component::Server::IRC::Backend');
 }
 
-sub ircd_backend_listener_add {
+sub ircd_listener_add {
     my ($heap, $port) = @_[HEAP, ARG0];
 
     pass("Started a listener on $port");
@@ -75,21 +75,21 @@ sub ircd_backend_listener_add {
     );
 }
 
-sub ircd_backend_listener_del {
+sub ircd_listener_del {
     my ($heap, $port) = @_[HEAP, ARG0];
     is($port, $heap->{port}, "Stopped listener on $port");
     $_[KERNEL]->yield('_shutdown');
 }
 
-sub ircd_backend_connection {
+sub ircd_connection {
     pass('ircd_backend_connection');
 }
 
-sub ircd_backend_auth_done {
+sub ircd_auth_done {
     pass('ircd_backend_auth_done');
 }
 
-sub ircd_backend_cmd_nick {
+sub ircd_cmd_nick {
     pass('ircd_backend_cmd_nick');
     $_[HEAP]->{result}++;
     if ($_[HEAP]->{result} >= 2) {
@@ -97,7 +97,7 @@ sub ircd_backend_cmd_nick {
     }
 }
 
-sub ircd_backend_cmd_user {
+sub ircd_cmd_user {
     pass('ircd_backend_cmd_user');
     $_[HEAP]->{result}++;
     if ($_[HEAP]->{result} >= 2) {

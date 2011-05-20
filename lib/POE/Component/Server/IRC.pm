@@ -16,7 +16,6 @@ sub spawn {
     my ($package, %args) = @_;
     my $config = delete $args{config};
     my $self = $package->create(
-        prefix => 'ircd_',
         %args,
         states => [
             [qw(add_spoofed_nick del_spoofed_nick)],
