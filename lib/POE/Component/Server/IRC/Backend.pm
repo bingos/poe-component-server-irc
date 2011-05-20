@@ -1515,6 +1515,26 @@ Takes a hashref and one or more connection IDs.
 
 These following events are sent to interested sessions.
 
+=head2 C<ircd_registered>
+
+I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/syndicator_registered>>
+
+=over
+
+=item Emitted: when a session registers with the component;
+
+=item Target: the registering session;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>: the component's object;
+
+=back
+
+=back
+
 =head2 C<ircd_connection>
 
 =over
@@ -1728,26 +1748,6 @@ period;
 
 =back
 
-=head2 C<ircd_disconnected>
-
-=over
-
-=item Emitted: when a client disconnects;
-
-=item Target: all plugins and registered sessions;
-
-=item Args:
-
-=over 4
-
-=item * C<ARG0>, the connection id;
-
-=item * C<ARG1>, the error or reason for disconnection;
-
-=back
-
-=back
-
 =head2 C<ircd_cmd_*>
 
 =over
@@ -1776,21 +1776,21 @@ POE::Filter::IRCD:
 
 =back
 
-=head2 C<ircd_registered>
-
-I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/syndicator_registered>>
+=head2 C<ircd_disconnected>
 
 =over
 
-=item Emitted: when a session registers with the component;
+=item Emitted: when a client disconnects;
 
-=item Target: the registering session;
+=item Target: all plugins and registered sessions;
 
 =item Args:
 
 =over 4
 
-=item * C<ARG0>: the component's object;
+=item * C<ARG0>, the connection id;
+
+=item * C<ARG1>, the error or reason for disconnection;
 
 =back
 
