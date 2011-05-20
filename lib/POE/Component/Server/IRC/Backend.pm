@@ -1422,12 +1422,29 @@ These are POE events that the component will accept:
 
 =head2 C<register>
 
-Takes no arguments. Registers a session to receive events from the
-component.
+I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/register>>
+
+Takes N arguments: a list of event names that your session wants to listen
+for, minus the C<irc_> prefix.
+
+ $ircd->yield('register', qw(connected disconnected));
+
+The special argument 'all' will register your session for all events.
+Registering will generate an L<C<ircd_registered>|/ircd_registered>
+event that your session can trap.
 
 =head2 C<unregister>
 
-Takes no arguments. Unregisters a previously registered session.
+I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/unregister>>
+
+Takes N arguments: a list of event names which you I<don't> want to
+receive. If you've previously done a L<C<register>|/register>
+for a particular event which you no longer care about, this event will
+tell the component to stop sending them to you. (If you haven't, it just
+ignores you. No big deal.)
+
+If you have registered with 'all', attempting to unregister individual
+events such as 'connected', etc. will not work. This is a 'feature'.
 
 =head2 C<add_listener>
 
