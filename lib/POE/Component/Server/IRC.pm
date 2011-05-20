@@ -50,7 +50,7 @@ sub IRCD_connection {
         = [$peeraddr, $peerport, $sockaddr, $sockport];
 
     $self->_state_conn_stats();
-    return PCSI_EAT_ALL;
+    return PCSI_EAT_CLIENT;
 }
 
 sub IRCD_connected {
@@ -72,7 +72,7 @@ sub IRCD_connected {
 
     $self->_state_conn_stats();
     $self->_state_send_credentials($conn_id, $name);
-    return PCSI_EAT_ALL;
+    return PCSI_EAT_CLIENT;
 }
 
 sub IRCD_connection_flood {
@@ -80,7 +80,7 @@ sub IRCD_connection_flood {
     pop @_;
     my ($conn_id) = map { ${ $_ } } @_;
     $self->_terminate_conn_error($conn_id, 'Excess Flood');
-    return PCSI_EAT_ALL;
+    return PCSI_EAT_CLIENT;
 }
 
 sub IRCD_connection_idle {
@@ -92,13 +92,13 @@ sub IRCD_connection_idle {
     my $conn = $self->{state}{conns}{$conn_id};
     if ($conn->{type} eq 'u') {
         $self->_terminate_conn_error($conn_id, 'Connection Timeout');
-        return PCSI_EAT_ALL;
+        return PCSI_EAT_CLIENT;
     }
 
     if ($conn->{pinged}) {
         my $msg = 'Ping timeout: '.(time - $conn->{seen}).' seconds';
         $self->_terminate_conn_error($conn_id, $msg);
-        return PCSI_EAT_ALL;
+        return PCSI_EAT_CLIENT;
     }
 
     $conn->{pinged} = 1;
@@ -109,25 +109,25 @@ sub IRCD_connection_idle {
         },
         $conn_id,
     );
-    return PCSI_EAT_ALL;
+    return PCSI_EAT_CLIENT;
 }
 
 sub IRCD_auth_done {
     my ($self, $ircd) = splice @_, 0, 2;
     pop @_;
     my ($conn_id, $ref) = map { ${ $_ } } @_;
-    return PCSI_EAT_ALL if !$self->_connection_exists($conn_id);
+    return PCSI_EAT_CLIENT if !$self->_connection_exists($conn_id);
 
     $self->{state}{conns}{$conn_id}{auth} = $ref;
     $self->_client_register($conn_id);
-    return PCSI_EAT_ALL;
+    return PCSI_EAT_CLIENT;
 }
 
 sub IRCD_disconnected {
     my ($self, $ircd) = splice @_, 0, 2;
     pop @_;
     my ($conn_id, $errstr) = map { ${ $_ } } @_;
-    return PCSI_EAT_ALL if !$self->_connection_exists($conn_id);
+    return PCSI_EAT_CLIENT if !$self->_connection_exists($conn_id);
 
     if (!$self->_connection_registered($conn_id)) {
         delete $self->{state}{conns}{$conn_id};
@@ -149,7 +149,7 @@ sub IRCD_disconnected {
         delete $self->{state}{conns}{$conn_id};
     }
 
-    return PCSI_EAT_ALL;
+    return PCSI_EAT_CLIENT;
 }
 
 sub IRCD_compressed_conn {
@@ -157,7 +157,7 @@ sub IRCD_compressed_conn {
     pop @_;
     my ($conn_id) = map { ${ $_ } } @_;
     $self->_state_send_burst($conn_id);
-    return PCSI_EAT_ALL;
+    return PCSI_EAT_CLIENT;
 }
 
 sub IRCD_raw_input {
@@ -165,7 +165,7 @@ sub IRCD_raw_input {
     my $conn_id = ${ $_[0] };
     my $input   = ${ $_[1] };
     warn "<<< $conn_id: $input\n";
-    return PCSI_EAT_ALL;
+    return PCSI_EAT_CLIENT;
 }
 
 sub IRCD_raw_output {
@@ -173,7 +173,7 @@ sub IRCD_raw_output {
     my $conn_id = ${ $_[0] };
     my $output   = ${ $_[1] };
     warn ">>> $conn_id: $output\n";
-    return PCSI_EAT_ALL;
+    return PCSI_EAT_CLIENT;
 }
 
 sub _default {
@@ -182,7 +182,7 @@ sub _default {
     pop @_;
     my ($conn_id, $input) = map { ${ $_ } } @_;
 
-    return PCSI_EAT_ALL if !$self->_connection_exists($conn_id);
+    return PCSI_EAT_CLIENT if !$self->_connection_exists($conn_id);
     $self->{state}{conns}{$conn_id}{seen} = time;
 
     if (!$self->_connection_registered($conn_id)) {
@@ -196,7 +196,7 @@ sub _default {
         $self->_cmd_from_client($conn_id, $input);
     }
 
-  return PCSI_EAT_ALL;
+  return PCSI_EAT_CLIENT;
 }
 
 sub _auth_finished {
