@@ -21,7 +21,6 @@ use constant {
         shutdown           => '_shutdown',
     },
     OBJECT_STATES_ARRAYREF => [qw(
-        __send_output
         _accept_connection
         _accept_failed
         _auth_client
@@ -47,6 +46,7 @@ sub create {
     $args{ lc $_ } = delete $args{$_} for keys %args;
     my $self = bless { }, $package;
 
+    $self->{raw_events} = $args{raw_events} if defined $args{raw_events};
     $self->{prefix} = defined $args{prefix}
         ? $args{prefix}
         : 'ircd_';
@@ -145,7 +145,6 @@ sub _start {
     my ($kernel, $self, $sender) = @_[KERNEL, OBJECT, SENDER];
 
     $self->{ircd_filter} = POE::Filter::IRCD->new(
-        DEBUG    => $self->{debug},
         colonify => 1,
     );
     $self->{line_filter} = POE::Filter::Line->new(
@@ -163,6 +162,12 @@ sub _start {
         );
     }
 
+    return;
+}
+
+sub raw_events {
+    my ($self, $value) = @_;
+    $self->{raw_events} = 1 if $value;
     return;
 }
 
@@ -607,29 +612,16 @@ sub send_output {
     my ($self, $output) = splice @_, 0, 2;
 
     if ($output && ref $output eq 'HASH') {
-        if (@_ == 1 || $output->{command}
-            && $output->{command} eq 'ERROR') {
-
-            for my $id (grep { $self->_wheel_exists($_) } @_) {
-                $self->{wheels}{ $id}{wheel}->put($output);
-            }
-            return 1;
-        }
-
         for my $id (grep { $self->_wheel_exists($_) } @_) {
-            $self->yield('__send_output', $output, $id);
+            if ($self->{raw_events}) {
+                my $out = $self->{filter}->put([$output])->[0];
+                chomp $out;
+                $self->send_event("$self->{prefix}raw_output", $id, $out);
+            }
+            $self->{wheels}{$id}{wheel}->put($output);
         }
-        return 1;
     }
 
-    return;
-}
-
-sub __send_output {
-    my ($self, $output, $route_id) = @_[OBJECT, ARG0, ARG1];
-    if ($self->_wheel_exists($route_id)) {
-        $self->{wheels}{$route_id}{wheel}->put($output);
-    }
     return;
 }
 
@@ -1141,6 +1133,9 @@ Default is false.
 
 =item * B<'options'>, a hashref of options to L<POE::Session|POE::Session>
 
+=item * B<'raw_events'>, whether to send L<raw|/ircd_raw_input> events.
+False by default. Can be enabled later with L<C<raw_events>|/raw_events>;
+
 =back
 
 If the component is created from within another session, that session will
@@ -1237,6 +1232,11 @@ event is currently being processed and there are plugins or sessions which
 will receive it after you do, then an event sent with C<send_event_now>
 will be received by those plugins/sessions I<before> the current event.
 Takes the same arguments as L<C<send_event>|/send_event>.
+
+=head3 C<raw_events>
+
+If called with a true value, raw events (L<C<ircd_raw_input>|/ircd_raw_input>
+and L<C<ircd_raw_output>|/ircd_raw_output>) will be enabled.
 
 =head2 Connections
 
@@ -1771,6 +1771,46 @@ POE::Filter::IRCD:
      params  => [ '#moo', 'cows go moo, not fish :D' ],
      raw_line => ':blah!~blah@blah.blah.blah.blah PRIVMSG #moo :cows go moo, not fish :D'
  }
+
+=back
+
+=back
+
+=head2 C<ircd_raw_input>
+
+=over
+
+=item Emitted: when a line of input is received from a connection
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>, the connection id;
+
+=item * C<ARG1>, the raw line of input
+
+=back
+
+=back
+
+=head2 C<ircd_raw_output>
+
+=over
+
+=item Emitted: when a line of output is sent over a connection
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>, the connection id;
+
+=item * C<ARG1>, the raw line of output
 
 =back
 

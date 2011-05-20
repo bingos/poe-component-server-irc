@@ -3,6 +3,8 @@ Revision history for POE-Component-Server-IRC
 {{$NEXT}}
     - Only load POE::Filter::Zlib::Stream when using ziplinks
     - Backend.pm: Document create()'s plugin_debug and options parameters
+    - Add ircd_raw_(input|output) to the backend, and use them to implement
+      a 'debug' option for the frontend.
 
 1.46  Fri May 20 12:12:08 GMT 2011
     - Backend.pm: Document the 'idle', 'antiflood', and 'usessl' parameters

@@ -16,6 +16,7 @@ sub spawn {
     my ($package, %args) = @_;
     my $config = delete $args{config};
     my $self = $package->create(
+        (delete $args{debug} ? (raw_events => 1) : ()),
         %args,
         states => [
             [qw(add_spoofed_nick del_spoofed_nick)],
@@ -156,6 +157,22 @@ sub IRCD_compressed_conn {
     pop @_;
     my ($conn_id) = map { ${ $_ } } @_;
     $self->_state_send_burst($conn_id);
+    return PCSI_EAT_ALL;
+}
+
+sub IRCD_raw_input {
+    my ($self, $ircd) = splice @_, 0, 2;
+    my $conn_id = ${ $_[0] };
+    my $input   = ${ $_[1] };
+    warn "<<< $conn_id: $input\n";
+    return PCSI_EAT_ALL;
+}
+
+sub IRCD_raw_output {
+    my ($self, $ircd) = splice @_, 0, 2;
+    my $conn_id = ${ $_[0] };
+    my $output   = ${ $_[1] };
+    warn ">>> $conn_id: $output\n";
     return PCSI_EAT_ALL;
 }
 
