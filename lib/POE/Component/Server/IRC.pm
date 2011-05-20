@@ -128,29 +128,24 @@ sub IRCD_disconnected {
     my ($conn_id, $errstr) = map { ${ $_ } } @_;
     return PCSI_EAT_ALL if !$self->_connection_exists($conn_id);
 
-    SWITCH: {
-        if (!$self->_connection_registered($conn_id)) {
-            delete $self->{state}{conns}{$conn_id};
-            last SWITCH;
-        }
-        if ($self->_connection_is_peer($conn_id)) {
-            my $peer = $self->{state}{conns}{$conn_id}{name};
-            $self->send_output(
-                @{ $self->_daemon_peer_squit($conn_id, $peer, $errstr) }
-            );
-            delete $self->{state}{conns}{$conn_id};
-            last SWITCH;
-        }
-        if ($self->_connection_is_client($conn_id)) {
-            $self->send_output(
-                @{ $self->_daemon_cmd_quit(
-                    $self->_client_nickname($conn_id,$errstr ),
-                    $errstr,
-                )}
-            );
-            delete $self->{state}{conns}{$conn_id};
-            last SWITCH;
-        }
+    if (!$self->_connection_registered($conn_id)) {
+        delete $self->{state}{conns}{$conn_id};
+    }
+    elsif ($self->_connection_is_peer($conn_id)) {
+        my $peer = $self->{state}{conns}{$conn_id}{name};
+        $self->send_output(
+            @{ $self->_daemon_peer_squit($conn_id, $peer, $errstr) }
+        );
+        delete $self->{state}{conns}{$conn_id};
+    }
+    elsif ($self->_connection_is_client($conn_id)) {
+        $self->send_output(
+            @{ $self->_daemon_cmd_quit(
+                $self->_client_nickname($conn_id,$errstr ),
+                $errstr,
+            )}
+        );
+        delete $self->{state}{conns}{$conn_id};
     }
 
     return PCSI_EAT_ALL;
@@ -173,21 +168,16 @@ sub _default {
     return PCSI_EAT_ALL if !$self->_connection_exists($conn_id);
     $self->{state}{conns}{$conn_id}{seen} = time;
 
-    SWITCH: {
-        if (!$self->_connection_registered($conn_id)) {
-            $self->_cmd_from_unknown($conn_id, $input);
-            last SWITCH;
-        }
-        if ($self->_connection_is_peer($conn_id)) {
-            $self->_cmd_from_peer($conn_id, $input);
-            last SWITCH;
-        }
-        if ($self->_connection_is_client($conn_id)) {
-            delete $input->{prefix};
-            $self->_cmd_from_client($conn_id, $input);
-            last SWITCH;
-        }
-    };
+    if (!$self->_connection_registered($conn_id)) {
+        $self->_cmd_from_unknown($conn_id, $input);
+    }
+    elsif ($self->_connection_is_peer($conn_id)) {
+        $self->_cmd_from_peer($conn_id, $input);
+    }
+    elsif ($self->_connection_is_client($conn_id)) {
+        delete $input->{prefix};
+        $self->_cmd_from_client($conn_id, $input);
+    }
 
   return PCSI_EAT_ALL;
 }
