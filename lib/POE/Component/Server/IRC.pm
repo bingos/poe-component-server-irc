@@ -8654,7 +8654,7 @@ services.
 Takes a single mandatory argument, the spoofed nickname to remove.
 Optionally, you may specify a quit message for the spoofed nick.
 
-=head2 Spoofed commands
+=head2 Spoofed nick commands
 
 The following input events are for the benefit of spoofed nicks. All
 require a nickname of a spoofed nick as the first argument.
