@@ -1,6 +1,7 @@
 Revision history for POE-Component-Server-IRC
 
 {{$NEXT}}
+    - Don't enable debug output if a plugin enables raw events
 
 1.47  Sat May 21 00:14:59 GMT 2011
     - Only load POE::Filter::Zlib::Stream when using ziplinks

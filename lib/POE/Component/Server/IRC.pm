@@ -15,8 +15,9 @@ use base qw(POE::Component::Server::IRC::Backend);
 sub spawn {
     my ($package, %args) = @_;
     my $config = delete $args{config};
+    my $debug = delete $args{debug};
     my $self = $package->create(
-        (delete $args{debug} ? (raw_events => 1) : ()),
+        ($debug ? (raw_events => 1) : ()),
         %args,
         states => [
             [qw(add_spoofed_nick del_spoofed_nick)],
@@ -29,6 +30,7 @@ sub spawn {
     );
 
     $self->configure($config ? $config : ());
+    $self->{debug} = $debug;
     $self->_state_create();
     return $self;
 }
@@ -162,6 +164,7 @@ sub IRCD_compressed_conn {
 
 sub IRCD_raw_input {
     my ($self, $ircd) = splice @_, 0, 2;
+    return PCSI_EAT_CLIENT if !$self->{debug};
     my $conn_id = ${ $_[0] };
     my $input   = ${ $_[1] };
     warn "<<< $conn_id: $input\n";
@@ -170,6 +173,7 @@ sub IRCD_raw_input {
 
 sub IRCD_raw_output {
     my ($self, $ircd) = splice @_, 0, 2;
+    return PCSI_EAT_CLIENT if !$self->{debug};
     my $conn_id = ${ $_[0] };
     my $output   = ${ $_[1] };
     warn ">>> $conn_id: $output\n";
