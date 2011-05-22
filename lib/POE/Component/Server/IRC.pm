@@ -9280,7 +9280,7 @@ B<Note:> the component will shutdown, this is a feature;
 
 =back
 
-=head2 C<ircd_daemon_rkline>
+=head2 C<ircd_daemon_unkline>
 
 =over
 
