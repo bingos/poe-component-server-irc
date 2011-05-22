@@ -8458,9 +8458,9 @@ objects;
 
 =back
 
-A scalar ipmask can be contain '*' to match any number of characters or
-'?' to match one character. If no 'ipmask' is provided, operators are only
-allowed to OPER from the loopback interface.
+A scalar ipmask can contain '*' to match any number of characters or '?' to
+match one character. If no 'ipmask' is provided, operators are only allowed
+to OPER from the loopback interface.
 
 B<'password'> can be either plain-text, L<C<crypt>|crypt>'d or unix/apache
 md5. See the C<mkpasswd> function in
