@@ -1149,7 +1149,8 @@ an 'ircd_backend_registered' event.
 =head3 C<shutdown>
 
 Takes no arguments. Terminates the component. Removes all listeners and
-connectors. Disconnects all current client and server connections.
+connectors. Disconnects all current client and server connections. This
+is a shorthand for C<< $ircd->yield('shutdown') >>.
 
 =head3 C<session_id>
 
@@ -1510,6 +1511,13 @@ Takes a hashref and one or more connection IDs.
      },
      @list_of_connection_ids,
  );
+
+=head2 C<shutdown>
+
+I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/shutdown>>
+
+Takes no arguments. Terminates the component. Removes all listeners and
+connectors. Disconnects all current client and server connections.
 
 =head1 OUTPUT EVENTS
 
