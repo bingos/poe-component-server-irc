@@ -11,6 +11,8 @@ Revision history for POE-Component-Server-IRC
     - Add arguments to ircd_socketerr describing the error
     - Fix broken chomping of output for ircd_raw_output
     - IRC.pm: Emit ircd_daemon_error on failed peer registration
+    - Depend on PoCo-Client-DNS and PoCo-Client-Ident again, since most
+      people will want them, and authentication is enabled by default.
 
 1.47  Sat May 21 00:14:59 GMT 2011
     - Only load POE::Filter::Zlib::Stream when using ziplinks
