@@ -8384,7 +8384,7 @@ defaults to 'poco.server.irc';
 'Poco? POCO? POCO!';
 
 =item * B<'network'>, the name of the IRC network you will be creating,
-defaults tp 'poconet';
+defaults to 'poconet';
 
 =item * B<'nicklen'>, the max length of nicknames to support, defaults
 to 9. B<Note>: the nicklen must be the same on all servers on your IRC
