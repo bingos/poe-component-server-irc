@@ -1,6 +1,8 @@
 Revision history for POE-Component-Server-IRC
 
 {{$NEXT}}
+
+1.48  Sun May 22 17:12:03 GMT 2011
     - Don't enable debug output if a plugin enables raw events
     - Backend.pm: Fix issues with listening on the same port on multiple
       addresses. Also don't emit an ircd_listener_add event when we fail to
