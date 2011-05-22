@@ -1713,6 +1713,8 @@ called with;
 
 =item * C<ARG4>, our socket port;
 
+=item * C<ARG5>, the peer's name;
+
 =back
 
 =back
