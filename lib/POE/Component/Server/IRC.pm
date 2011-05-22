@@ -2,6 +2,7 @@ package POE::Component::Server::IRC;
 
 use strict;
 use warnings;
+use Carp qw(croak);
 use IRC::Utils qw(uc_irc parse_mode_line unparse_mode_line parse_mask
                   matches_mask gen_mode_change is_valid_nick_name
                   is_valid_chan_name);
@@ -7716,7 +7717,7 @@ sub add_peer {
 
     if (!defined $parms->{name} || !defined $parms->{pass}
            || !defined $parms->{rpass}) {
-        warn "Not enough parameters specified\n";
+        croak((caller(0))[3].": Not enough parameters specified\n");
         return;
     }
 
