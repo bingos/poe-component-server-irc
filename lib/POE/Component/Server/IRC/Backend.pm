@@ -425,7 +425,7 @@ sub _sock_failed {
 
     my $ref = delete $self->{connectors}{$connector_id};
     delete $ref->{wheel};
-    $self->send_event("$self->{prefix}socketerr",$ref);
+    $self->send_event("$self->{prefix}socketerr", $ref, $op, $errno, $errstr);
     return;
 }
 
@@ -1686,6 +1686,12 @@ hostname and ident;
 
 =item * C<ARG0>, a HASHREF containing the params that add_connector() was
 called with;
+
+=item * C<ARG1>, the name of the operation that failed;
+
+=item * C<ARG2>, numeric value for $!;
+
+=item * C<ARG3>, string value for $!;
 
 =back
 

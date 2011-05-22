@@ -8,6 +8,7 @@ Revision history for POE-Component-Server-IRC
     - croak() instead of warn() when add_peer() is called wrong
     - Document peer name argument to ircd_connected
     - Depend on IRC::Utils 0.10 for an improved parse_mask()
+    - Add arguments to ircd_socketerr describing the error
 
 1.47  Sat May 21 00:14:59 GMT 2011
     - Only load POE::Filter::Zlib::Stream when using ziplinks
