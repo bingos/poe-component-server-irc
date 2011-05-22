@@ -6,7 +6,6 @@ use Carp qw(croak);
 use List::Util qw(first);
 use POE qw(Wheel::SocketFactory Wheel::ReadWrite Filter::Stackable
            Filter::Line Filter::IRCD);
-use POE::Component::Server::IRC::Plugin qw(:ALL);
 use Net::Netmask;
 use Socket qw(unpack_sockaddr_in inet_ntoa);
 use base qw(POE::Component::Syndicator);
