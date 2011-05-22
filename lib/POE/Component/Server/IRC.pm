@@ -3,7 +3,7 @@ package POE::Component::Server::IRC;
 use strict;
 use warnings;
 use Carp qw(croak);
-use IRC::Utils qw(uc_irc parse_mode_line unparse_mode_line parse_mask
+use IRC::Utils qw(uc_irc parse_mode_line unparse_mode_line normalize_mask
                   matches_mask gen_mode_change is_valid_nick_name
                   is_valid_chan_name);
 use List::Util qw(sum);
@@ -3509,7 +3509,7 @@ sub _daemon_cmd_mode {
         # Bans
         if (my ($flag) = $mode =~ /[-+]b/) {
             next if ++$mode_count > $maxmodes;
-            my $mask = parse_mask($arg);
+            my $mask = normalize_mask($arg);
             my $umask = uc_irc $mask;
             if ($flag eq '+' && !$record->{bans}{$umask}) {
                 $record->{bans}{$umask}
@@ -3527,7 +3527,7 @@ sub _daemon_cmd_mode {
         # Invex
         if (my ($flag) = $mode =~ /[-+]I/) {
             next if ++$mode_count > $maxmodes;
-            my $mask = parse_mask( $arg );
+            my $mask = normalize_mask( $arg );
             my $umask = uc_irc $mask;
 
             if ($flag eq '+' && !$record->{invex}{$umask}) {
@@ -3546,7 +3546,7 @@ sub _daemon_cmd_mode {
         # Exceptions
         if (my ($flag) = $mode =~ /[-+]e/) {
             next if ++$mode_count > $maxmodes;
-            my $mask = parse_mask($arg);
+            my $mask = normalize_mask($arg);
             my $umask = uc_irc($mask);
 
                 if ($flag eq '+' && !$record->{excepts}{$umask}) {
@@ -5644,7 +5644,7 @@ sub _daemon_peer_mode {
                 }
                 # Bans
                 if (my ($flag) = $mode =~ /(\+|-)b/) {
-                    my $mask = parse_mask($arg);
+                    my $mask = normalize_mask($arg);
                     my $umask = uc_irc($mask);
                     if ($flag eq '+' && !$record->{bans}{$umask} ) {
                         $record->{bans}{$umask}
@@ -5661,7 +5661,7 @@ sub _daemon_peer_mode {
                 }
                 # Invex
                 if (my ($flag) = $mode =~ /(\+|-)I/) {
-                    my $mask = parse_mask($arg);
+                    my $mask = normalize_mask($arg);
                     my $umask = uc_irc($mask);
                     if ($flag eq '+' && !$record->{invex}{$umask}) {
                         $record->{invex}{$umask}
@@ -5678,7 +5678,7 @@ sub _daemon_peer_mode {
                 }
                 # Exceptions
                 if (my ($flag) = $mode =~ /(\+|-)e/) {
-                    my $mask = parse_mask($arg);
+                    my $mask = normalize_mask($arg);
                     my $umask = uc_irc($mask);
                     if ($flag eq '+' && !$record->{excepts}{$umask}) {
                         $record->{excepts}{$umask}
@@ -7923,7 +7923,7 @@ sub daemon_server_mode {
             }
             # Bans
             if (my ($flag) = $mode =~ /(\+|-)b/) {
-                my $mask = parse_mask($arg);
+                my $mask = normalize_mask($arg);
                 my $umask = uc_irc($mask);
                 if ($flag eq '+' && !$record->{bans}{$umask}) {
                     $record->{bans}{$umask}
@@ -7936,7 +7936,7 @@ sub daemon_server_mode {
             }
             # Invex
             if (my ($flag) = $mode =~ /(\+|-)I/) {
-                my $mask = parse_mask($arg);
+                my $mask = normalize_mask($arg);
                 my $umask = uc_irc($mask);
                 if ($flag eq '+' && !$record->{invex}->{$umask}) {
                     $record->{invex}{$umask}
@@ -7949,7 +7949,7 @@ sub daemon_server_mode {
             }
             # Exceptions
             if (my ($flag) = $mode =~ /(\+|-)e/) {
-                my $mask = parse_mask($arg);
+                my $mask = normalize_mask($arg);
                 my $umask = uc_irc($mask);
                 if ($flag eq '+' && !$record->{excepts}{$umask}) {
                     $record->{excepts}{$umask}
