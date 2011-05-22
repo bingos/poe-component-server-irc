@@ -66,6 +66,7 @@ sub IRCD_connected {
         delete $self->{state}{conns}{$conn_id};
     }
 
+    $self->{state}{conns}{$conn_id}{peer}       = $name;
     $self->{state}{conns}{$conn_id}{registered} = 0;
     $self->{state}{conns}{$conn_id}{cntr}       = 1;
     $self->{state}{conns}{$conn_id}{type}       = 'u';
@@ -368,6 +369,17 @@ sub _cmd_from_unknown {
     my $invalid = 0;
 
     SWITCH: {
+        if ($cmd eq 'ERROR') {
+            my $peer = $self->{state}{conns}{$wheel_id}{peer};
+            if (defined $peer) {
+                $self->send_event_next(
+                    'daemon_error',
+                    $wheel_id,
+                    $peer,
+                    $params->[0],
+                );
+            }
+        }
         if ($cmd eq 'QUIT') {
             $self->_terminate_conn_error($wheel_id, 'Client Quit');
             last SWITCH;
@@ -8842,6 +8854,28 @@ Takes two arguments, a spoofed nickname and the text message to send to
 all operators.
 
 =head1 OUTPUT EVENTS
+
+=head2 C<ircd_daemon_error>
+
+=over
+
+=item Emitted: when we fail to register with peer;
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>, the connection id;
+
+=item * C<ARG1>, the server name;
+
+=item * C<ARG2>, the reason;
+
+=back
+
+=back
 
 =head2 C<ircd_daemon_server>
 
