@@ -620,7 +620,7 @@ sub send_output {
         for my $id (grep { $self->_wheel_exists($_) } @_) {
             if ($self->{raw_events}) {
                 my $out = $self->{filter}->put([$output])->[0];
-                chomp $out;
+                $out =~ s/\015\012$//;
                 $self->send_event("$self->{prefix}raw_output", $id, $out);
             }
             $self->{wheels}{$id}{wheel}->put($output);
