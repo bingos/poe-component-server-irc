@@ -192,6 +192,8 @@ sub _accept_failed {
     my ($kernel, $self, $operation, $errnum, $errstr, $listener_id)
         = @_[KERNEL, OBJECT, ARG0..ARG3];
 
+    my $port = $self->{listeners}{$listener_id}{port};
+    my $addr = $self->{listeners}{$listener_id}{addr};
     delete $self->{listeners}{$listener_id};
     $self->send_event(
         "$self->{prefix}listener_failure",
@@ -199,6 +201,8 @@ sub _accept_failed {
         $operation,
         $errnum,
         $errstr,
+        $port,
+        $addr,
     );
     return;
 }
@@ -289,6 +293,7 @@ sub _add_listener {
 
     $args{ lc($_) } = delete $args{$_} for keys %args;
 
+    my $bindaddr  = $args{bindaddr} || '0.0.0.0';
     my $bindport  = $args{port} || 0;
     my $idle      = $args{idle} || 180;
     my $auth      = 1;
@@ -299,29 +304,32 @@ sub _add_listener {
     $antiflood = 0 if defined $args{antiflood} && $args{antiflood} eq '0';
 
     my $listener = POE::Wheel::SocketFactory->new(
+        BindAddress  => $bindaddr,
         BindPort     => $bindport,
         SuccessEvent => '_accept_connection',
         FailureEvent => '_accept_failed',
         Reuse        => 'on',
-        ($args{bindaddr} ? (BindAddress => $args{bindaddr}) : ()),
         ($args{listenqueue} ? (ListenQueue => $args{listenqueue}) : ()),
     );
 
-    if ($listener) {
-        my $port = (unpack_sockaddr_in($listener->getsockname))[0];
-        my $listener_id = $listener->ID();
+    my $id = $listener->ID();
+    $self->{listeners}{$id}{wheel}     = $listener;
+    $self->{listeners}{$id}{port}      = $bindport;
+    $self->{listeners}{$id}{addr}      = $bindaddr;
+    $self->{listeners}{$id}{idle}      = $idle;
+    $self->{listeners}{$id}{auth}      = $auth;
+    $self->{listeners}{$id}{antiflood} = $antiflood;
+    $self->{listeners}{$id}{usessl}    = $usessl;
+
+    my ($port, $addr) = unpack_sockaddr_in($listener->getsockname);
+    if ($port) {
+        $self->{listeners}{$id}{port} = $port;
         $self->send_event(
             $self->{prefix} . 'listener_add',
             $port,
-            $listener_id,
+            $id,
+            $bindaddr,
         );
-        $self->{listening_ports}{$port} = $listener_id;
-        $self->{listeners}{$listener_id}{wheel}     = $listener;
-        $self->{listeners}{$listener_id}{port}      = $port;
-        $self->{listeners}{$listener_id}{idle}      = $idle;
-        $self->{listeners}{$listener_id}{auth}      = $auth;
-        $self->{listeners}{$listener_id}{antiflood} = $antiflood;
-        $self->{listeners}{$listener_id}{usessl}    = $usessl;
     }
     return;
 }
@@ -338,29 +346,33 @@ sub _del_listener {
     my %args = @_[ARG0..$#_];
 
     $args{lc $_} = delete $args{$_} for keys %args;
-
     my $listener_id = delete $args{listener};
     my $port = delete $args{port};
 
     if ($self->_listener_exists($listener_id)) {
-        $port = delete $self->{listeners}{$listener_id}{port};
-        delete $self->{listening_ports}{$port};
+        my $port = $self->{listeners}{$listener_id}{port};
+        my $addr = $self->{listeners}{$listener_id}{addr};
         delete $self->{listeners}{$listener_id};
         $self->send_event(
             $self->{prefix} . 'listener_del',
             $port,
             $listener_id,
+            $addr,
         );
     }
-
-    if ($self->_port_exists($port)) {
-        $listener_id = delete $self->{listening_ports}{$port};
-        delete $self->{listeners}{$listener_id};
-        $self->send_event(
-            $self->{prefix} . 'listener_del',
-            $port,
-            $listener_id,
-        );
+    elsif (defined $port) {
+        while (my ($id, $listener) = each %{ $self->{listeners } }) {
+            if ($listener->{port} == $port) {
+                my $addr = $listener->{addr};
+                delete $self->{listeners}{$id};
+                $self->send_event(
+                    $self->{prefix} . 'listener_del',
+                    $port,
+                    $listener_id,
+                    $addr,
+                );
+            }
+        }
     }
 
     return;
@@ -370,13 +382,6 @@ sub _listener_exists {
     my $self = shift;
     my $listener_id = shift || return;
     return 1 if defined $self->{listeners}{$listener_id};
-    return;
-}
-
-sub _port_exists {
-    my $self = shift;
-    my $port = shift || return;
-    return 1 if defined $self->{listening_ports}->{$port};
     return;
 }
 
@@ -1475,10 +1480,15 @@ considered idle. Defaults is 180.
 
 =head2 C<del_listener>
 
-Takes either 'port' or 'listener': 
+Takes one of the following arguments:
 
-B<'listener'> is a previously returned listener ID;
-B<'port'>, listening TCP port; 
+=over 4
+
+=item * B<'listener'>, a previously returned listener ID;
+
+=item * B<'port'>, a listening port;
+
+=back
 
 The listener will be deleted. Note: any connected clients on that port
 will not be disconnected.
@@ -1606,6 +1616,8 @@ hostname and ident;
 
 =item * C<ARG1>, the listener id;
 
+=item * C<ARG2>, the listening address;
+
 =back
 
 =back
@@ -1625,6 +1637,8 @@ hostname and ident;
 =item * C<ARG0>, the listening port;
 
 =item * C<ARG1>, the listener id;
+
+=item * C<ARG2>, the listener address;
 
 =back
 
@@ -1649,6 +1663,10 @@ hostname and ident;
 =item * C<ARG2>, numeric value for $!;
 
 =item * C<ARG3>, string value for $!;
+
+=item * C<ARG4>, the port it tried to listen on;
+
+=item * C<ARG5>, the address it tried to listen on;
 
 =back
 
