@@ -22,19 +22,13 @@ use constant {
     OBJECT_STATES_ARRAYREF => [qw(
         _accept_connection
         _accept_failed
-        _auth_client
-        _auth_done
         _conn_alarm
         _conn_input
         _conn_error
         _conn_flushed
         _event_dispatcher
-        _got_hostname_response
-        _got_ip_response
         _sock_failed
         _sock_up
-        ident_agent_error
-        ident_agent_reply
     )],
 };
 
@@ -52,26 +46,10 @@ sub create {
     $self->{antiflood} = defined $args{antiflood}
         ? $args{antiflood}
         : 1;
+
     $self->{auth} = defined $args{auth}
         ? $args{auth}
         : 1;
-
-    if ($self->{auth}) {
-        eval {
-            require POE::Component::Client::Ident::Agent;
-            $self->{got_ident} = 1;
-        };
-        if (!$self->{got_ident}) {
-            croak('POE::Component::Client::Ident::Agent needed for authentication');
-        }
-        eval {
-            require POE::Component::Client::DNS;
-            $self->{got_dns} = 1;
-        };
-        if (!$self->{got_dns}) {
-            croak('POE::Component::Client::DNS needed for authentication');
-        }
-    }
 
     if ($args{sslify_options} && ref $args{sslify_options} eq 'ARRAY') {
         eval {
@@ -109,6 +87,14 @@ sub create {
         ($args{plugin_debug} ? (debug => 1) : () ),
         (ref $args{options} eq 'HASH' ? (options => $args{options}) : ()),
     );
+
+    if ($self->{auth}) {
+        require POE::Component::Server::IRC::Plugin::Auth;
+        $self->plugin_add(
+            'Auth_'.$self->session_id(),
+            POE::Component::Server::IRC::Plugin::Auth->new(),
+        );
+    }
 
     return $self;
 }
@@ -153,13 +139,6 @@ sub _start {
     $self->{filter} = POE::Filter::Stackable->new(
         Filters => [$self->{line_filter}, $self->{ircd_filter}],
     );
-
-    if ($self->{auth}) {
-        $self->{resolver} = POE::Component::Client::DNS->spawn(
-            Alias   => 'poco_dns_' . $self->session_id(),
-            Timeout => 10,
-        );
-    }
 
     return;
 }
@@ -247,27 +226,16 @@ sub _accept_connection {
             compress  => 0
         };
 
+        my $needs_auth = $listener->{auth} && $self->{auth} ? 1 : 0;
         $self->send_event(
             "$self->{prefix}connection",
             $wheel_id,
             $peeraddr,
             $peerport,
             $sockaddr,
-            $sockport
+            $sockport,
+            $needs_auth,
         );
-
-        if ($listener->{auth} && $self->{auth}) {
-            $kernel->yield('_auth_client', $wheel_id);
-        }
-        else {
-            $self->send_event(
-                "$self->{prefix}auth_done",
-                $wheel_id => {
-                    ident    => '',
-                    hostname => '',
-                },
-            );
-        }
 
         $ref->{alarm} = $kernel->delay_set(
             '_conn_alarm',
@@ -484,7 +452,7 @@ sub _anti_flood {
     my ($self, $wheel_id, $input) = @_;
     my $current_time = time();
 
-    return if !$wheel_id || !$self->_wheel_exists($wheel_id) || !$input;
+    return if !$wheel_id || !$self->connection_exists($wheel_id) || !$input;
 
     SWITCH: {
         if ($self->{wheels}->{ $wheel_id }->{flooded}) {
@@ -519,7 +487,7 @@ sub _anti_flood {
 
 sub _conn_error {
     my ($self, $errstr, $wheel_id) = @_[OBJECT, ARG2, ARG3];
-    return if !$self->_wheel_exists($wheel_id);
+    return if !$self->connection_exists($wheel_id);
     $self->_disconnected(
         $wheel_id,
         $errstr || $self->{wheels}{$wheel_id}{disconnecting}
@@ -529,7 +497,7 @@ sub _conn_error {
 
 sub _conn_alarm {
     my ($kernel, $self, $wheel_id) = @_[KERNEL, OBJECT, ARG0];
-    return if !$self->_wheel_exists($wheel_id);
+    return if !$self->connection_exists($wheel_id);
     my $conn = $self->{wheels}{$wheel_id};
 
     $self->send_event(
@@ -548,7 +516,7 @@ sub _conn_alarm {
 
 sub _conn_flushed {
     my ($kernel, $self, $wheel_id) = @_[KERNEL, OBJECT, ARG0];
-    return if !$self->_wheel_exists($wheel_id);
+    return if !$self->connection_exists($wheel_id);
 
     if ($self->{wheels}{$wheel_id}{disconnecting}) {
         $self->_disconnected(
@@ -597,7 +565,7 @@ sub _conn_input {
 sub _event_dispatcher {
     my ($kernel, $self, $wheel_id) = @_[KERNEL, OBJECT, ARG0];
 
-    if (!$self->_wheel_exists($wheel_id)
+    if (!$self->connection_exists($wheel_id)
         || $self->{wheels}{$wheel_id}{flooded}) {
         return;
     }
@@ -616,7 +584,7 @@ sub send_output {
     my ($self, $output) = splice @_, 0, 2;
 
     if ($output && ref $output eq 'HASH') {
-        for my $id (grep { $self->_wheel_exists($_) } @_) {
+        for my $id (grep { $self->connection_exists($_) } @_) {
             if ($self->{raw_events}) {
                 my $out = $self->{filter}->put([$output])->[0];
                 $out =~ s/\015\012$//;
@@ -634,281 +602,10 @@ sub _send_output {
     return;
 }
 
-sub _auth_client {
-    my ($kernel, $self, $wheel_id) = @_[KERNEL, OBJECT, ARG0];
-    return if !$self->_wheel_exists($wheel_id);
-
-    my ($peeraddr, $peerport, $sockaddr, $sockport)
-        = $self->connection_info($wheel_id);
-
-    $self->send_output(
-        {
-            command => 'NOTICE',
-            params  => ['AUTH', '*** Checking Ident'],
-        },
-        $wheel_id,
-    );
-
-    $self->send_output(
-        {
-            command => 'NOTICE',
-            params  => ['AUTH', '*** Checking Hostname'],
-        },
-        $wheel_id,
-    );
-
-    if ($peeraddr !~ /^127\./) {
-        my $response = $self->{resolver}->resolve(
-            event   => '_got_hostname_response',
-            host    => $peeraddr,
-            type    => 'PTR',
-            context => {
-                wheel       => $wheel_id,
-                peeraddress => $peeraddr,
-            },
-        );
-
-        if ($response) {
-            $kernel->yield('_got_hostname_response', $response);
-        }
-    }
-    else {
-        $self->send_output(
-            {
-                command => 'NOTICE',
-                params  => ['AUTH', '*** Found your hostname']
-            },
-            $wheel_id,
-        );
-        $self->{wheels}{$wheel_id}{auth}{hostname} = 'localhost';
-        $self->yield('_auth_done', $wheel_id);
-    }
-
-    POE::Component::Client::Ident::Agent->spawn(
-        PeerAddr    => $peeraddr,
-        PeerPort    => $peerport,
-        SockAddr    => $sockaddr,
-        SockPort    => $sockport,
-        BuggyIdentd => 1,
-        TimeOut     => 10,
-        Reference   => $wheel_id,
-    );
-    return;
-}
-
-sub _auth_done {
-    my ($kernel, $self, $wheel_id) = @_[KERNEL, OBJECT, ARG0];
-
-    return if !$self->_wheel_exists($wheel_id);
-    if (defined $self->{wheels}{$wheel_id}{auth}{ident}
-        && defined $self->{wheels}{$wheel_id}{auth}{hostname}) {
-
-        if (!$self->{wheels}{$wheel_id}{auth}{done}) {
-            $self->send_event(
-                "$self->{prefix}auth_done",
-                $wheel_id => {
-                    ident    => $self->{wheels}{$wheel_id}{auth}{ident},
-                    hostname => $self->{wheels}{$wheel_id}{auth}{hostname},
-                },
-            );
-        }
-        $self->{wheels}->{ $wheel_id }->{auth}->{done}++;
-    }
-    return;
-}
-
-sub _got_hostname_response {
-    my ($kernel, $self) = @_[KERNEL, OBJECT];
-    my $response = $_[ARG0];
-    my $wheel_id = $response->{context}{wheel};
-
-    return if !$self->_wheel_exists($wheel_id);
-
-    if (!defined $response->{response}) {
-        if (!defined $self->{wheels}{$wheel_id}{auth}{hostname}) {
-            # Send NOTICE to client of failure.
-            $self->send_output(
-                {
-                    command => 'NOTICE',
-                    params  => [
-                        'AUTH',
-                        "*** Couldn\'t look up your hostname",
-                    ],
-                },
-                $wheel_id,
-            );
-        }
-        $self->{wheels}{$wheel_id}{auth}{hostname} = '';
-        $self->yield('_auth_done', $wheel_id);
-        return;
-    }
-
-    my @answers = $response->{response}->answer();
-
-    if (@answers == 0) {
-        if (!defined $self->{wheels}{$wheel_id}{auth}{hostname}) {
-            # Send NOTICE to client of failure.
-            $self->send_output(
-                {
-                    command => 'NOTICE',
-                    params  => [
-                        'AUTH',
-                        "*** Couldn\'t look up your hostname",
-                    ]
-                },
-                $wheel_id,
-            );
-        }
-        $self->{wheels}->{ $wheel_id }->{auth}->{hostname} = '';
-        $self->yield( '_auth_done' => $wheel_id );
-    }
-
-    for my $answer (@answers) {
-        my $context = $response->{context};
-        $context->{hostname} = $answer->rdatastr();
-
-        chop $context->{hostname} if $context->{hostname} =~ /\.$/;
-        my $query = $self->{resolver}->resolve(
-            event   => '_got_ip_response',
-            host    => $answer->rdatastr(),
-            context => $context,
-            type    => 'A'
-        );
-        if (defined $query) {
-            $self->yield('_got_ip_response', $query);
-        }
-    }
-
-    return;
-}
-
-sub _got_ip_response {
-    my ($kernel, $self) = @_[KERNEL, OBJECT];
-    my $response = $_[ARG0];
-    my $wheel_id = $response->{context}{wheel};
-
-    return if !$self->_wheel_exists($wheel_id);
-
-    if (!defined $response->{response}) {
-        # Send NOTICE to client of failure.
-        if (!$self->{wheels}{$wheel_id}{auth}{hostname}) {
-            $self->send_output(
-                {
-                    command => 'NOTICE',
-                    params  => [
-                        'AUTH',
-                        "*** Couldn't look up your hostname",
-                    ],
-                },
-                $wheel_id,
-            );
-        }
-        $self->{wheels}{$wheel_id}{auth}{hostname} = '';
-        $self->yield('_auth_done', $wheel_id);
-    }
-
-    my @answers     = $response->{response}->answer();
-    my $peeraddress = $response->{context}{peeraddress};
-    my $hostname    = $response->{context}{hostname};
-
-    if (@answers == 0) {
-        if (!defined $self->{wheels}{$wheel_id}{auth}{hostname}) {
-            # Send NOTICE to client of failure.
-            $self->send_output(
-                {
-                    command => 'NOTICE',
-                    params  => [
-                        'AUTH',
-                        "*** Couldn\'t look up your hostname",
-                    ],
-                },
-                $wheel_id,
-            );
-        }
-        $self->{wheels}{$wheel_id}{auth}{hostname} = '';
-        $self->yield('_auth_done', $wheel_id);
-    }
-
-    for my $answer (@answers) {
-        if ($answer->rdatastr() eq $peeraddress
-            && !defined $self->{wheels}{$wheel_id}{auth}{hostname}) {
-
-            if (!$self->{wheels}{$wheel_id}{auth}{hostname}) {
-                $self->send_output(
-                    {
-                        command => 'NOTICE',
-                        params  => ['AUTH', '*** Found your hostname'],
-                    },
-                    $wheel_id,
-                );
-            }
-            $self->{wheels}{$wheel_id}{auth}{hostname} = $hostname;
-            $self->yield('_auth_done', $wheel_id);
-            return;
-        }
-        else {
-            if (!$self->{wheels}->{ $wheel_id }->{auth}->{hostname}) {
-                $self->send_output(
-                    {
-                        command => 'NOTICE',
-                        params  => [
-                            'AUTH',
-                            '*** Your forward and reverse DNS do not match',
-                        ],
-                    },
-                    $wheel_id,
-                );
-            }
-            $self->{wheels}->{ $wheel_id }->{auth}->{hostname} = '';
-            $self->yield( '_auth_done' => $wheel_id );
-        }
-    }
-    return;
-}
-
-sub ident_agent_reply {
-    my ($kernel, $self, $ref, $opsys, $other)
-        = @_[KERNEL, OBJECT, ARG0, ARG1, ARG2];
-    my $wheel_id = $ref->{Reference};
-
-    if ($self->_wheel_exists($wheel_id)) {
-        my $ident = '';
-        $ident = $other if uc $opsys ne 'OTHER';
-        $self->send_output(
-            {
-                command => 'NOTICE',
-                params  => ['AUTH', "*** Got Ident response"],
-            },
-            $wheel_id
-        );
-        $self->{wheels}{$wheel_id}{auth}{ident} = $ident;
-        $self->yield('_auth_done', $wheel_id);
-    }
-    return;
-}
-
-sub ident_agent_error {
-    my ($kernel, $self, $ref, $error) = @_[KERNEL, OBJECT, ARG0, ARG1];
-    my $wheel_id = $ref->{Reference};
-
-    if ($self->_wheel_exists($wheel_id)) {
-        $self->send_output(
-            {
-                command => 'NOTICE',
-                params  => ['AUTH', "*** No Ident response"],
-            },
-            $wheel_id
-        );
-        $self->{wheels}{$wheel_id}{auth}{ident} = '';
-        $self->yield('_auth_done', $wheel_id);
-    }
-    return;
-}
-
 sub antiflood {
     my ($self, $wheel_id, $value) = @_;
 
-    return if !$self->_wheel_exists($wheel_id);
+    return if !$self->connection_exists($wheel_id);
     return 0 if !$self->{antiflood};
     return $self->{wheels}{$wheel_id}{antiflood} if !defined $value;
 
@@ -931,7 +628,7 @@ sub antiflood {
 
 sub compressed_link {
     my ($self, $wheel_id, $value, $cntr) = @_;
-    return if !$self->_wheel_exists($wheel_id);
+    return if !$self->connection_exists($wheel_id);
     return $self->{wheels}{$wheel_id}{compress} if !defined $value;
 
     if ($value) {
@@ -966,14 +663,14 @@ sub compressed_link {
 
 sub disconnect {
     my ($self, $wheel_id, $string) = @_;
-    return if !$wheel_id || !$self->_wheel_exists($wheel_id);
+    return if !$wheel_id || !$self->connection_exists($wheel_id);
     $self->{wheels}{$wheel_id}{disconnecting} = $string || 'Client Quit';
     return;
 }
 
 sub _disconnected {
     my ($self, $wheel_id, $errstr) = @_;
-    return if !$wheel_id || !$self->_wheel_exists($wheel_id);
+    return if !$wheel_id || !$self->connection_exists($wheel_id);
 
     my $conn = delete $self->{wheels}{$wheel_id};
     for my $alarm_id ($conn->{alarm}, @{ $conn->{alarm_ids} }) {
@@ -990,13 +687,13 @@ sub _disconnected {
 
 sub connection_info {
     my ($self, $wheel_id) = @_;
-    return if !$self->_wheel_exists($wheel_id);
+    return if !$self->connection_exists($wheel_id);
     return map {
         $self->{wheels}{$wheel_id}{$_}
     } qw(peeraddr peerport sockaddr sockport);
 }
 
-sub _wheel_exists {
+sub connection_exists {
     my ($self, $wheel_id) = @_;
     return if !$wheel_id || !defined $self->{wheels}{$wheel_id};
     return 1;
@@ -1005,7 +702,7 @@ sub _wheel_exists {
 sub _conn_flooded {
     my $self = shift;
     my $conn_id = shift || return;
-    return if !$self->_wheel_exists($conn_id);
+    return if !$self->connection_exists($conn_id);
     return $self->{wheels}{$conn_id}{flooded};
 }
 
@@ -1265,6 +962,11 @@ Requires on argument, the connection id you wish to disconnect. The
 component will terminate the connection the next time that the wheel input
 is flushed, so you may send some sort of error message to the client on
 that connection. Returns true on success, undef on error.
+
+=head3 C<connection_exists>
+
+Requires one argument, a connection id. Returns true value if the connection
+exists, false otherwise.
 
 =head3 C<connection_info>
 
@@ -1573,6 +1275,8 @@ I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/syndica
 =item * C<ARG3>: our ip address;
 
 =item * C<ARG4>: our socket port;
+
+=item * C<ARG5>: a boolean indicating whether the client needs to be authed
 
 =back
 

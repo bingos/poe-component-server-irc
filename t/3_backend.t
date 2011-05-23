@@ -1,6 +1,6 @@
 use strict;
 use warnings;
-use Test::More tests => 9;
+use Test::More tests => 8;
 use POE::Component::Server::IRC::Backend;
 use POE::Component::IRC;
 use POE;
@@ -19,7 +19,6 @@ if ($pocosi && $pocoirc) {
             'main' => [qw(
                 _start
                 _shutdown
-                ircd_auth_done
                 ircd_connection
                 ircd_cmd_nick
                 ircd_cmd_user
@@ -83,10 +82,6 @@ sub ircd_listener_del {
 
 sub ircd_connection {
     pass('ircd_backend_connection');
-}
-
-sub ircd_auth_done {
-    pass('ircd_backend_auth_done');
 }
 
 sub ircd_cmd_nick {

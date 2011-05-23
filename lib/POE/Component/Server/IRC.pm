@@ -39,7 +39,7 @@ sub spawn {
 sub IRCD_connection {
     my ($self, $ircd) = splice @_, 0, 2;
     pop @_;
-    my ($conn_id, $peeraddr, $peerport, $sockaddr, $sockport)
+    my ($conn_id, $peeraddr, $peerport, $sockaddr, $sockport, $needs_auth)
         = map { ${ $_ } } @_;
 
     if ($self->_connection_exists($conn_id)) {
@@ -53,6 +53,15 @@ sub IRCD_connection {
         = [$peeraddr, $peerport, $sockaddr, $sockport];
 
     $self->_state_conn_stats();
+
+    if (!$needs_auth) {
+        $self->{state}{conns}{$conn_id}{auth} = {
+            hostname => '',
+            ident => '',
+        };
+        $self->_client_register($conn_id);
+    }
+
     return PCSI_EAT_CLIENT;
 }
 
