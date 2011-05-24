@@ -5,12 +5,11 @@ use POE::Component::IRC;
 use POE::Component::Server::IRC;
 use Test::More tests => 4;
 
-my $bot1 = POE::Component::IRC->spawn(
-    plugin_debug => 1,
-);
+my $bot1 = POE::Component::IRC->spawn(flood => 1);
 my $ircd = POE::Component::Server::IRC->spawn(
-    Auth      => 0,
-    AntiFlood => 0,
+    Auth         => 0,
+    AntiFlood    => 0,
+    plugin_debug => 1,
 );
 
 POE::Session->create(

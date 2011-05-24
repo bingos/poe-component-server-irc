@@ -11,12 +11,10 @@ use POE;
 
 my $pocosi = PoCoServerIRCSubd->spawn(
     auth         => 0,
-    options      => { trace => 0 },
     antiflood    => 0,
-    plugin_debug => 0,
-    debug        => 0,
+    plugin_debug => 1,
 );
-my $pocoirc = POE::Component::IRC->spawn('flood', 1);
+my $pocoirc = POE::Component::IRC->spawn(flood => 1);
 
 if ($pocosi && $pocoirc) {
     isa_ok($pocosi, 'POE::Component::Server::IRC');

@@ -23,16 +23,13 @@ plan tests => 15;
 
 my $pocosi = POE::Component::Server::IRC->spawn(
     auth           => 0,
-    options        => { trace => 0 },
     antiflood      => 0,
-    plugin_debug   => 0,
-    debug          => 0,
+    plugin_debug   => 1,
     sslify_options => ['ircd.key', 'ircd.crt'],
 );
 my $pocoirc = POE::Component::IRC->spawn(
     flood   => 1,
     UseSSL  => 1,
-    options => { trace => 0 },
 );
 
 POE::Session->create(

@@ -5,8 +5,9 @@ use POE;
 use POE::Component::Server::IRC;
 
 my $pocosi = POE::Component::Server::IRC->spawn(
-    auth      => 0,
-    antiflood => 0,
+    auth         => 0,
+    antiflood    => 0,
+    plugin_debug => 1,
 );
 
 POE::Session->create(

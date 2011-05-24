@@ -6,13 +6,12 @@ use POE::Component::Server::IRC;
 use Test::More tests => 3;
 
 my $ircd = POE::Component::Server::IRC->spawn(
-    Auth      => 0,
-    AntiFlood => 0,
+    Auth         => 0,
+    AntiFlood    => 0,
+    plugin_debug => 1,
 );
 
-my $irc = POE::Component::IRC->spawn(
-    Flood => 1,
-);
+my $irc = POE::Component::IRC->spawn(Flood => 1);
 
 POE::Session->create(
     package_states => [

@@ -6,8 +6,9 @@ use POE::Component::IRC;
 use POE;
 
 my $pocosi = POE::Component::Server::IRC->spawn(
-    auth      => 0,
-    antiflood => 0,
+    auth         => 0,
+    antiflood    => 0,
+    plugin_debug => 1,
 );
 my $pocoirc = POE::Component::IRC->spawn(flood => 1);
 

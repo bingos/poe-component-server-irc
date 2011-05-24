@@ -7,15 +7,18 @@ use Test::More tests => 4;
 
 my $bot1 = POE::Component::IRC->spawn(
     plugin_debug => 1,
+    flood        => 1,
     alias        => 'bot1',
 );
 my $bot2 = POE::Component::IRC->spawn(
     plugin_debug => 1,
+    flood        => 1,
     alias        => 'bot2',
 );
 my $ircd = POE::Component::Server::IRC->spawn(
-    Auth      => 0,
-    AntiFlood => 0,
+    Auth         => 0,
+    AntiFlood    => 0,
+    plugin_debug => 1,
 );
 
 POE::Session->create(
