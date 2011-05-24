@@ -8875,7 +8875,7 @@ all operators.
 
 =over
 
-=item Emitted: when we fail to register with peer;
+=item Emitted: when we fail to register with a peer;
 
 =item Target: all plugins and registered sessions;
 
