@@ -110,7 +110,7 @@ PRIVMSG commands from operators.
 =head2 C<new>
 
 Returns a plugin object suitable for feeding to
-L<POE::Component::Server::IRC|POE::Component::ServeR::IRC>'s C<plugin_add>
+L<POE::Component::Server::IRC|POE::Component::Server::IRC>'s C<plugin_add>
 method.
 
 =head1 COMMANDS

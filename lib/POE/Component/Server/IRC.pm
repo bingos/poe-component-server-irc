@@ -186,7 +186,7 @@ sub IRCD_raw_output {
     my ($self, $ircd) = splice @_, 0, 2;
     return PCSI_EAT_CLIENT if !$self->{debug};
     my $conn_id = ${ $_[0] };
-    my $output   = ${ $_[1] };
+    my $output  = ${ $_[1] };
     warn ">>> $conn_id: $output\n";
     return PCSI_EAT_CLIENT;
 }
@@ -195,7 +195,7 @@ sub _default {
     my ($self, $ircd, $event) = splice @_, 0, 3;
     return PCSI_EAT_NONE if $event !~ /^IRCD_cmd_/;
     pop @_;
-    my ($conn_id, $input) = map { ${ $_ } } @_;
+    my ($conn_id, $input) = map { $$_ } @_;
 
     return PCSI_EAT_CLIENT if !$self->_connection_exists($conn_id);
     $self->{state}{conns}{$conn_id}{seen} = time;
@@ -211,7 +211,7 @@ sub _default {
         $self->_cmd_from_client($conn_id, $input);
     }
 
-  return PCSI_EAT_CLIENT;
+    return PCSI_EAT_CLIENT;
 }
 
 sub _auth_finished {
