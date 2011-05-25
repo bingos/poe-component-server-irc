@@ -142,15 +142,11 @@ sub IRCD_disconnected {
     my ($conn_id, $errstr) = map { ${ $_ } } @_;
     return PCSI_EAT_CLIENT if !$self->_connection_exists($conn_id);
 
-    if (!$self->_connection_registered($conn_id)) {
-        delete $self->{state}{conns}{$conn_id};
-    }
-    elsif ($self->_connection_is_peer($conn_id)) {
+    if ($self->_connection_is_peer($conn_id)) {
         my $peer = $self->{state}{conns}{$conn_id}{name};
         $self->send_output(
             @{ $self->_daemon_peer_squit($conn_id, $peer, $errstr) }
         );
-        delete $self->{state}{conns}{$conn_id};
     }
     elsif ($self->_connection_is_client($conn_id)) {
         $self->send_output(
@@ -159,9 +155,9 @@ sub IRCD_disconnected {
                 $errstr,
             )}
         );
-        delete $self->{state}{conns}{$conn_id};
     }
 
+    delete $self->{state}{conns}{$conn_id};
     return PCSI_EAT_CLIENT;
 }
 
@@ -712,13 +708,13 @@ sub _daemon_cmd_message {
             }
 
             if ($targ_type =~ /(server|host)mask/
-                && $targs->{$target}->[0] !~ /\./) {
+                && $targs->{$target}[0] !~ /\./) {
                 push @$ref, ['413', $target];
                 next LOOP;
             }
 
             if ($targ_type =~ /(server|host)mask/
-                    && $targs->{$target}->[0] =~ /\x2E.*[\x2A\x3F]+.*$/) {
+                    && $targs->{$target}[0] =~ /\x2E.*[\x2A\x3F]+.*$/) {
                 push @$ref, ['414', $target];
                 next LOOP;
             }
@@ -742,7 +738,7 @@ sub _daemon_cmd_message {
             }
 
             if ($targ_type eq 'nick_ext'
-                    && !$self->state_peer_exists($targs->{$target}->[1])) {
+                    && !$self->state_peer_exists($targs->{$target}[1])) {
                 push @$ref, ['402', $targs->{$target}[1]];
                 next LOOP;
             }
@@ -819,7 +815,7 @@ sub _daemon_cmd_message {
                 my %targets; my @local;
 
                 HOST: for my $luser (values %{ $self->{state}{users} }) {
-                    if (!matches_mask($targs->{$target}->[0],
+                    if (!matches_mask($targs->{$target}[0],
                             $luser->{auth}{hostname})) {;
                             next HOST;
                         }
@@ -903,8 +899,8 @@ sub _daemon_cmd_message {
                 }
 
                 my @local = $self->_state_find_user_host(
-                    $targs->{$target}->[0],
-                    $targs->{$target}->[2],
+                    $targs->{$target}[0],
+                    $targs->{$target}[2],
                 );
 
                 if (@local == 1) {
@@ -1325,7 +1321,7 @@ sub _daemon_cmd_pong {
             );
             last SWITCH;
         }
-        delete $self->{state}->{users}->{ uc_irc $nick }->{pinged};
+        delete $self->{state}{users}{uc_irc($nick)}{pinged};
     }
 
     return @$ref if wantarray;
@@ -1997,9 +1993,9 @@ sub _daemon_cmd_unkline {
                 "daemon_unkline", $full, $target, $user, $host,
             );
             my $i = 0;
-            for (@{ $self->{state}->{klines} }) {
+            for (@{ $self->{state}{klines} }) {
                 if ($_->{user} eq $user && $_->{host} eq $host) {
-                    splice @{ $self->{state}->{klines} }, $i, 1;
+                    splice @{ $self->{state}{klines} }, $i, 1;
                     last;
                 }
                 ++$i;
@@ -2550,7 +2546,7 @@ sub _daemon_cmd_users {
         params  => [
             $nick,
             "Current global users: $global  Max: "
-                . $self->{state}->{stats}->{maxglobal},
+                . $self->{state}{stats}{maxglobal},
         ],
     };
 
@@ -2593,7 +2589,7 @@ sub _daemon_cmd_lusers {
             $self->{state}{stats}{ops_online},
             "IRC Operators online",
         ]
-    } if $self->{state}->{stats}->{ops_online};
+    } if $self->{state}{stats}{ops_online};
 
     push @$ref, {
         prefix  => $server,
@@ -2941,7 +2937,7 @@ sub _daemon_cmd_list {
                     $record->{name},
                     scalar keys %{ $record->{users} },
                     (defined $record->{topic}
-                        ? $record->{topic}->[0]
+                        ? $record->{topic}[0]
                         : ''
                     ),
                 ],
@@ -3539,7 +3535,7 @@ sub _daemon_cmd_mode {
                 push @reply_args, $mask;
             }
             if ($flag eq '-' && $record->{bans}{$umask}) {
-                delete $record->{bans}->{ $umask };
+                delete $record->{bans}{$umask};
                 $reply .= $mode;
                 push @reply_args, $mask;
             }
@@ -4073,10 +4069,10 @@ sub _daemon_cmd_umode {
             }
             if ($action eq '-' && $record->{umode} =~ /$char/) {
                 $record->{umode} =~ s/$char//g;
-                $self->{state}->{stats}->{invisible}-- if $char eq 'i';
+                $self->{state}{stats}{invisible}-- if $char eq 'i';
 
                 if ($char eq 'o') {
-                    $self->{state}->{stats}{ops_online}--;
+                    $self->{state}{stats}{ops_online}--;
                     delete $self->{state}{localops}{$route_id};
                     $self->antiflood( $route_id, 1);
                 }
@@ -4084,10 +4080,10 @@ sub _daemon_cmd_umode {
                     delete $self->{state}{wallops}{$route_id};
                 }
                 if ($char eq 'z') {
-                    delete $self->{state}->{operwall}{$route_id};
+                    delete $self->{state}{operwall}{$route_id};
                 }
                 if ($char eq 'l') {
-                    delete $self->{state}->{locops}{$route_id};
+                    delete $self->{state}{locops}{$route_id};
                 }
             }
         }
@@ -4313,7 +4309,7 @@ sub _daemon_peer_squit {
                 $self->send_event(
                     "daemon_quit",
                     $output->{prefix},
-                    $output->{params}->[0],
+                    $output->{params}[0],
                 );
                 my $record = delete $self->{state}{users}{$nick};
                 if ($record->{umode} =~ /o/) {
@@ -4374,7 +4370,7 @@ sub _daemon_peer_rkline {
 
         if ($us) {
             $self->send_event("daemon_rkline", $full, @$args);
-            push @{ $self->{state}->{rklines} }, {
+            push @{ $self->{state}{rklines} }, {
                 setby    => $full,
                 setat    => time,
                 target   => $args->[0],
@@ -4433,7 +4429,7 @@ sub _daemon_peer_kline {
         );
         if ($us) {
             $self->send_event("daemon_kline", $full, @$args);
-            push @{ $self->{state}->{klines} }, {
+            push @{ $self->{state}{klines} }, {
                 setby    => $full,
                 setat    => time(),
                 target   => $args->[0],
@@ -4471,7 +4467,7 @@ sub _daemon_peer_unkline {
         my $ucserver = uc $server;
         my %targets;
 
-        for my $peer (keys %{ $self->{state}->{peers} }) {
+        for my $peer (keys %{ $self->{state}{peers} }) {
             if (matches_mask($target, $peer)) {
                 if ($ucserver eq $peer) {
                     $us = 1;
@@ -4497,7 +4493,7 @@ sub _daemon_peer_unkline {
             my $i = 0;
             for (@{ $self->{state}{klines} }) {
                 if ($_->{user} eq $args->[1] && $_->{host} eq $args->[2]) {
-                    splice (@{ $self->{state}->{klines} }, $i, 1);
+                    splice (@{ $self->{state}{klines} }, $i, 1);
                     last;
                 }
                 ++$i;
@@ -4827,7 +4823,7 @@ sub _daemon_peer_server {
     my $ref     = [ ];
     my $args    = [ @_ ];
     my $count   = @$args;
-    my $peer    = $self->{state}->{conns}->{ $peer_id }->{name};
+    my $peer    = $self->{state}{conns}{$peer_id}{name};
 
     SWITCH: {
         if (!$count || $count < 2) {
@@ -4972,7 +4968,7 @@ sub _daemon_peer_nick {
                 $peer_id,
             );
             my $unick = uc_irc($prefix);
-            $self->{state}{users}{$unick}->{nick_collision} = 1;
+            $self->{state}{users}{$unick}{nick_collision} = 1;
             $self->daemon_server_kill($prefix, 'Nick Collision', $peer_id);
             last SWITCH;
         }
@@ -5213,7 +5209,7 @@ sub _daemon_peer_sjoin {
     my $ref     = [ ];
     my $args    = [ @_ ];
     my $count   = @$args;
-    #my $peer = $self->{state}->{conns}->{ $peer_id }->{name};
+    #my $peer = $self->{state}{conns}{$peer_id}{name};
 
     SWITCH: {
         if (!$count || $count < 4) {
@@ -5851,12 +5847,12 @@ sub _daemon_peer_message {
                 next LOOP;
             }
             if ($targ_type =~ /(server|host)mask/
-                    && $targs->{$target}->[0] !~ /\./) {
+                    && $targs->{$target}[0] !~ /\./) {
                 push @$ref, ['413', $target];
                 next LOOP;
             }
             if ($targ_type =~ /(server|host)mask/
-                    && $targs->{$target}->[0] !~ /\x2E.*[\x2A\x3F]+.*$/) {
+                    && $targs->{$target}[0] !~ /\x2E.*[\x2A\x3F]+.*$/) {
                 push @$ref, ['414', $target];
                 next LOOP;
             }
@@ -5876,7 +5872,7 @@ sub _daemon_peer_message {
                 next LOOP;
             }
             if ($targ_type eq 'nick_ext'
-                    && !$self->state_peer_exists($targs->{$target}->[1])) {
+                    && !$self->state_peer_exists($targs->{$target}[1])) {
                 push @$ref, ['402', $targs->{$target}[1]];
                 next LOOP;
             }
@@ -5982,9 +5978,9 @@ sub _daemon_peer_message {
                 next LOOP;
             }
             if ($targ_type eq 'nick_ext') {
-                $targs->{$target}->[1]
+                $targs->{$target}[1]
                     = $self->_state_peer_name($targs->{$target}[1]);
-                if ($targs->{$target}->[2]
+                if ($targs->{$target}[2]
                         && !$self->state_user_is_operator($nick)) {
                     push @$ref, ['481'];
                     next LOOP;
@@ -6427,7 +6423,7 @@ sub _state_local_users_match_rkline {
     for my $user (values %$local) {
         next if $user->{route_id} eq 'spoofed';
         next if $user->{umode} && $user->{umode} =~ /o/;
-        if (($user->{socket}->[0] =~ /$host/
+        if (($user->{socket}[0] =~ /$host/
                 || $user->{auth}{hostname} =~ /$host/)
                 && $user->{auth}{ident} =~ /$luser/) {
             push @conns, $user->{route_id};
@@ -6492,7 +6488,7 @@ sub _state_user_matches_kline {
     my $record  = $self->{state}{conns}{$conn_id};
     my $host    = $record->{auth}{hostname} || $record->{socket}[0];
     my $user    = $record->{auth}{ident} || "~" . $record->{user};
-    my $ip      = $record->{socket}->[0];
+    my $ip      = $record->{socket}[0];
 
     for my $gline (@{ $self->{state}{klines} }) {
         if (my $netmask = Net::Netmask->new2($gline->{host})) {
@@ -6514,7 +6510,7 @@ sub _state_user_matches_kline {
 sub _state_user_matches_gline {
     my $self    = shift;
     my $conn_id = shift || return;
-    my $record  = $self->{state}{conns}->{$conn_id};
+    my $record  = $self->{state}{conns}{$conn_id};
     my $host    = $record->{auth}{hostname} || $record->{socket}[0];
     my $user    = $record->{auth}{ident} || "~" . $record->{user};
     my $ip      = $record->{socket}[0];
@@ -6558,8 +6554,8 @@ sub _state_auth_client_conn {
             }
             $record->{auth}{hostname} = $auth->{spoof} if $auth->{spoof};
 
-            if (!$record->{auth}->{ident} && $auth->{no_tilde}) {
-                $record->{auth}->{ident} = $record->{user};
+            if (!$record->{auth}{ident} && $auth->{no_tilde}) {
+                $record->{auth}{ident} = $record->{user};
             }
             return 1;
         }
@@ -6597,7 +6593,7 @@ sub _state_auth_peer_conn {
     }
 
     return 1 if matches_mask(
-        '*!*@'.$peers->{uc $name}->{ipmask},
+        '*!*@'.$peers->{uc $name}{ipmask},
         "*!*\@$client_ip",
     );
 
@@ -6624,7 +6620,7 @@ sub _state_send_credentials {
         {
             command => 'CAPAB',
             params  => [
-                join (' ', @{ $self->{config}->{capab} },
+                join (' ', @{ $self->{config}{capab} },
                     ($peer->{zip} ? 'ZIP' : ())
                 ),
             ],
@@ -6658,7 +6654,7 @@ sub _state_send_burst {
     my $conn_id = shift || return;
     return if !$self->_connection_exists($conn_id);
     my $server  = $self->server_name();
-    my $conn    = $self->{state}->{conns}->{ $conn_id };
+    my $conn    = $self->{state}{conns}{$conn_id};
     my $burst   = grep { /^EOB$/i } @{ $conn->{capab} };
     my $invex   = grep { /^IE$/i } @{ $conn->{capab} };
     my $excepts = grep { /^EX$/i } @{ $conn->{capab} };
@@ -6888,7 +6884,7 @@ sub _state_register_peer {
     $record->{users} = { };
     $record->{peers} = { };
     $self->{state}{peers}{uc $server}{peers}{uc $record->{name}} = $record;
-    $self->{state}->{peers}->{ uc $record->{name} } = $record;
+    $self->{state}{peers}{ uc $record->{name} } = $record;
     $self->antiflood($conn_id, 0);
     $self->send_output(
         {
@@ -6927,7 +6923,7 @@ sub _state_register_client {
     $record->{route_id} = $conn_id;
     $record->{umode}    = '';
 
-    if (!$record->{auth}->{ident}) {
+    if (!$record->{auth}{ident}) {
         $record->{auth}{ident} = '~' . $record->{user};
     }
 
@@ -7266,7 +7262,7 @@ sub state_is_chan_member {
     my $chan = shift || return;
     return if !$self->state_nick_exists($nick);
     return 0 if !$self->state_chan_exists($chan);
-    my $record = $self->{state}->{users}{uc_irc($nick)};
+    my $record = $self->{state}{users}{uc_irc($nick)};
     return 1 if defined $record->{chans}{uc_irc($chan)};
     return 0;
 }
@@ -7497,7 +7493,7 @@ sub configure {
 
     if (!defined $self->{config}{INFO}
             || ref $self->{config}{INFO} ne 'ARRAY'
-            || !@{ $self->{config}->{INFO} } == 1) {
+            || !@{ $self->{config}{INFO} } == 1) {
         $self->{config}{INFO} = [split /\n/, <<'EOF'];
 # POE::Component::Server::IRC
 #
@@ -7966,7 +7962,7 @@ sub daemon_server_mode {
             if (my ($flag) = $mode =~ /(\+|-)I/) {
                 my $mask = normalize_mask($arg);
                 my $umask = uc_irc($mask);
-                if ($flag eq '+' && !$record->{invex}->{$umask}) {
+                if ($flag eq '+' && !$record->{invex}{$umask}) {
                     $record->{invex}{$umask}
                         = [$mask, ($full || $server), time];
                 }
@@ -8138,7 +8134,7 @@ sub daemon_server_wallops {
                 params  => [$args->[0]],
             },
             $self->_state_connected_peers(), 
-            keys %{ $self->{state}->{operwall} },
+            keys %{ $self->{state}{operwall} },
         );
         $self->send_event("daemon_wallops", $server, $args->[0]);
     }
