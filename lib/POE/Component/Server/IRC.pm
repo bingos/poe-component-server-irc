@@ -6126,24 +6126,24 @@ sub _daemon_peer_message {
                     # Target user has CALLERID on
                     if ($targ_umode && $targ_umode =~ /[Gg]/) {
                         my $targ_rec = $self->{state}{users}{uc_irc($target) };
-	            if (($targ_umode =~ /G/ && (
-                        !$self->state_users_share_chan($target, $nick)
-                        || !$targ_rec->{accepts}{uc_irc($nick)}))
-                        || ($targ_umode =~ /g/
-                        && !$targ_rec->{accepts}{uc_irc($nick)})) {
-                        push @$ref, {
-                            prefix  => $server,
-                            command => '716',
-                            params  => [
-                                $nick,
-                                $target,
-                                'is in +g mode (server side ignore)',
-                            ],
-                        };
-                        if (!$targ_rec->{last_caller}
-                            || (time - $targ_rec->{last_caller} ) >= 60) {
-                            my ($n, $uh) = split /!/,
-                                $self->state_user_full($nick);
+                        if (($targ_umode =~ /G/ && (
+                            !$self->state_users_share_chan($target, $nick)
+                            || !$targ_rec->{accepts}{uc_irc($nick)}))
+                            || ($targ_umode =~ /g/
+                            && !$targ_rec->{accepts}{uc_irc($nick)})) {
+                            push @$ref, {
+                                prefix  => $server,
+                                command => '716',
+                                params  => [
+                                    $nick,
+                                    $target,
+                                    'is in +g mode (server side ignore)',
+                                ],
+                            };
+                            if (!$targ_rec->{last_caller}
+                                || (time - $targ_rec->{last_caller} ) >= 60) {
+                                my ($n, $uh) = split /!/,
+                                    $self->state_user_full($nick);
                                 $self->send_output(
                                     {
                                         prefix  => $server,
