@@ -1,6 +1,8 @@
 Revision history for POE-Component-Server-IRC
 
 {{$NEXT}}
+
+1.49  Wed May 25 06:23:32 GMT 2011
     - Fixed a bug were unsuccessful client registration would leave the
       client's nickname "already in use" when later clients request it.
     - Backend.pm: Moved client authentication into an Auth plugin.
