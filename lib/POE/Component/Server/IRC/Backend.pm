@@ -104,7 +104,7 @@ sub _validate_states {
 
     for my $events (@$states) {
         if (ref $events eq 'HASH') {
-            for my $event (keys $events) {
+            for my $event (keys %$events) {
                 if (OBJECT_STATES_HASHREF->{$event}
                     || first { $event eq $_ } @{ +OBJECT_STATES_ARRAYREF }) {
                     return "Event $event is reserved by ". __PACKAGE__;
@@ -113,11 +113,9 @@ sub _validate_states {
         }
         elsif (ref $events eq 'ARRAY') {
             for my $event (@$events) {
-                for my $event (keys $events) {
-                    if (OBJECT_STATES_HASHREF->{$event}
-                        || first { $event eq $_ } @{ +OBJECT_STATES_ARRAYREF }) {
-                        return "Event $event is reserved by ". __PACKAGE__;
-                    }
+                if (OBJECT_STATES_HASHREF->{$event}
+                    || first { $event eq $_ } @{ +OBJECT_STATES_ARRAYREF }) {
+                    return "Event $event is reserved by ". __PACKAGE__;
                 }
             }
         }
