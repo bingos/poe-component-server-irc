@@ -1,6 +1,7 @@
 Revision history for POE-Component-Server-IRC
 
 {{$NEXT}}
+    - Fix invalid method call in Auth plugin when there's no ident response
 
 1.49  Wed May 25 06:23:32 GMT 2011
     - Fixed a bug were unsuccessful client registration would leave the

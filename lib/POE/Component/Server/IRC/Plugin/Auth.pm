@@ -278,7 +278,7 @@ sub got_ident_error {
         return;
     }
 
-    $self->send_output(
+    $ircd->send_output(
         {
             command => 'NOTICE',
             params  => ['AUTH', "*** No Ident response"],
