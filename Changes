@@ -1,6 +1,8 @@
 Revision history for POE-Component-Server-IRC
 
 {{$NEXT}}
+
+1.51  Sat Aug 27 04:32:12 GMT 2011
     - Fix authentication for clients connecting from localhost
 
 1.50  Thu Jun 2 02:53:21 GMT 2011
