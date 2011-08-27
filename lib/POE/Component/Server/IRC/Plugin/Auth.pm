@@ -92,6 +92,7 @@ sub IRCD_connection {
             $conn_id,
         );
         $self->{conns}{$conn_id}{hostname} = 'localhost';
+        $self->_auth_done($conn_id);
     }
     else {
         $poe_kernel->call(
