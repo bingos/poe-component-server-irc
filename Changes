@@ -1,6 +1,8 @@
 Revision history for POE-Component-Server-IRC
 
 {{$NEXT}}
+
+1.52  Thu Oct 6 11:50:38 UTC 2011
     - Fix public messages for non-spoofed clients (thanks BinGOs!)
 
 1.51  Sat Aug 27 04:32:12 GMT 2011
