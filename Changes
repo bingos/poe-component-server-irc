@@ -1,6 +1,7 @@
 Revision history for POE-Component-Server-IRC
 
 {{$NEXT}}
+    - Fix public messages for non-spoofed clients (thanks BinGOs!)
 
 1.51  Sat Aug 27 04:32:12 GMT 2011
     - Fix authentication for clients connecting from localhost
