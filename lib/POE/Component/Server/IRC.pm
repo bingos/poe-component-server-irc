@@ -976,7 +976,7 @@ sub _daemon_cmd_message {
                     if ($self->_connection_is_client($route_id)) {
                         $msg->{prefix} = $full;
                     }
-                    if (!$route_id eq 'spoofed') {
+                    if ($route_id ne 'spoofed') {
                         $self->send_output($msg, $route_id);
                     }
                     else {
