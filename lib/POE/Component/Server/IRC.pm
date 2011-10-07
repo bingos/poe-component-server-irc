@@ -15,6 +15,7 @@ use base qw(POE::Component::Server::IRC::Backend);
 
 sub spawn {
     my ($package, %args) = @_;
+    $args{lc $_} = delete $args{$_} for keys %args;
     my $config = delete $args{config};
     my $debug = delete $args{debug};
     my $self = $package->create(
@@ -1662,7 +1663,7 @@ sub _daemon_cmd_squit {
         $args->[0] = $self->_state_peer_name($peer);
         $args->[1] = $reason;
 
-        if (grep { $_ eq $peer }
+        if ( !grep { $_ eq $peer }
                 keys %{ $self->{state}{peers}{uc $server}{peers} }) {
             $self->send_output(
                 {
