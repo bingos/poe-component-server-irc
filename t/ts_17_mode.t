@@ -88,7 +88,6 @@ sub irc_join {
 sub irc_mode {
     return unless $_[ARG1] =~ /^\#/ and $_[ARG2] =~ /o/;
     my $irc = $_[SENDER]->get_heap();
-    diag(join(' ', @_[ARG0..$#_]));
     pass($irc->session_alias() . ' received a mode message');
     $irc->yield( 'quit' );
 }
