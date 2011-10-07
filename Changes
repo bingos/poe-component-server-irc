@@ -1,6 +1,8 @@
 Revision history for POE-Component-Server-IRC
 
 {{$NEXT}}
+
+1.53  Fri Oct 7 15:35:27 UTC 2011
     - Fix channel mode handling
     - Some configuration options were not being accepted case-insensitively
     - The SQUIT commands was not working
