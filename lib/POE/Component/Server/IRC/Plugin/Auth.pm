@@ -25,6 +25,7 @@ sub PCSI_register {
                 resolve_hostname
                 resolve_ident
                 got_hostname
+                got_ip
             )],
             $self => {
                 ident_agent_reply => 'got_ident',
@@ -220,10 +221,10 @@ sub got_ip {
     my @answers = $response->{response}->answer();
     return $fail->() if !@answers;
 
-    my $peeraddress = $response->{context}{peeraddress};
+    my $peeraddr = $response->{context}{peeraddr};
     my $hostname    = $response->{context}{hostname};
     for my $answer (@answers) {
-        if ($answer->rdatastr() eq $peeraddress) {
+        if ($answer->rdatastr() eq $peeraddr) {
             $ircd->send_output(
                 {
                     command => 'NOTICE',
