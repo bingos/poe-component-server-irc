@@ -2,6 +2,7 @@ Revision history for POE-Component-Server-IRC
 
 {{$NEXT}}
     - Resolve problem with remote (versus localhost) clients
+    - Fix shutdown on Win32
 
 1.53  Fri Oct 7 15:35:27 UTC 2011
     - Fix channel mode handling
