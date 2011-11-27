@@ -3217,6 +3217,35 @@ sub _daemon_cmd_whois {
     return $ref;
 }
 
+sub _daemon_cmd_whowas {
+    my $self   = shift;
+    my $nick   = shift || return;
+    my $server = $self->server_name();
+    my $ref    = [ ];
+    my ($first) = @_;
+
+    SWITCH: {
+        if (!$first) {
+            push @$ref, ['431'];
+            last SWITCH;
+        }
+        my $query = ( split /,/, $first )[0];
+        push @$ref, {
+            prefix  => $server,
+            command => '406',
+            params  => [$nick, $query, 'There was no such nickname'],
+        };
+        push @$ref, {
+            prefix  => $server,
+            command => '369',
+            params  => [$nick, $query, 'End of WHOWAS'],
+        };
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
 sub _daemon_cmd_who {
     my $self   = shift;
     my $nick   = shift || return;
