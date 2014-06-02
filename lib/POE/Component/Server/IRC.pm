@@ -7815,7 +7815,8 @@ sub _terminate_conn_error {
         $conn_id,
     );
 
-    while (my ($nick, $id) = each %{ $self->{state}{pending} }) {
+    foreach my $nick ( keys %{ $self->{state}{pending} }) {
+        my $id = $self->{state}{pending}{$nick};
         if ($id == $conn_id) {
             delete $self->{state}{pending}{$nick};
             last;

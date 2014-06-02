@@ -11,7 +11,7 @@ my $pocosi = POE::Component::Server::IRC->spawn(
     plugin_debug => 1,
 );
 my @pocoirc;
-push @pocoirc, POE::Component::IRC->spawn(alias => $_, flood => 1) for qw(one two);
+push @pocoirc, POE::Component::IRC->spawn(alias => $_, flood => 1, nodns => 1) for qw(one two);
 
 if ($pocosi && @pocoirc) {
     isa_ok( $pocosi, "POE::Component::Server::IRC" );
