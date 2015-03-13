@@ -6469,11 +6469,11 @@ sub _state_local_users_match_gline {
     my $local = $self->{state}{peers}{uc $self->server_name()}{users};
     my @conns;
 
-    if (my $netmask = Net::Netmask->new2($host)) {
+    if (my $netmask = Net::CIDR::cidrvalidate($host)) {
         for my $user (values %$local) {
             next if $user->{route_id} eq 'spoofed';
             next if $user->{umode} && $user->{umode} =~ /o/;
-            if ($netmask->match($user->{socket}[0])
+            if (Net::CIDR::cidrlookup($user->{socket}[0],$netmask)
                     && matches_mask($luser, $user->{auth}{ident})) {
                 push @conns, $user->{route_id};
             }
@@ -6521,8 +6521,8 @@ sub _state_user_matches_kline {
     my $ip      = $record->{socket}[0];
 
     for my $gline (@{ $self->{state}{klines} }) {
-        if (my $netmask = Net::Netmask->new2($gline->{host})) {
-            if ($netmask->match($ip)
+        if (my $netmask = Net::CIDR::cidrvalidate($gline->{host})) {
+            if (Net::CIDR::cidrlookup($ip,$netmask)
                 && matches_mask($gline->{user}, $user)) {
                 return 1;
             }
@@ -6546,8 +6546,8 @@ sub _state_user_matches_gline {
     my $ip      = $record->{socket}[0];
 
     for my $gline (@{ $self->{state}{glines} }) {
-        if (my $netmask = Net::Netmask->new2($gline->{host})) {
-            if ($netmask->match($ip)
+        if (my $netmask = Net::CIDR::cidrvalidate($gline->{host})) {
+            if (Net::CIDR::cidrlookup($ip,$netmask)
                 && matches_mask($gline->{user}, $user)) {
                 return 1;
             }
@@ -9488,7 +9488,7 @@ L<POE|POE> L<http://poe.perl.org/>
 
 L<POE::Component::Server::IRC::Backend|POE::Component::IRC::Server::Backend>
 
-L<Net::Netmask|Net::Netmask>
+L<Net::CIDR|Net::CIDR>
 
 Hybrid IRCD L<http://ircd-hybrid.com/>
 
