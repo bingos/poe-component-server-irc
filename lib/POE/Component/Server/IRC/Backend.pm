@@ -8,7 +8,7 @@ use POE qw(Wheel::SocketFactory Wheel::ReadWrite Filter::Stackable
            Filter::Line Filter::IRCD);
 use Net::Netmask; # deprecated
 use Net::CIDR ();
-use Socket qw(unpack_sockaddr_in inet_ntoa);
+use Socket qw(getnameinfo NI_NUMERICHOST NI_NUMERICSERV);
 use base qw(POE::Component::Syndicator);
 
 use constant {
@@ -185,12 +185,14 @@ sub _accept_failed {
 }
 
 sub _accept_connection {
-    my ($kernel, $self, $socket, $peeraddr, $peerport, $listener_id)
-        = @_[KERNEL, OBJECT, ARG0..ARG3];
+    my ($kernel, $self, $socket, $listener_id)
+        = @_[KERNEL, OBJECT, ARG0, ARG3];
 
-    my $sockaddr = inet_ntoa((unpack_sockaddr_in(getsockname $socket))[1]);
-    my $sockport = (unpack_sockaddr_in(getsockname $socket))[0];
-    $peeraddr    = inet_ntoa($peeraddr);
+    my (undef,$peeraddr,$peerport) = getnameinfo( CORE::getpeername( $socket ), NI_NUMERICHOST | NI_NUMERICSERV );
+    my (undef,$sockaddr,$sockport) = getnameinfo( CORE::getsockname( $socket ), NI_NUMERICHOST | NI_NUMERICSERV );
+
+    s!^::ffff:!! for ( $sockaddr, $peeraddr );
+
     my $listener = $self->{listeners}{$listener_id};
 
     if ($self->{got_ssl} && $listener->{usessl}) {
@@ -287,7 +289,8 @@ sub _add_listener {
     $self->{listeners}{$id}{antiflood} = $antiflood;
     $self->{listeners}{$id}{usessl}    = $usessl;
 
-    my ($port, $addr) = unpack_sockaddr_in($listener->getsockname);
+    my (undef,$addr,$port) = getnameinfo( $listener->getsockname, NI_NUMERICHOST | NI_NUMERICSERV );
+    $addr =~ s!^::ffff:!!;
     if ($port) {
         $self->{listeners}{$id}{port} = $port;
         $self->send_event(
@@ -396,9 +399,13 @@ sub _sock_failed {
 }
 
 sub _sock_up {
-    my ($kernel, $self, $socket, $peeraddr, $peerport, $connector_id)
-        = @_[KERNEL, OBJECT, ARG0..ARG3];
-    $peeraddr = inet_ntoa($peeraddr);
+    my ($kernel, $self, $socket, $connector_id)
+        = @_[KERNEL, OBJECT, ARG0, ARG3];
+
+    my (undef,$peeraddr,$peerport) = getnameinfo( CORE::getpeername( $socket ), NI_NUMERICHOST | NI_NUMERICSERV );
+    my (undef,$sockaddr,$sockport) = getnameinfo( CORE::getsockname( $socket ), NI_NUMERICHOST | NI_NUMERICSERV );
+
+    s!^::ffff:!! for ( $sockaddr, $peeraddr );
 
     my $cntr = delete $self->{connectors}{$connector_id};
     if ($self->{got_ssl} && $cntr->{usessl}) {
@@ -421,8 +428,6 @@ sub _sock_up {
 
     return if !$wheel;
     my $wheel_id = $wheel->ID();
-    my $sockaddr = inet_ntoa((unpack_sockaddr_in(getsockname $socket))[1]);
-    my $sockport = (unpack_sockaddr_in(getsockname $socket))[0];
     my $ref = {
         wheel     => $wheel,
         peeraddr  => $peeraddr,
