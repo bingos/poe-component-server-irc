@@ -2,11 +2,12 @@ package POE::Component::Server::IRC::Backend;
 
 use strict;
 use warnings;
-use Carp qw(croak);
+use Carp qw(carp croak);
 use List::Util qw(first);
 use POE qw(Wheel::SocketFactory Wheel::ReadWrite Filter::Stackable
            Filter::Line Filter::IRCD);
-use Net::Netmask;
+use Net::Netmask; # deprecated
+use Net::CIDR ();
 use Socket qw(unpack_sockaddr_in inet_ntoa);
 use base qw(POE::Component::Syndicator);
 
@@ -713,7 +714,18 @@ sub add_denial {
     my $self = shift;
     my $netmask = shift || return;
     my $reason = shift || 'Denied';
-    return if !$netmask->isa('Net::Netmask');
+
+    if ( $netmask->isa('Net::Netmask') ) {
+      carp("Use of Net::Netmask is deprecated and will be removed from a future version of this module")
+    }
+    else {
+      $netmask = Net::CIDR::cidrvalidate( $netmask );
+    }
+
+    if ( !$netmask ) {
+      carp("Failed to validate netmask");
+      return;
+    }
 
     $self->{denials}{$netmask} = {
         blk    => $netmask,
@@ -725,7 +737,9 @@ sub add_denial {
 sub del_denial {
     my $self = shift;
     my $netmask = shift || return;
-    return if !$netmask->isa('Net::Netmask');
+    if ( $netmask->isa('Net::Netmask') ) {
+      carp("Use of Net::Netmask is deprecated and will be removed from a future version of this module")
+    }
     return if !$self->{denials}{$netmask};
     delete $self->{denials}{$netmask};
     return 1;
@@ -734,7 +748,18 @@ sub del_denial {
 sub add_exemption {
     my $self = shift;
     my $netmask = shift || return;
-    return if !$netmask->isa('Net::Netmask');
+
+    if ( $netmask->isa('Net::Netmask') ) {
+      carp("Use of Net::Netmask is deprecated and will be removed from a future version of this module")
+    }
+    else {
+      $netmask = Net::CIDR::cidrvalidate( $netmask );
+    }
+
+    if ( !$netmask ) {
+      carp("Failed to validate netmask");
+      return;
+    }
 
     if (!$self->{exemptions}{$netmask}) {
         $self->{exemptions}{$netmask} = $netmask;
@@ -745,7 +770,9 @@ sub add_exemption {
 sub del_exemption {
     my $self = shift;
     my $netmask = shift || return;
-    return if !$netmask->isa('Net::Netmask');
+    if ( $netmask->isa('Net::Netmask') ) {
+      carp("Use of Net::Netmask is deprecated and will be removed from a future version of this module")
+    }
     return if !$self->{exemptions}{$netmask};
     delete $self->{exemptions}{$netmask};
     return 1;
@@ -757,7 +784,10 @@ sub denied {
     return if $self->exempted($ipaddr);
 
     for my $mask (keys %{ $self->{denials} }) {
-        if ($self->{denials}{$mask}{blk}->match($ipaddr)) {
+        if ($self->{denials}{$mask}{blk}->isa('Net::Netmask') && $self->{denials}{$mask}{blk}->match($ipaddr)) {
+            return $self->{denials}{$mask}{reason};
+        }
+        elsif ( Net::CIDR::cidrlookup( $ipaddr, $self->{denials}{$mask}{blk} ) ) {
             return $self->{denials}{$mask}{reason};
         }
     }
@@ -769,7 +799,8 @@ sub exempted {
     my $self = shift;
     my $ipaddr = shift || return;
     for my $mask (keys %{ $self->{exemptions} }) {
-        return 1 if $self->{exemptions}{$mask}->match($ipaddr);
+        return 1 if $self->{exemptions}{$mask}->isa('Net::Netmask') && $self->{exemptions}{$mask}->match($ipaddr);
+        return 1 if Net::CIDR::cidrlookup( $ipaddr, $self->{exemptions}{$mask} );
     }
     return;
 }
@@ -982,13 +1013,13 @@ port. Returns undef on error.
 =head3 C<add_denial>
 
 Takes one mandatory argument and one optional. The first mandatory
-argument is a L<Net::Netmask|Net::Netmask> object that will be used to
+argument is an address or CIDR as understood by L<Net::CIDR>::cidrvalidate that will be used to
 check connecting IP addresses against. The second optional argument is a
 reason string for the denial.
 
 =head3 C<del_denial>
 
-Takes one mandatory argument, a L<Net::Netmask|Net::Netmask> object to
+Takes one mandatory argument, an address or CIDR as understood by L<Net::CIDR>::cidrvalidate to
 remove from the current denial list.
 
 =head3 C<denied>
@@ -998,12 +1029,12 @@ whether that IP is denied or not.
 
 =head3 C<add_exemption>
 
-Takes one mandatory argument, a L<Net::Netmask|Net::Netmask> object that
+Takes one mandatory argument, an address or CIDR as understood by L<Net::CIDR>::cidrvalidate that
 will be checked against connecting IP addresses for exemption from denials.
 
 =head3 C<del_exemption>
 
-Takes one mandatory argument, a L<Net::Netmask|Net::Netmask> object to
+Takes one mandatory argument, an address or CIDR as understood by L<Net::CIDR>::cidrvalidate to
 remove from the current exemption list.
 
 =head3 C<exempted>
