@@ -8,7 +8,8 @@ use POE qw(Wheel::SocketFactory Wheel::ReadWrite Filter::Stackable
            Filter::Line Filter::IRCD);
 use Net::Netmask; # deprecated
 use Net::CIDR ();
-use Socket qw(getnameinfo NI_NUMERICHOST NI_NUMERICSERV);
+use Net::IP::Minimal qw[ip_is_ipv6];
+use Socket qw(getnameinfo NI_NUMERICHOST NI_NUMERICSERV AF_INET6);
 use base qw(POE::Component::Syndicator);
 
 use constant {
@@ -277,6 +278,7 @@ sub _add_listener {
         SuccessEvent => '_accept_connection',
         FailureEvent => '_accept_failed',
         Reuse        => 'on',
+        ( ip_is_ipv6( $bindaddr ) ? ( SocketDomain => AF_INET6 ) : () ),
         ($args{listenqueue} ? (ListenQueue => $args{listenqueue}) : ()),
     );
 
@@ -379,6 +381,7 @@ sub _add_connector {
         SuccessEvent   => '_sock_up',
         FailureEvent   => '_sock_failed',
         ($args{bindaddress} ? (BindAddress => $args{bindaddress}) : ()),
+        (ip_is_ipv6($remoteaddress) ? (SocketDomain => AF_INET6) : () ),
     );
 
     if ($wheel) {
