@@ -1,3 +1,4 @@
 POE-Component-Server-IRC-*
 cover_db
 .build
+examples/test-ircd2.pl
