@@ -7,6 +7,7 @@ use POE;
 use POE::Component::Client::Ident::Agent;
 use POE::Component::Client::DNS;
 use POE::Component::Server::IRC::Plugin 'PCSI_EAT_NONE';
+use Net::IP::Minimal qw[ip_is_ipv6];
 
 sub new {
     my ($package, %args) = @_;
@@ -66,6 +67,7 @@ sub IRCD_connection {
     $self->{conns}{$conn_id} = {
         hostname => '',
         ident    => '',
+        done     => 0,
     };
 
     $ircd->send_output(
@@ -146,6 +148,7 @@ sub resolve_ident {
 sub got_hostname {
     my ($kernel, $self, $response) = @_[KERNEL, OBJECT, ARG0];
     my $conn_id = $response->{context}{conn_id};
+    my $peer_ip = $response->{context}{peeraddr};
     my $ircd    = $self->{ircd};
 
     if (!$ircd->connection_exists($conn_id)) {
@@ -165,9 +168,7 @@ sub got_hostname {
             $conn_id,
         );
 
-        if ($self->{conns}{$conn_id}{done} == 2) {
-            $self->_auth_done($conn_id);
-        }
+        $self->_auth_done($conn_id);
     };
 
     return $fail->() if !defined $response->{response};
@@ -183,7 +184,7 @@ sub got_hostname {
             event   => 'got_ip',
             host    => $answer->rdatastr(),
             context => $context,
-            type    => 'A',
+            type    => ( ip_is_ipv6( $peer_ip ) ? 'AAAA' : 'A' ),
         );
         if (defined $query) {
             $kernel->call($self->{session_id}, 'got_ip', $query);

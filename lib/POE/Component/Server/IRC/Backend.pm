@@ -223,7 +223,7 @@ sub _accept_connection {
             flooded   => 0,
             sockaddr  => $sockaddr,
             sockport  => $sockport,
-            idle      => time(),
+            idle      => $listener->{idle},
             antiflood => $listener->{antiflood},
             compress  => 0
         };
@@ -374,6 +374,8 @@ sub _add_connector {
 
     return if !$remoteaddress || !$remoteport;
 
+    $args{idle} = $args{idle} || 180;
+
     my $wheel = POE::Wheel::SocketFactory->new(
         SocketProtocol => 'tcp',
         RemoteAddress  => $remoteaddress,
@@ -437,7 +439,7 @@ sub _sock_up {
         peerport  => $peerport,
         sockaddr  => $sockaddr,
         sockport  => $sockport,
-        idle      => time(),
+        idle      => $cntr->{idle},
         antiflood => 0,
         compress  => 0,
     };
@@ -513,7 +515,7 @@ sub _conn_alarm {
         $conn->{idle},
     );
     $conn->{alarm} = $kernel->delay_set(
-        '_conn_alar',
+        '_conn_alarm',
         $conn->{idle},
         $wheel_id,
     );
@@ -1248,6 +1250,9 @@ Opens a TCP connection to specified address and port.
 =item * B<'remoteport'>, the TCP port on the remote host;
 
 =item * B<'bindaddress'>, a local address to bind from (optional);
+
+=item * B<'idle'>, the time, in seconds, after which a connection will be
+considered idle. Defaults is 180.
 
 =back
 
