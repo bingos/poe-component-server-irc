@@ -2,7 +2,7 @@ package POE::Component::Server::IRC;
 
 use strict;
 use warnings;
-use Carp qw(croak);
+use Carp qw(carp croak);
 use IRC::Utils qw(uc_irc parse_mode_line unparse_mode_line normalize_mask
                   matches_mask gen_mode_change is_valid_nick_name
                   is_valid_chan_name);
@@ -11,6 +11,7 @@ use POE;
 use POE::Component::Server::IRC::Common qw(chkpasswd);
 use POE::Component::Server::IRC::Plugin qw(:ALL);
 use POSIX 'strftime';
+use Net::CIDR ();
 use base qw(POE::Component::Server::IRC::Backend);
 
 sub spawn {
@@ -6616,9 +6617,12 @@ sub _state_auth_peer_conn {
     my $client_ip = $conn->{socket}[0];
 
     if (ref $peers->{uc $name}{ipmask} eq 'ARRAY') {
-        for my $block (grep { $_->isa('Net::Netmask') }
-            @{ $peers->{uc $name}{ipmask} }) {
-            return 1 if $block->match($client_ip);
+        for my $block ( @{ $peers->{uc $name}{ipmask} }) {
+            if ( $block->isa('Net::Netmask') ) {
+              return 1 if $block->match($client_ip);
+              next;
+            }
+            return 1 if Net::CIDR::cidrlookup( $client_ip, $block );
         }
     }
 
@@ -7355,8 +7359,12 @@ sub _state_o_line {
     return 0 if !$ops->{$user}{ipmask};
 
     if (ref $ops->{$user}{ipmask} eq 'ARRAY') {
-        for my $block (grep { $_->isa('Net::Netmask') } @{ $ops->{$user}{ipmask} }) {
-            return 1 if $block->match($client_ip);
+        for my $block (@{ $ops->{$user}{ipmask} }) {
+            if ( $block->isa('Net::Netmask') ) {
+              return 1 if $block->match($client_ip);
+              next;
+            }
+            return 1 if Net::CIDR::cidrlookup( $client_ip, $block );
         }
     }
     return 1 if matches_mask($ops->{$user}{ipmask}, $client_ip);
@@ -7703,6 +7711,23 @@ sub add_operator {
         return;
     }
 
+    if ( $ref->{ipmask} && $ref->{ipmask} eq 'ARRAY' ) {
+      my @validated;
+      my $warned;
+      foreach my $mask ( @{ $ref->{ipmask} } ) {
+        if ( $mask->isa('Net::Netmask' ) ) {
+          carp("Use of Net::Netmask is deprecated and will be removed from a future version of this module")
+            if !$warned;
+          $warned++;
+          push @validated, $mask;
+          next;
+        }
+        my $valid = Net::CIDR::cidrvalidate($mask);
+        push @validated, $valid if $valid;
+      }
+      $ref->{ipmask} = \@validated;
+    }
+
     my $record = $self->{state}{peers}{uc $self->server_name()};
     my $user = delete $ref->{username};
     $self->{config}{ops}{$user} = $ref;
@@ -7778,6 +7803,24 @@ sub add_peer {
 
     $parms->{ipmask} = $parms->{raddress} if $parms->{raddress};
     $parms->{zip} = 0 if !$parms->{zip};
+
+    if ( $parms->{ipmask} && $parms->{ipmask} eq 'ARRAY' ) {
+      my @validated;
+      my $warned;
+      foreach my $mask ( @{ $parms->{ipmask} } ) {
+        if ( $mask->isa('Net::Netmask' ) ) {
+          carp("Use of Net::Netmask is deprecated and will be removed from a future version of this module")
+            if !$warned;
+          $warned++;
+          push @validated, $mask;
+          next;
+        }
+        my $valid = Net::CIDR::cidrvalidate($mask);
+        push @validated, $valid if $valid;
+      }
+      $parms->{ipmask} = \@validated;
+    }
+
     my $name = $parms->{name};
     $self->{config}{peers}{uc $name} = $parms;
     $self->add_connector(
@@ -8508,8 +8551,8 @@ This adds an O line to the IRCd. Takes a number of parameters:
 
 =item * B<'password'>, the password, mandatory;
 
-=item * B<'ipmask'>, either a scalar ipmask or an arrayref of Net::Netmask
-objects;
+=item * B<'ipmask'>, either a scalar ipmask or an arrayref of addresses or CIDRs
+as understood by L<Net::CIDR>::cidrvalidate;
 
 =back
 
@@ -8548,8 +8591,8 @@ eq 'r';
 
 =item * B<'rport'>, the remote port to connect to, default is 6667;
 
-=item * B<'ipmask'>, either a scalar ipmask or an arrayref of Net::Netmask
-objects;
+=item * B<'ipmask'>, either a scalar ipmask or an arrayref of addresses or CIDRs
+as understood by L<Net::CIDR>::cidrvalidate;
 
 =item * B<'auto'>, if set to true value will automatically connect to
 remote server if type is 'r';
