@@ -406,6 +406,12 @@ sub _cmd_from_unknown {
                 $self->{state}{conns}{$wheel_id}{ts_server} = 1;
                 $self->antiflood($wheel_id, 0);
             }
+
+            # TS6 server
+            if ($params->[2] && $params->[3]) {
+              $self->{state}{conns}{$wheel_id}{ts_data} = [ @{$params}[2,3] ];
+            }
+
             last SWITCH;
         }
 
@@ -6367,7 +6373,17 @@ sub _state_create {
         name => $self->server_name(),
         hops => 0,
         desc => $self->{config}{SERVERDESC},
+        ts => 5,
     };
+
+    if ( my $sid = $self->{config}{SID} ) {
+      my $rec = $self->{state}{peers}{uc $self->server_name()};
+      $rec->{sid} = $sid;
+      $rec->{ts}  = 6;
+      $self->{state}{sids}{uc $sid} = $rec;
+      $self->{state}{uids} = { };
+      $self->{genuid} = $sid . 'AAAAAA';
+    }
 
     $self->{state}{stats} = {
         maxconns   => 0,
@@ -6379,6 +6395,48 @@ sub _state_create {
     };
 
     return 1;
+}
+
+sub _state_gen_uid {
+    my $self = shift;
+    my $uid = $self->{genuid};
+    $self->{genuid} = _add_one_uid( $uid );
+    while ( defined $self->{state}{uids}{$uid} ) {
+       $uid = $self->{genuid};
+       $self->{genuid} = _add_one_uid( $uid );
+    }
+    return $uid;
+}
+
+sub _add_one_uid {
+  my $UID = shift;
+  my @cols = unpack 'a' x length $UID, $UID;
+  my ($add,$add1);
+  $add1 = $add = sub {
+    my $idx = shift;
+    if ( $idx != 3 ) {
+      if ( $cols[$idx] eq 'Z' ) {
+        $cols[$idx] = '0';
+      }
+      elsif ( $cols[$idx] eq '9' ) {
+        $cols[$idx] = 'A';
+        $add->( $idx - 1 );
+      }
+      else {
+        $cols[$idx]++;
+      }
+    }
+    else {
+      if ( $cols[$idx] eq 'Z' ) {
+        @cols[3..8] = qw[A A A A A A];
+      }
+      else {
+        $cols[$idx]++;
+      }
+    }
+  };
+  $add->(8);
+  return pack 'a' x scalar @cols, @cols;
 }
 
 sub _state_delete {
@@ -6642,10 +6700,13 @@ sub _state_send_credentials {
     return if !$self->{config}{peers}{uc $name};
 
     my $peer = $self->{config}{peers}{uc $name};
+    my $rec = $self->{state}{peers}{uc $self->server_name()};
+    my $sid = $rec->{sid};
+
     $self->send_output(
         {
             command => 'PASS',
-            params  => [$peer->{rpass}, 'TS'],
+            params  => [$peer->{rpass}, 'TS', ( $sid ? ( 6 => $sid ) : () )],
         },
         $conn_id,
     );
@@ -6662,7 +6723,6 @@ sub _state_send_credentials {
         $conn_id,
     );
 
-    my $rec = $self->{state}{peers}{uc $self->server_name()};
     $self->send_output(
         {
             command => 'SERVER',
@@ -6674,7 +6734,7 @@ sub _state_send_credentials {
     $self->send_output(
         {
             command => 'SVINFO',
-            params  => [5, 5, 0, time],
+            params  => [($sid ? 6 : 5 ), 5, 0, time],
         },
         $conn_id,
     );
@@ -6957,6 +7017,10 @@ sub _state_register_client {
     $record->{route_id} = $conn_id;
     $record->{umode}    = '';
 
+    my $ts6 = $self->{config}{SID};
+
+    $record->{uid} = $self->_state_gen_uid() if $ts6;
+
     if (!$record->{auth}{ident}) {
         $record->{auth}{ident} = '~' . $record->{user};
     }
@@ -6971,7 +7035,9 @@ sub _state_register_client {
     }
 
     $self->{state}{users}{uc_irc($record->{nick})} = $record;
+    $self->{state}{uids}{ $record->{uid} } = $record if $ts6;
     $self->{state}{peers}{uc $record->{server}}{users}{uc_irc($record->{nick})} = $record;
+    $self->{state}{peers}{uc $record->{server}}{uids}{ $record->{uid} } = $record;
 
     my $arrayref = [
         $record->{nick},
@@ -6983,6 +7049,7 @@ sub _state_register_client {
         $record->{ircname},
     ];
     delete $self->{state}{pending}{uc_irc($record->{nick})};
+    #TODO: TS6 and TS5 connected peers
     $self->send_output(
         {
             command => 'NICK',
@@ -7161,6 +7228,7 @@ sub _state_peer_route {
 
 sub _state_connected_peers {
     my $self = shift;
+    #TODO: Add TS version option
     my $server = uc $self->server_name();
     return if !keys %{ $self->{state}{peers} } > 1;
     my $record = $self->{state}{peers}{$server};
@@ -7506,8 +7574,19 @@ sub configure {
         }
     }
 
+
     for my $opt (keys %$opts) {
         $self->{config}{$opt} = $opts->{$opt} if defined $opts->{$opt};
+    }
+
+    if (defined $self->{config}{SID}) {
+      my $sid = delete $self->{config}{SID};
+      if ($sid !~ m!^[0-9][A-Z0-9]{2}$!i) {
+        carp("SID is invalid, falling back to TS5\n");
+      }
+      else {
+        $self->{config}{SID} = uc $sid;
+      }
     }
 
     $self->{config}{BANLEN}
@@ -8505,6 +8584,9 @@ returned by ADMIN;
 
 =item * B<'whoisactually'>, setting this to a false value means that only
 opers can see 338. Defaults to true;
+
+=item * B<'sid'>, servers unique ID.  This is three characters long and must be in
+the form [0-9][A-Z0-9][A-Z0-9]. Specifying this enables C<TS6>.
 
 =back
 
