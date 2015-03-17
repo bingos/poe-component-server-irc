@@ -410,6 +410,15 @@ sub _cmd_from_unknown {
             # TS6 server
             if ($params->[2] && $params->[3]) {
               $self->{state}{conns}{$wheel_id}{ts_data} = [ @{$params}[2,3] ];
+              last SWITCH if !$self->server_sid();
+              my $sid = $params->[3];
+              my $error;
+              $error = 'Bogus server ID intoduced' if $sid !~ m!^[0-9][A-Z0-9]{2}$!;
+              $error = 'Server ID already exists'  if $self->{state}{sids}{$sid};
+              if ( $error ) {
+                $self->_terminate_conn_error($wheel_id, $error);
+                last SWITCH;
+              }
             }
 
             last SWITCH;
@@ -7489,11 +7498,15 @@ sub _state_parse_msg_targets {
 }
 
 sub server_name {
-    return $_[0]->server_config('ServerName');
+    return $_[0]->{config}{'SERVERNAME'};
 }
 
 sub server_version {
-    return $_[0]->server_config('Version');
+    return $_[0]->{config}{'VERSION'};
+}
+
+sub server_sid {
+    return $_[0]->{config}{'SID'};
 }
 
 sub server_created {
