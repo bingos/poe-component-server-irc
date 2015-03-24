@@ -1224,9 +1224,11 @@ sub _daemon_cmd_quit {
     my $qmsg = shift || 'Client Quit';
     my $ref  = [ ];
     my $full = $self->state_user_full($nick);
+    my $name = uc $self->server_name();
 
     $nick = uc_irc($nick);
-    my $record = delete $self->{state}{peers}{uc $self->server_name()}{users}{$nick};
+    my $record = delete $self->{state}{peers}{$name}{users}{$nick};
+    delete $self->{state}{peers}{$name}{uids}{ $record->{uid} } if $record->{uid};
     $self->send_output(
         {
             prefix  => $record->{nick},
@@ -1266,6 +1268,7 @@ sub _daemon_cmd_quit {
     $self->{state}{stats}{ops_online}-- if $record->{umode} =~ /o/;
     $self->{state}{stats}{invisible}-- if $record->{umode} =~ /i/;
     delete $self->{state}{users}{$nick} if !$record->{nick_collision};
+    delete $self->{state}{uids}{ $record->{uid} } if $record->{uid};
     delete $self->{state}{localops}{$record->{route_id}};
     return @$ref if wantarray;
     return $ref;
