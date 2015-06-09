@@ -411,9 +411,10 @@ sub _cmd_from_unknown {
             if ($params->[2] && $params->[3]) {
               $self->{state}{conns}{$wheel_id}{ts_data} = [ @{$params}[2,3] ];
               last SWITCH if !$self->server_sid();
+              my $ts  = $params->[2];
               my $sid = $params->[3];
               my $error;
-              $error = 'Bogus server ID intoduced' if $sid !~ m!^[0-9][A-Z0-9]{2}$!;
+              $error = 'Bogus server ID introduced' if $sid !~ m!^[0-9][A-Z0-9]{2}$! or $ts ne '6';
               $error = 'Server ID already exists'  if $self->{state}{sids}{$sid};
               if ( $error ) {
                 $self->_terminate_conn_error($wheel_id, $error);
@@ -7029,9 +7030,10 @@ sub _state_register_client {
     $record->{route_id} = $conn_id;
     $record->{umode}    = '';
 
-    my $ts6 = $self->{config}{SID};
 
-    $record->{uid} = $self->_state_gen_uid() if $ts6;
+    if ( my $ts6 = $self->{config}{SID} ) {
+        $record->{uid} = $self->_state_gen_uid();
+    }
 
     if (!$record->{auth}{ident}) {
         $record->{auth}{ident} = '~' . $record->{user};
@@ -7047,9 +7049,9 @@ sub _state_register_client {
     }
 
     $self->{state}{users}{uc_irc($record->{nick})} = $record;
-    $self->{state}{uids}{ $record->{uid} } = $record if $ts6;
+    $self->{state}{uids}{ $record->{uid} } = $record if $record->{uid};
     $self->{state}{peers}{uc $record->{server}}{users}{uc_irc($record->{nick})} = $record;
-    $self->{state}{peers}{uc $record->{server}}{uids}{ $record->{uid} } = $record;
+    $self->{state}{peers}{uc $record->{server}}{uids}{ $record->{uid} } = $record if $record->{uid};
 
     my $arrayref = [
         $record->{nick},
