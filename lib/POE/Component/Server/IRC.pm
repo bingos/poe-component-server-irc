@@ -8304,7 +8304,7 @@ sub daemon_server_wallops {
                 command => 'WALLOPS',
                 params  => [$args->[0]],
             },
-            $self->_state_connected_peers(), 
+            $self->_state_connected_peers(),
             keys %{ $self->{state}{operwall} },
         );
         $self->send_event("daemon_wallops", $server, $args->[0]);
@@ -8328,6 +8328,9 @@ sub add_spoofed_nick {
     return if !$ref->{nick};
     return if $self->state_nick_exists($ref->{nick});
     my $record = $ref;
+    if ( my $ts6 = $self->{config}{SID} ) {
+        $record->{uid} = $self->_state_gen_uid();
+    }
     $record->{ts} = time if !$record->{ts};
     $record->{type} = 's';
     $record->{server} = $self->server_name();
@@ -8344,7 +8347,9 @@ sub add_spoofed_nick {
     $record->{auth}{hostname} = delete $record->{hostname}
         || $self->server_name();
     $self->{state}{users}{uc_irc($record->{nick})} = $record;
+    $self->{state}{uids}{ $record->{uid} } = $record if $record->{uid};
     $self->{state}{peers}{uc $record->{server}}{users}{uc_irc($record->{nick})} = $record;
+    $self->{state}{peers}{uc $record->{server}}{uids}{ $record->{uid} } = $record if $record->{uid};
 
     my $arrayref = [
         $record->{nick},
