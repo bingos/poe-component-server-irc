@@ -14,6 +14,10 @@ use POSIX 'strftime';
 use Net::CIDR ();
 use base qw(POE::Component::Server::IRC::Backend);
 
+my $sid_re = qr/^[0-9][A-Z0-9][A-Z0-9]$/;
+my $id_re  = qr/^[A-Z][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9]$/;
+my $uid_re = qr/^[0-9][A-Z0-9][A-Z0-9][A-Z][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9]$/;
+
 sub spawn {
     my ($package, %args) = @_;
     $args{lc $_} = delete $args{$_} for keys %args;
@@ -414,7 +418,7 @@ sub _cmd_from_unknown {
               my $ts  = $params->[2];
               my $sid = $params->[3];
               my $error;
-              $error = 'Bogus server ID introduced' if $sid !~ m!^[0-9][A-Z0-9]{2}$! or $ts ne '6';
+              $error = 'Bogus server ID introduced' if $sid !~ $sid_re or $ts ne '6';
               $error = 'Server ID already exists'  if $self->{state}{sids}{$sid};
               if ( $error ) {
                 $self->_terminate_conn_error($wheel_id, $error);
@@ -7599,7 +7603,7 @@ sub configure {
 
     if (defined $self->{config}{SID}) {
       my $sid = delete $self->{config}{SID};
-      if ($sid !~ m!^[0-9][A-Z0-9]{2}$!i) {
+      if ($sid !~ $sid_re) {
         carp("SID is invalid, falling back to TS5\n");
       }
       else {
