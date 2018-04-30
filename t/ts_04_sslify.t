@@ -26,6 +26,7 @@ my $pocosi = POE::Component::Server::IRC->spawn(
     antiflood      => 0,
     plugin_debug   => 1,
     sslify_options => ['ircd.key', 'ircd.crt'],
+    config         => { sid => '2FA', },
 );
 my $pocoirc = POE::Component::IRC->spawn(
     flood   => 1,

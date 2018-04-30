@@ -1,6 +1,6 @@
 use strict;
 use warnings;
-use Test::More tests => 7;
+use Test::More tests => 9;
 use POE;
 use POE::Component::Server::IRC;
 
@@ -8,7 +8,7 @@ my $pocosi = POE::Component::Server::IRC->spawn(
     auth         => 0,
     antiflood    => 0,
     plugin_debug => 1,
-    config       => { sid => '999', },
+    #config => { sid => 666 },
 );
 
 POE::Session->create(
@@ -47,6 +47,7 @@ sub _shutdown {
 
 sub ircd_daemon_quit {
     pass('Deleted Spoof User');
+    is( scalar keys %{ $pocosi->{state}{uids} }, 0, 'No UID now' );
     $poe_kernel->yield('_shutdown');
 }
 
@@ -58,5 +59,6 @@ sub ircd_daemon_nick {
     is($args[6], 'poco.server.irc', 'Spoof Test 1: Server');
     is($args[3], '+o', 'Spoof Test 1: Umode');
     is($args[7], 'The OperServ Bot', 'Spoof Test 1: GECOS');
+    is( scalar keys %{ $pocosi->{state}{uids} }, 1, 'Spoofed generated a UID' );
     $_[SENDER]->get_heap()->yield('del_spoofed_nick', $args[0]);
 }

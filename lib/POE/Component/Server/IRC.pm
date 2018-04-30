@@ -6414,6 +6414,14 @@ sub _state_create {
     return 1;
 }
 
+sub _state_rand_sid {
+  my $self = shift;
+  my @components = ( 0 .. 9, 'A' .. 'Z' );
+  my $total = scalar @components;
+  my $prefx = 10;
+  $self->{config}{SID} = join '', $components[ rand $prefx ], $components[ rand $total ], $components[ rand $total ];
+}
+
 sub _state_gen_uid {
     my $self = shift;
     my $uid = $self->{genuid};
@@ -7601,10 +7609,11 @@ sub configure {
         $self->{config}{$opt} = $opts->{$opt} if defined $opts->{$opt};
     }
 
-    if (defined $self->{config}{SID}) {
+    {
       my $sid = delete $self->{config}{SID};
-      if ($sid !~ $sid_re) {
-        carp("SID is invalid, falling back to TS5\n");
+      if (!$sid || $sid !~ $sid_re) {
+        warn "No SID or SID is invalid, generating a random one\n";
+        $self->_state_rand_sid();
       }
       else {
         $self->{config}{SID} = uc $sid;
