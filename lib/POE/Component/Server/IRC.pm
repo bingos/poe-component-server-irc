@@ -2434,7 +2434,7 @@ sub _daemon_cmd_version {
                 $nick,
                 $self->server_version(),
                 $server,
-                'eGHIMZ TS5ow',
+                'eGHIMZ TS6ow',
             ],
         };
         push @$ref, $_ for @{ $self->_daemon_cmd_isupport($nick) };
@@ -4888,8 +4888,8 @@ sub _daemon_peer_server {
             last SWITCH;
         }
         my $record = {
-            name => $args->[0], 
-            hops => $args->[1], 
+            name => $args->[0],
+            hops => $args->[1],
             desc => ( $args->[2] || '' ),
             route_id => $peer_id,
             type => 'r',
@@ -5132,7 +5132,7 @@ sub _daemon_peer_nick {
         }
         my $unick = uc_irc($args->[0]);
         $args->[3] =~ s/^\+//g;
-        my $record = { 
+        my $record = {
             nick  => $args->[0],
             hops  => $args->[1],
             ts    => $args->[2],
@@ -6390,7 +6390,7 @@ sub _state_create {
         name => $self->server_name(),
         hops => 0,
         desc => $self->{config}{SERVERDESC},
-        ts => 5,
+        ts => 6,
     };
 
     if ( my $sid = $self->{config}{SID} ) {
@@ -6759,7 +6759,7 @@ sub _state_send_credentials {
     $self->send_output(
         {
             command => 'SVINFO',
-            params  => [($sid ? 6 : 5 ), 5, 0, time],
+            params  => [6, 6, 0, time],
         },
         $conn_id,
     );
@@ -6909,7 +6909,7 @@ sub _state_server_burst {
 
     my $ref = [ ];
     $peer = $self->_state_peer_name($peer);
-    my $upeer = uc $peer; 
+    my $upeer = uc $peer;
     my $utarg = uc $targ;
 
     for my $server (keys %{ $self->{state}{peers}{$upeer}{peers} }) {
