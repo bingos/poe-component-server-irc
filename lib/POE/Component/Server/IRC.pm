@@ -230,6 +230,13 @@ sub _connection_exists {
     return 1;
 }
 
+sub _connection_terminated {
+    my $self = shift;
+    my $conn_id = shift || return;
+    return if !defined $self->{state}{conns}{$conn_id};
+    return 1 if defined $self->{state}{conns}{$conn_id}{terminated};
+}
+
 sub _client_register {
     my $self    = shift;
     my $conn_id = shift || return;
@@ -406,27 +413,30 @@ sub _cmd_from_unknown {
         if ($cmd eq 'PASS' && $pcount) {
             $self->{state}{conns}{$wheel_id}{lc $cmd} = $params->[0];
 
-            if ($params->[1] && $params->[1] =~ /TS$/) {
-                $self->{state}{conns}{$wheel_id}{ts_server} = 1;
-                $self->antiflood($wheel_id, 0);
-            }
+           if ($params->[1] && $params->[1] =~ /TS$/) {
+               $self->{state}{conns}{$wheel_id}{ts_server} = 1;
+               $self->antiflood($wheel_id, 0);
 
-            # TS6 server
-            if ($params->[2] && $params->[3]) {
-              $self->{state}{conns}{$wheel_id}{ts_data} = [ @{$params}[2,3] ];
-              last SWITCH if !$self->server_sid();
-              my $ts  = $params->[2];
-              my $sid = $params->[3];
-              my $error;
-              $error = 'Bogus server ID introduced' if $sid !~ $sid_re or $ts ne '6';
-              $error = 'Server ID already exists'  if $self->{state}{sids}{$sid};
-              if ( $error ) {
-                $self->_terminate_conn_error($wheel_id, $error);
-                last SWITCH;
+               # TS6 server
+               # PASS password TS 6 6FU
+               if ($params->[2] && $params->[3]) {
+                  $self->{state}{conns}{$wheel_id}{ts_data} = [ @{$params}[2,3] ];
+                  my $ts  = $params->[2];
+                  my $sid = $params->[3];
+                  my $error;
+                  $error = 'Bogus server ID introduced' if $sid !~ $sid_re or $ts ne '6';
+                  $error = 'Server ID already exists'  if $self->{state}{sids}{$sid};
+                  if ( $error ) {
+                    $self->_terminate_conn_error($wheel_id, $error);
+                    last SWITCH;
+                  }
               }
-            }
-
-            last SWITCH;
+              else {
+                  $self->_terminate_conn_error($wheel_id, 'Incompatible TS version' );
+                  last SWITCH;
+              }
+           }
+           last SWITCH;
         }
 
         # SERVER stuff.
@@ -4787,6 +4797,11 @@ sub _daemon_peer_svinfo {
     my $ref     = [ ];
     my $args    = [ @_ ];
     my $count   = @$args;
+    # SVINFO 6 6 0 :1525185763
+    if ( !( $args->[0] eq '6' && $args->[1] eq '6' ) ) {
+      $self->_terminate_conn_error($peer_id, 'Incompatible TS version');
+      return;
+    }
     $self->{state}{conns}{$peer_id}{svinfo} = $args;
     return @$ref if wantarray;
     return $ref;
@@ -6723,6 +6738,7 @@ sub _state_send_credentials {
     my $name    = shift || return;
     return if !$self->_connection_exists($conn_id);
     return if !$self->{config}{peers}{uc $name};
+    return if $self->_connection_terminated($conn_id);
 
     my $peer = $self->{config}{peers}{uc $name};
     my $rec = $self->{state}{peers}{uc $self->server_name()};
@@ -6772,6 +6788,7 @@ sub _state_send_burst {
     my $self    = shift;
     my $conn_id = shift || return;
     return if !$self->_connection_exists($conn_id);
+    return if $self->_connection_terminated($conn_id);
     my $server  = $self->server_name();
     my $conn    = $self->{state}{conns}{$conn_id};
     my $burst   = grep { /^EOB$/i } @{ $conn->{capab} };
@@ -7957,6 +7974,7 @@ sub _terminate_conn_error {
     return if !$self->_connection_exists($conn_id);
 
     $self->disconnect($conn_id, $msg);
+    $self->{state}{conns}{$conn_id}{terminated} = 1;
     $self->send_output(
         {
             command => 'ERROR',
