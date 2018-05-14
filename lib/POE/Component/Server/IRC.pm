@@ -7007,7 +7007,9 @@ sub _state_register_peer {
     my $conn_id = shift || return;
     return if !$self->_connection_exists($conn_id);
     my $server  = $self->server_name();
+    my $mysid   = $self->server_sid();
     my $record  = $self->{state}{conns}{$conn_id};
+    my $psid    = $record->{ts_data}[1];
 
     if (!$record->{cntr}) {
         $self->_state_send_credentials($conn_id, $record->{name});
@@ -7021,6 +7023,8 @@ sub _state_register_peer {
     $record->{peers} = { };
     $self->{state}{peers}{uc $server}{peers}{uc $record->{name}} = $record;
     $self->{state}{peers}{ uc $record->{name} } = $record;
+    $self->{state}{sids}{ $mysid }{sids}{ $psid } = $record;
+    $self->{state}{sids}{ $psid } = $record;
     $self->antiflood($conn_id, 0);
     $self->send_output(
         {
