@@ -6790,6 +6790,7 @@ sub _state_send_burst {
     return if !$self->_connection_exists($conn_id);
     return if $self->_connection_terminated($conn_id);
     my $server  = $self->server_name();
+    my $sid     = $self->server_sid();
     my $conn    = $self->{state}{conns}{$conn_id};
     my $burst   = grep { /^EOB$/i } @{ $conn->{capab} };
     my $invex   = grep { /^IE$/i } @{ $conn->{capab} };
@@ -6800,7 +6801,7 @@ sub _state_send_burst {
     push @lists, 'invex' if $invex;
 
     # Send SERVER burst
-    for ($self->_state_server_burst($server, $conn->{name})) {
+    for ($self->_state_server_burst($sid, $conn->{sid})) {
         $self->send_output($_, $conn_id );
     }
 
@@ -6925,19 +6926,16 @@ sub _state_server_burst {
     }
 
     my $ref = [ ];
-    $peer = $self->_state_peer_name($peer);
-    my $upeer = uc $peer;
-    my $utarg = uc $targ;
 
-    for my $server (keys %{ $self->{state}{peers}{$upeer}{peers} }) {
-        next if $server eq $utarg;
-        my $rec = $self->{state}{peers}{$server};
+    for my $server (keys %{ $self->{state}{sids}{$peer}{sids} }) {
+        next if $server eq $targ;
+        my $rec = $self->{state}{sids}{$server};
         push @$ref, {
             prefix  => $peer,
-            command => 'SERVER',
-            params  => [$rec->{name}, $rec->{hops} + 1, $rec->{desc}],
+            command => 'SID',
+            params  => [$rec->{name}, $rec->{hops} + 1, $server, $rec->{desc}],
         };
-        push @$ref, $_ for $self->_state_server_burst($rec->{name}, $targ);
+        push @$ref, $_ for $self->_state_server_burst($rec->{sid}, $targ);
     }
 
     return @$ref if wantarray;
@@ -7021,6 +7019,7 @@ sub _state_register_peer {
     $record->{peer}     = $server;
     $record->{users} = { };
     $record->{peers} = { };
+    $record->{sid} = $psid;
     $self->{state}{peers}{uc $server}{peers}{uc $record->{name}} = $record;
     $self->{state}{peers}{ uc $record->{name} } = $record;
     $self->{state}{sids}{ $mysid }{sids}{ $psid } = $record;
@@ -7149,7 +7148,7 @@ sub state_peers {
 sub state_peer_exists {
     my $self = shift;
     my $peer = shift || return;
-    return 0 if !defined $self->{state}{peers}{uc $peer};
+    return 0 if !defined $self->{state}{peers}{uc $peer} || !defined $self->{state}{sids}{ $peer };
     return 1;
 }
 
