@@ -1246,7 +1246,7 @@ sub _daemon_cmd_quit {
     delete $self->{state}{peers}{$name}{uids}{ $record->{uid} } if $record->{uid};
     $self->send_output(
         {
-            prefix  => $record->{nick},
+            prefix  => $record->{uid},
             command => 'QUIT',
             params  => [$qmsg],
         },
@@ -7240,19 +7240,22 @@ sub _state_register_client {
         $record->{ts}, '+i',
         $record->{auth}{ident},
         $record->{auth}{hostname},
-        $record->{server},
+        $record->{ipaddress},
+        $record->{uid},
+        '*',
         $record->{ircname},
     ];
     delete $self->{state}{pending}{uc_irc($record->{nick})};
-    #TODO: TS6 and TS5 connected peers
     $self->send_output(
         {
-            command => 'NICK',
+            prefix  => $record->{sid},
+            command => 'UID',
             params  => $arrayref,
         },
         $self->_state_connected_peers(),
     );
     $self->send_event("daemon_nick", @$arrayref);
+    # TODO: daemon_uid event
     $self->_state_update_stats();
     return 1;
 }
@@ -8605,18 +8608,20 @@ sub add_spoofed_nick {
         $record->{ts},
         '+' . $record->{umode},
         $record->{auth}{ident},
-        $record->{auth}{hostname},
-        $record->{server},
+        $record->{auth}{hostname}, '0',
+        $record->{uid}, '*',
         $record->{ircname},
     ];
 
     $self->send_output(
         {
-            command => 'NICK',
+            prefix  => $record->{sid},
+            command => 'UID',
             params  => $arrayref,
         },
         $self->_state_connected_peers(),
     );
+    # TODO: daemon_uid event
     $self->send_event("daemon_nick", @$arrayref);
     $self->_state_update_stats();
     return;
