@@ -85,9 +85,6 @@ sub testc_connected {
 sub testc_input {
   my ($heap,$input) = @_[HEAP,ARG0];
   return unless $input->{command} eq 'ERROR';
-  use Data::Dumper;
-  local $Data::Dumper::Indent=1;
-  diag(Dumper($input));
   pass('ERROR');
   like( $input->{params}->[0], qr/Incompatible TS version/, 'Incompatible TS version' );
   return;

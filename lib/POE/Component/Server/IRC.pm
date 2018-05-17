@@ -425,7 +425,7 @@ sub _cmd_from_unknown {
                   my $sid = $params->[3];
                   my $error;
                   $error = 'Bogus server ID introduced' if $sid !~ $sid_re or $ts ne '6';
-                  $error = 'Server ID already exists'  if $self->{state}{sids}{$sid};
+                  $error = 'Server ID already exists'  if $self->state_sid_exists( $sid );
                   if ( $error ) {
                     $self->_terminate_conn_error($wheel_id, $error);
                     last SWITCH;
@@ -4706,7 +4706,7 @@ sub _daemon_peer_eob {
     my $peer_id = shift || return;
     my $peer    = shift || return;
     my $ref     = [ ];
-    $self->send_event("daemon_eob", $peer);
+    $self->send_event('daemon_eob', $self->{state}{sids}{$peer}{name}, $peer);
     return @$ref if wantarray;
     return $ref;
 }
@@ -4714,27 +4714,27 @@ sub _daemon_peer_eob {
 sub _daemon_peer_kill {
     my $self    = shift;
     my $peer_id = shift || return;
-    my $nick    = shift || return;
+    my $killer  = shift || return;
     my $server  = $self->server_name();
     my $ref     = [ ];
     my $args    = [ @_ ];
     my $count   = @$args;
 
     SWITCH: {
-        if ($self->state_peer_exists($args->[0])) {
+        if ($self->state_sid_exists($args->[0])) {
             last SWITCH;
         }
-        if (!$self->state_nick_exists($args->[0])) {
+        if (!$self->state_uid_exists($args->[0])) {
             last SWITCH;
         }
 
-        my $target = $self->state_user_nick($args->[0]);
+        my $target = $args->[0];
         my $comment = $args->[1];
-        if ($self->_state_is_local_user($target)) {
-            my $route_id = $self->_state_user_route($target);
+        if ($self->_state_is_local_uid($target)) {
+            my $route_id = $self->_state_uid_route($target);
             $self->send_output(
                 {
-                    prefix  => $nick,
+                    prefix  => $killer,
                     command => 'KILL',
                     params  => [
                         $target,
@@ -4745,7 +4745,7 @@ sub _daemon_peer_kill {
 
             $self->send_output(
                 {
-                    prefix  => $self->state_user_full($nick),
+                    prefix  => ( $self->_state_sid_name($killer) || $self->state_user_full($killer) ),
                     command => 'KILL',
                     params  => [
                         $target,
@@ -4771,10 +4771,10 @@ sub _daemon_peer_kill {
             }
         }
         else {
-            $self->{state}{users}{uc_irc($target)}{killed} = 1;
+            $self->{state}{uids}{$target}{killed} = 1;
             $self->send_output(
                 {
-                    prefix  => $nick,
+                    prefix  => $killer,
                     command => 'KILL',
                     params  => [$target, join('!', $server, $comment)],
                 },
@@ -4782,7 +4782,7 @@ sub _daemon_peer_kill {
             );
             $self->send_output(
                 @{ $self->_daemon_peer_quit(
-                    $target, "Killed ($nick ($comment))" ) },
+                    $target, "Killed ($killer ($comment))" ) },
             );
         }
     }
@@ -4884,6 +4884,9 @@ sub _daemon_peer_pong {
     return $ref;
 }
 
+sub _daemon_peer_sid {
+}
+
 sub _daemon_peer_server {
     my $self    = shift;
     my $peer_id = shift || return;
@@ -4941,18 +4944,19 @@ sub _daemon_peer_server {
 
 sub _daemon_peer_quit {
     my $self    = shift;
-    my $nick    = shift || return;
+    my $uid     = shift || return;
     my $qmsg    = shift || 'Client Quit';
     my $conn_id = shift;
     my $ref     = [ ];
-    my $full    = $self->state_user_full($nick);
+    my $full    = $self->state_user_full($uid);
 
-    $nick = uc_irc($nick);
-    my $record = delete $self->{state}{users}{$nick};
+    my $record = delete $self->{state}{uids}{$uid};
     return $ref if !$record;
+    my $nick = uc_irc($record->{nick});
+    delete $self->{state}{users}{$nick};
     $self->send_output(
         {
-            prefix  => $record->{nick},
+            prefix  => $uid,
             command => 'QUIT',
             params  => [$qmsg],
         },
@@ -4976,6 +4980,7 @@ sub _daemon_peer_quit {
     my $common = { };
     for my $uchan (keys %{ $record->{chans} }) {
         delete $self->{state}{chans}{$uchan}{users}{$nick};
+        delete $self->{state}{chans}{$uchan}{uids}{$uid};
         for my $user ($self->state_chan_list($uchan)) {
             next if !$self->_state_is_local_user($user);
             $common->{$user} = $self->_state_user_route($user);
@@ -4989,6 +4994,125 @@ sub _daemon_peer_quit {
     $self->{state}{stats}{ops_online}-- if $record->{umode} =~ /o/;
     $self->{state}{stats}{invisible}-- if $record->{umode} =~ /i/;
     delete $self->{state}{peers}{uc $record->{server}}{users}{$nick};
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _daemon_peer_uid {
+    my $self    = shift;
+    my $peer_id = shift || return;
+    my $prefix  = shift;
+    my $server  = $self->server_name();
+    my $mysid   = $self->server_sid();
+    my $ref     = [ ];
+    my $args    = [ @_ ];
+    my $count   = @$args;
+
+    SWITCH: {
+        if (!$count || $count < 9) {
+            $self->_terminate_conn_error(
+                $peer_id,
+                'Not enough arguments to server command.',
+            );
+            last SWITCH;
+        }
+        if ( $self->state_nick_exists( $args->[0] ) ) {
+            my $unick = uc_irc($args->[0]);
+            my $exist = $self->{state}{users}{ $unick };
+            my $userhost = ( split /!/, $self->state_user_full($args->[0]) )[1];
+            my $incoming = join '@', @{ $args }[4..5];
+            # Received TS  < Existing TS
+            if ( $args->[2] < $exist->{ts} ) {
+              # If userhosts different, collide existing user
+              if ( $incoming ne $userhost ) {
+                # Send KILL for existing user UID to all servers
+              }
+              # If userhosts same, collide new user
+              else {
+                # Send KILL for new user UID back to sending peer
+                $self->send_output(
+                  {
+                    prefix  => $mysid,
+                    command => 'KILL',
+                    params  => [$args->[7], 'Nick Collision'],
+                  },
+                  $peer_id,
+                );
+                last SWITCH;
+              }
+            }
+            # Received TS == Existing TS
+            if ( $args->[2] == $exist->{ts} ) {
+              # Collide both
+              # Send KILL for existing user UID to all servers
+              # Send KILL for new user UID back to sending peer
+              last SWITCH;
+            }
+            # Received TS  > Existing TS
+            if ( $args->[2] > $exist->{ts} ) {
+              # If userhosts same, collide existing user
+              if ( $incoming eq $userhost ) {
+                # Send KILL for existing user UID to all servers
+              }
+              # If userhosts different, collide new user, drop message
+              else {
+                # Send KILL for new user UID back to sending peer
+                $self->send_output(
+                  {
+                    prefix  => $mysid,
+                    command => 'KILL',
+                    params  => [$args->[7], 'Nick Collision'],
+                  },
+                  $peer_id,
+                );
+                last SWITCH;
+              }
+            }
+            #last SWITCH;
+        }
+
+        my $record = {
+            nick  => $args->[0],
+            uid   => $args->[7],
+            sid   => $prefix,
+            hops  => $args->[1],
+            ts    => $args->[2],
+            type  => 'r',
+            umode => $args->[3],
+            auth  => {
+                ident => $args->[4],
+                hostname => $args->[5],
+            },
+            route_id => $peer_id,
+            server => $self->_state_sid_name( $prefix ),
+            ircname => ( $args->[9] || '' ),
+        };
+
+        my $unick = uc_irc( $args->[0] );
+
+        $self->{state}{users}{ $unick } = $record;
+        $self->{state}{uids}{ $record->{uid} } = $record;
+        $self->{state}{stats}{ops_online}++ if $record->{umode} =~ /o/;
+        $self->{state}{stats}{invisible}++ if $record->{umode} =~ /i/;
+        $self->{state}{sids}{$prefix}{users}{$unick} = $record;
+        $self->{state}{sids}{$prefix}{uids}{ $record->{uid} } = $record;
+        $self->_state_update_stats();
+
+        $self->send_output(
+             {
+                 prefix  => $prefix,
+                 command => 'UID',
+                 params  => $args,
+             },
+             grep { $_ ne $peer_id } $self->_state_connected_peers(),
+        );
+
+
+        $self->send_event('daemon_uid', $prefix, @$args);
+        $self->send_event('daemon_nick', @{ $args }[0..5], $record->{server}, ( $args->[9] || '' ) );
+
+    }
 
     return @$ref if wantarray;
     return $ref;
@@ -6795,23 +6919,29 @@ sub _state_send_burst {
     my $burst   = grep { /^EOB$/i } @{ $conn->{capab} };
     my $invex   = grep { /^IE$/i } @{ $conn->{capab} };
     my $excepts = grep { /^EX$/i } @{ $conn->{capab} };
+    my $tburst  = grep { /^TBURST$/i } @{ $conn->{capab} };
     my %map     = qw(bans b excepts e invex I);
     my @lists   = qw(bans);
     push @lists, 'excepts' if $excepts;
     push @lists, 'invex' if $invex;
 
     # Send SERVER burst
+    my %eobs;
     for ($self->_state_server_burst($sid, $conn->{sid})) {
+        $eobs{ $_->{prefix} }++;
         $self->send_output($_, $conn_id );
     }
 
     # Send NICK burst
-    for my $nick (keys %{ $self->{state}{users} }) {
-        my $record = $self->{state}{users}{$nick};
+    for my $uid (keys %{ $self->{state}{uids} }) {
+        my $record = $self->{state}{uids}{$uid};
         next if $record->{route_id} eq $conn_id;
 
         my $umode_fixed = $record->{umode};
         $umode_fixed =~ s/[^aiow]//g;
+        # :8H8 UID rhefr 1 1525788887 +aceiklnoswy pi staff.gumbynet.org.uk 127.0.0.1 8H8AAAAAA * :*Unknown*
+        # :<SID> UID <NICK> <HOPS> <TS> +<UMODE> <USERNAME> <HOSTNAME> <IP> <UID> <ACCOUNT> :<GECOS>
+        my $prefix = $record->{sid};
         my $arrayref = [
             $record->{nick},
             $record->{hops} + 1,
@@ -6819,20 +6949,35 @@ sub _state_send_burst {
             '+' . $umode_fixed,
             $record->{auth}{ident},
             $record->{auth}{hostname},
-            $record->{server}, $record->{ircname},
+            ( $record->{ipaddress} || 0 ),
+            $record->{uid}, '*', $record->{ircname},
         ];
         $self->send_output(
             {
-                command => 'NICK',
+                prefix  => $prefix,
+                command => 'UID',
                 params  => $arrayref,
             },
             $conn_id,
         );
     }
 
+    # EOB for each connected peer if EOB supported
+    if ( $burst && scalar keys %eobs ) {
+      $self->send_output(
+          {
+              prefix  => $_,
+              command => 'EOB',
+          },
+          $conn_id,
+      ) for keys %eobs;
+    }
+
     # Send SJOIN+MODE burst
     for my $chan (keys %{ $self->{state}{chans} }) {
         next if $chan =~ /^\&/;
+        # TODO: may as well add TBURST gathering here if applicable
+        #       but actually send after MODE burst
         my $chanrec = $self->{state}{chans}{$chan};
         my @nicks = map { $_->[1] }
             sort { $a->[0] cmp $b->[0] }
@@ -6908,7 +7053,7 @@ sub _state_send_burst {
 
     $self->send_output(
         {
-            prefix  => $server,
+            prefix  => $sid,
             command => 'EOB',
         },
         $conn_id,
@@ -7008,6 +7153,7 @@ sub _state_register_peer {
     my $mysid   = $self->server_sid();
     my $record  = $self->{state}{conns}{$conn_id};
     my $psid    = $record->{ts_data}[1];
+    return if !$psid;
 
     if (!$record->{cntr}) {
         $self->_state_send_credentials($conn_id, $record->{name});
@@ -7065,6 +7211,7 @@ sub _state_register_client {
 
     if ( my $ts6 = $self->{config}{SID} ) {
         $record->{uid} = $self->_state_gen_uid();
+        $record->{sid} = substr $record->{uid}, 0, 3;
     }
 
     if (!$record->{auth}{ident}) {
@@ -7079,6 +7226,8 @@ sub _state_register_client {
     if (!$record->{auth}{hostname}) {
         $record->{auth}{hostname} = $record->{socket}[0];
     }
+
+    $record->{ipaddress} = $record->{socket}[0]; # Needed latter for UID command
 
     $self->{state}{users}{uc_irc($record->{nick})} = $record;
     $self->{state}{uids}{ $record->{uid} } = $record if $record->{uid};
@@ -7126,6 +7275,13 @@ sub state_nick_exists {
     return 1;
 }
 
+sub state_uid_exists {
+    my $self = shift;
+    my $uid = shift || return 1;
+    return 1 if defined $self->{state}{uids}{$uid};
+    return 0;
+}
+
 sub state_chans {
     my $self = shift;
     return map { $self->{state}{chans}{$_}{name} }
@@ -7148,7 +7304,14 @@ sub state_peers {
 sub state_peer_exists {
     my $self = shift;
     my $peer = shift || return;
-    return 0 if !defined $self->{state}{peers}{uc $peer} || !defined $self->{state}{sids}{ $peer };
+    return 0 if !defined $self->{state}{peers}{uc $peer};
+    return 1;
+}
+
+sub state_sid_exists {
+    my $self = shift;
+    my $sid  = shift || return;
+    return 0 if !defined $self->{state}{sids}{ $sid };
     return 1;
 }
 
@@ -7157,6 +7320,13 @@ sub _state_peer_name {
     my $peer = shift || return;
     return if !$self->state_peer_exists($peer);
     return $self->{state}{peers}{uc $peer}{name};
+}
+
+sub _state_sid_name {
+    my $self = shift;
+    my $sid = shift || return;
+    return if !$self->state_sid_exists($sid);
+    return $self->{state}{sids}{$sid}{name};
 }
 
 sub _state_peer_desc {
@@ -7179,8 +7349,15 @@ sub _state_peer_capab {
 sub state_user_full {
     my $self = shift;
     my $nick = shift || return;
-    return if !$self->state_nick_exists($nick);
-    my $record = $self->{state}{users}{uc_irc($nick)};
+    my $record;
+    if ( $nick =~ m!^\d! ) {
+      return if !$self->state_uid_exists($nick);
+      $record = $self->{state}{uids}{$nick};
+    }
+    else {
+      return if !$self->state_nick_exists($nick);
+      $record = $self->{state}{users}{uc_irc($nick)};
+    }
     return $record->{nick} . '!' . $record->{auth}{ident}
         . '@' . $record->{auth}{hostname};
 }
@@ -7188,8 +7365,14 @@ sub state_user_full {
 sub state_user_nick {
     my $self = shift;
     my $nick = shift || return;
-    return if !$self->state_nick_exists($nick);
-    return $self->{state}{users}{uc_irc($nick)}{nick};
+    if ( $nick =~ m!^\d! ) {
+      return if !$self->state_uid_exists($nick);
+      return $self->{state}{uids}{$nick}{nick};
+    }
+    else {
+      return if !$self->state_nick_exists($nick);
+      return $self->{state}{users}{uc_irc($nick)}{nick};
+    }
 }
 
 sub _state_user_ip {
@@ -7256,12 +7439,27 @@ sub _state_user_route {
     return $record->{route_id};
 }
 
+sub _state_uid_route {
+    my $self = shift;
+    my $uid = shift || return;
+    return if !$self->state_uid_exists($uid);
+    my $record = $self->{state}{uids}{ $uid };
+    return $record->{route_id};
+}
+
 sub state_user_server {
     my $self = shift;
     my $nick = shift || return;
     return if !$self->state_nick_exists($nick);
     my $record = $self->{state}{users}{uc_irc($nick)};
     return $record->{server};
+}
+
+sub state_uid_sid {
+    my $self = shift;
+    my $uid = shift || return;
+    return if !$self->state_uid_exists($uid);
+    return substr( $uid, 0, 3 );
 }
 
 sub _state_peer_route {
@@ -7272,9 +7470,16 @@ sub _state_peer_route {
     return $record->{route_id};
 }
 
+sub _state_sid_route {
+    my $self = shift;
+    my $sid = shift || return;
+    return if !$self->state_sid_exists($sid);
+    my $record = $self->{state}{sid}{$sid};
+    return $record->{route_id};
+}
+
 sub _state_connected_peers {
     my $self = shift;
-    #TODO: Add TS version option
     my $server = uc $self->server_name();
     return if !keys %{ $self->{state}{peers} } > 1;
     my $record = $self->{state}{peers}{$server};
@@ -7342,7 +7547,15 @@ sub _state_is_local_user {
     my $nick = shift || return;
     return if !$self->state_nick_exists($nick);
     my $record = $self->{state}{peers}{uc $self->server_name()};
-    return 1 if defined $record->{users}{uc_irc($nick)};
+    return 1 if defined $record->{uids}{ $nick } || defined $record->{users}{uc_irc($nick)};
+    return 0;
+}
+
+sub _state_is_local_uid {
+    my $self = shift;
+    my $uid = shift || return;
+    return if !$self->state_uid_exists($uid);
+    return 1 if $self->server_sid() eq substr( $uid, 0, 3 );
     return 0;
 }
 
@@ -8364,6 +8577,7 @@ sub add_spoofed_nick {
     my $record = $ref;
     if ( my $ts6 = $self->{config}{SID} ) {
         $record->{uid} = $self->_state_gen_uid();
+        $record->{sid} = substr $record->{uid}, 0, 3;
     }
     $record->{ts} = time if !$record->{ts};
     $record->{type} = 's';
@@ -8410,8 +8624,15 @@ sub add_spoofed_nick {
 
 sub del_spoofed_nick {
     my ($kernel, $self, $nick) = @_[KERNEL, OBJECT, ARG0];
-    return if !$self->state_nick_exists($nick);
-    return if $self->_state_user_route($nick) ne 'spoofed';
+    if ( $nick =~ m!^\d! ) {
+      return if !$self->state_uid_exists($nick);
+      return if $self->_state_uid_route($nick) ne 'spoofed';
+    }
+    else {
+      return if !$self->state_nick_exists($nick);
+      return if $self->_state_user_route($nick) ne 'spoofed';
+    }
+    $nick = $self->state_user_nick($nick);
 
     my $message = $_[ARG1] || 'Client Quit';
     $self->send_output(

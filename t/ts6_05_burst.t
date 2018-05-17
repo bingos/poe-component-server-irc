@@ -1,9 +1,11 @@
 use strict;
 use warnings;
-use Test::More tests => 6;
+use Test::More tests => 5;
 use POE qw[Filter::Stackable Filter::Line Filter::IRCD];
 use POE::Component::Server::IRC;
 use Test::POE::Client::TCP;
+
+my $ts = time();
 
 my $pocosi = POE::Component::Server::IRC->spawn(
     servername   => 'listen.server.irc',
@@ -18,6 +20,7 @@ POE::Session->create(
         'main' => [qw(
             _start
             _shutdown
+            _terminate
             ircd_listener_add
             testc_registered
             testc_connected
@@ -42,6 +45,12 @@ sub _shutdown {
     $_[KERNEL]->delay('_shutdown');
     $heap->{ircd}->yield('shutdown');
     delete $heap->{ircd};
+}
+
+sub _terminate {
+  my $heap = $_[HEAP];
+  $heap->{testc}->terminate();
+  return;
 }
 
 sub ircd_listener_add {
@@ -72,18 +81,22 @@ sub testc_registered {
 sub testc_connected {
   my ($kernel,$heap,$sender) = @_[KERNEL,HEAP,SENDER];
   pass($_[STATE]);
-  $kernel->post( $sender, 'send_to_server', { command => 'PASS', params => [ 'foo', 'TS', ], } );
+  $kernel->post( $sender, 'send_to_server', { command => 'PASS', params => [ 'foo', 'TS', '6', '6FU' ], } );
   $kernel->post( $sender, 'send_to_server', { command => 'CAPAB', params => [ 'KNOCK UNDLN DLN TBURST GLN ENCAP UNKLN KLN CHW IE EX HOPS SVS CLUSTER EOB QS' ], colonify => 1 } );
   $kernel->post( $sender, 'send_to_server', { command => 'SERVER', params => [ 'connect.server.irc', '1', 'Open the door and come in!!!!!!' ], colonify => 1 } );
-  #$kernel->post( $sender, 'send_to_server', { command => 'PING', params => [ '6FU' ], colonify => 1 } );
+  $kernel->post( $sender, 'send_to_server', { command => 'SVINFO', params => [ '6', '6', '0', time() ], colonify => 1 } );
+  $kernel->post( $sender, 'send_to_server', { prefix => '6FU', command => 'UID', params => [ 'Bladger', '1', ( time() - 20 ), '+aiow', 'bladger', 'bladger.badger', '0', '6FUAAAAAA', '0', 'BladgerServ' ], colonify => 1 } );
+  $kernel->post( $sender, 'send_to_server', { prefix => '6FU', command => 'SJOIN', params => [ ( time() -5 ), '#badgers', '+nt', '@6FUAAAAAA' ], colonify => 1 } );
+  $kernel->post( $sender, 'send_to_server', { command => 'EOB', prefix => '6FU' } );
+  $kernel->post( $sender, 'send_to_server', { command => 'PING', params => [ '6FU' ], colonify => 1 } );
   return;
 }
 
 sub testc_input {
   my ($heap,$input) = @_[HEAP,ARG0];
-  return unless $input->{command} eq 'ERROR';
-  pass('ERROR');
-  like( $input->{params}->[0], qr/Incompatible TS version/, 'Incompatible TS version' );
+  return unless $input->{command} eq 'EOB';
+  pass($input->{command});
+  $poe_kernel->delay( _terminate => 5 );
   return;
 }
 
