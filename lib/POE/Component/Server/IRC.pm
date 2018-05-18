@@ -4885,6 +4885,75 @@ sub _daemon_peer_pong {
 }
 
 sub _daemon_peer_sid {
+    my $self    = shift;
+    my $peer_id = shift || return;
+    my $prefix  = shift || return;
+    my $server  = $self->server_name();
+    my $ref     = [ ];
+    my $args    = [ @_ ];
+    my $count   = @$args;
+    my $peer    = $self->{state}{conns}{$peer_id}{name};
+
+    #             0           1  2        3
+    # :8H8 SID rhyg.dummy.net 2 0FU :ircd-hybrid test server
+    # :0FU SID llestr.dummy.net 3 7UP :ircd-hybrid test server
+
+    SWITCH: {
+        if (!$count || $count < 2) {
+            last SWITCH;
+        }
+        if ($self->state_sid_exists($args->[2])) {
+            $self->_terminate_conn_error($peer_id, 'Server exists');
+            last SWITCH;
+        }
+        my $record = {
+            name => $args->[0],
+            hops => $args->[1],
+            sid  => $args->[2],
+            desc => ( $args->[3] || '' ),
+            route_id => $peer_id,
+            type => 'r',
+            psid => $prefix,
+            peer => $self->_state_sid_name( $prefix ),
+            peers => { },
+            users => { },
+        };
+        $self->{state}{sids}{ $prefix }{sids}{ $record->{sid} } = $record;
+        $self->{state}{sids}{ $record->{sid} } = $record;
+        my $uname = uc $record->{name};
+        $self->{state}{peers}{$uname} = $record;
+        $self->{state}{peers}{ uc $record->{peer} }{peers}{$uname} = $record;
+        $self->send_output(
+            {
+                prefix  => $prefix,
+                command => 'SID',
+                params  => [
+                    $record->{name},
+                    $record->{hops} + 1,
+                    $record->{sid},
+                    $record->{desc},
+                ],
+            },
+            grep { $_ ne $peer_id } $self->_state_connected_peers(),
+        );
+        $self->send_event(
+            'daemon_sid',
+            $record->{name},
+            $prefix,
+            $record->{hops},
+            $record->{sid},
+            $record->{desc},
+        );
+        $self->send_event(
+            'daemon_server',
+            $record->{name},
+            $prefix,
+            $record->{hops},
+            $record->{desc},
+        );
+    }
+    return @$ref if wantarray;
+    return $ref;
 }
 
 sub _daemon_peer_server {
@@ -7163,6 +7232,7 @@ sub _state_register_peer {
     $record->{type} = 'p';
     $record->{route_id} = $conn_id;
     $record->{peer}     = $server;
+    $record->{psid}     = $mysid;
     $record->{users} = { };
     $record->{peers} = { };
     $record->{sid} = $psid;
@@ -7173,11 +7243,12 @@ sub _state_register_peer {
     $self->antiflood($conn_id, 0);
     $self->send_output(
         {
-            prefix  => $server,
-            command => 'SERVER',
+            prefix  => $mysid,
+            command => 'SID',
             params  => [
                 $record->{name},
                 $record->{hops} + 1,
+                $psid,
                 $record->{desc},
             ],
         },
@@ -7185,7 +7256,15 @@ sub _state_register_peer {
     );
 
     $self->send_event(
-        "daemon_server",
+        'daemon_sid',
+        $record->{name},
+        $mysid,
+        $record->{hops},
+        $psid,
+        $record->{desc},
+    );
+    $self->send_event(
+        'daemon_server',
         $record->{name},
         $server,
         $record->{hops},
@@ -7254,8 +7333,8 @@ sub _state_register_client {
         },
         $self->_state_connected_peers(),
     );
-    $self->send_event("daemon_nick", @$arrayref);
-    # TODO: daemon_uid event
+    $self->send_event('daemon_uid', @$arrayref);
+    $self->send_event('daemon_nick', @{ $arrayref }[0..5], $record->{server}, ( $arrayref->[9] || '' ) );
     $self->_state_update_stats();
     return 1;
 }
@@ -8621,8 +8700,8 @@ sub add_spoofed_nick {
         },
         $self->_state_connected_peers(),
     );
-    # TODO: daemon_uid event
-    $self->send_event("daemon_nick", @$arrayref);
+    $self->send_event('daemon_uid', @$arrayref);
+    $self->send_event('daemon_nick', @{ $arrayref }[0..5], $record->{server}, ( $arrayref->[9] || '' ) );
     $self->_state_update_stats();
     return;
 }

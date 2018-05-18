@@ -1,11 +1,13 @@
 use strict;
 use warnings;
-use Test::More tests => 5;
+use Test::More tests => 16;
 use POE qw[Filter::Stackable Filter::Line Filter::IRCD];
 use POE::Component::Server::IRC;
 use Test::POE::Client::TCP;
 
 my $ts = time();
+
+my $uidts;
 
 my $pocosi = POE::Component::Server::IRC->spawn(
     servername   => 'listen.server.irc',
@@ -22,6 +24,9 @@ POE::Session->create(
             _shutdown
             _terminate
             ircd_listener_add
+            ircd_daemon_eob
+            ircd_daemon_sid
+            ircd_daemon_uid
             testc_registered
             testc_connected
             testc_input
@@ -85,7 +90,8 @@ sub testc_connected {
   $kernel->post( $sender, 'send_to_server', { command => 'CAPAB', params => [ 'KNOCK UNDLN DLN TBURST GLN ENCAP UNKLN KLN CHW IE EX HOPS SVS CLUSTER EOB QS' ], colonify => 1 } );
   $kernel->post( $sender, 'send_to_server', { command => 'SERVER', params => [ 'connect.server.irc', '1', 'Open the door and come in!!!!!!' ], colonify => 1 } );
   $kernel->post( $sender, 'send_to_server', { command => 'SVINFO', params => [ '6', '6', '0', time() ], colonify => 1 } );
-  $kernel->post( $sender, 'send_to_server', { prefix => '6FU', command => 'UID', params => [ 'Bladger', '1', ( time() - 20 ), '+aiow', 'bladger', 'bladger.badger', '0', '6FUAAAAAA', '0', 'BladgerServ' ], colonify => 1 } );
+  $uidts = time() - 20;
+  $kernel->post( $sender, 'send_to_server', { prefix => '6FU', command => 'UID', params => [ 'Bladger', '1', $uidts, '+aiow', 'bladger', 'bladger.badger', '0', '6FUAAAAAA', '0', 'BladgerServ' ], colonify => 1 } );
   $kernel->post( $sender, 'send_to_server', { prefix => '6FU', command => 'SJOIN', params => [ ( time() -5 ), '#badgers', '+nt', '@6FUAAAAAA' ], colonify => 1 } );
   $kernel->post( $sender, 'send_to_server', { command => 'EOB', prefix => '6FU' } );
   $kernel->post( $sender, 'send_to_server', { command => 'PING', params => [ '6FU' ], colonify => 1 } );
@@ -106,5 +112,44 @@ sub testc_disconnected {
   $heap->{testc}->shutdown();
   $heap->{ircd}->yield('shutdown');
   $poe_kernel->delay('_shutdown');
+  return;
+}
+
+sub ircd_daemon_eob {
+  my ($kernel,$sender,@args) = @_[KERNEL,SENDER,ARG0..$#_];
+  pass($_[STATE]);
+  is( $args[0], 'connect.server.irc', 'Correct server name in EOB' );
+  is( $args[1], '6FU', 'Correct server ID in EOB' );
+  return;
+}
+
+sub ircd_daemon_sid {
+  my ($kernel,$sender,@args) = @_[KERNEL,SENDER,ARG0..$#_];
+  pass($_[STATE]);
+  is( $args[0], 'connect.server.irc', 'Correct server name' );
+  is( $args[1], '1FU', 'Correct peer ID' );
+  is( $args[2], 1, 'Correct number of hops' );
+  is( $args[3], '6FU', 'Correct server ID' );
+  is( $args[4], 'Open the door and come in!!!!!!', 'Correct description' );
+  return;
+}
+
+sub ircd_daemon_uid {
+  my ($kernel,$sender,@args) = @_[KERNEL,SENDER,ARG0..$#_];
+  pass($_[STATE]);
+  my $expected = [
+   '6FU',
+   'Bladger',
+   '1',
+   $uidts,
+   '+aiow',
+   'bladger',
+   'bladger.badger',
+   '0',
+   '6FUAAAAAA',
+   '0',
+   'BladgerServ'
+  ];
+  is_deeply( \@args, $expected, 'UID event sent correct data' );
   return;
 }
