@@ -637,6 +637,7 @@ sub _cmd_from_client {
     my $pcount = @$params;
     my $server = $self->server_name();
     my $nick = $self->_client_nickname($wheel_id);
+    my $uid  = $self->_client_uid($wheel_id);
     my $invalid = 0;
 
     SWITCH: {
@@ -3355,6 +3356,7 @@ sub _daemon_cmd_mode {
     my $nick     = shift || return;
     my $chan     = shift;
     my $server   = $self->server_name();
+    my $sid      = $self->server_sid();
     my $maxmodes = $self->server_config('MODES');
     my $ref      = [ ];
     my $args     = [@_];
@@ -3516,9 +3518,9 @@ sub _daemon_cmd_mode {
                 next if ++$mode_count > $maxmodes;
 
                 if ($flag eq '+'
-                    && $record->{users}{uc_irc($arg)} !~ /$char/) {
+                    && $record->{users}{$self->state_user_uid($arg)} !~ /$char/) {
                     # Update user and chan record
-                    $arg = uc_irc($arg);
+                    $arg = $self->state_user_uid($arg);
                     if ($mode eq '+h' && $record->{users}{$arg} =~ /o/) {
                         next;
                     }
@@ -3543,9 +3545,9 @@ sub _daemon_cmd_mode {
                 if ($flag eq '-' && $record->{users}{uc_irc($arg)}
                     =~ /$char/) {
                     # Update user and chan record
-                    $arg = uc_irc($arg);
+                    $arg = $self->state_user_uid($arg);
                     $record->{users}{$arg} =~ s/$char//g;
-                    $self->{state}{users}{$arg}{chans}{uc_irc($chan)}
+                    $self->{state}{uids}{$arg}{chans}{uc_irc($chan)}
                         = $record->{users}{$arg};
                     $reply .= $mode;
                     push @reply_args, $self->state_user_nick($arg);
@@ -3678,10 +3680,13 @@ sub _daemon_cmd_join {
     my $self     = shift;
     my $nick     = shift || return;
     my $server   = $self->server_name();
+    my $sid      = $self->server_sid();
     my $ref      = [ ];
     my $args     = [@_];
     my $count    = @$args;
     my $route_id = $self->_state_user_route($nick);
+    # TODO: Ultimately want all _damon_cmd_* to be passed the client UID
+    my $uid      = $self->state_user_uid($nick);
     my $unick    = uc_irc($nick);
 
     SWITCH: {
@@ -3732,19 +3737,20 @@ sub _daemon_cmd_join {
                     name  => $channel,
                     ts    => time,
                     mode  => 'nt',
-                    users => { $unick => 'o' },
+                    users => { $uid => 'o' },
                 };
                 $self->{state}{chans}{$uchannel} = $record;
                 $self->{state}{users}{$unick}{chans}{$uchannel} = 'o';
                 my @peers = $self->_state_connected_peers();
                 $self->send_output(
                     {
+                        prefix  => $sid,
                         command => 'SJOIN',
                         params  => [
                             $record->{ts},
                             $channel,
                             '+' . $record->{mode},
-                            '@' . $nick,
+                            '@' . $uid,
                         ],
                     },
                     @peers,
@@ -3816,14 +3822,14 @@ sub _daemon_cmd_join {
             # JOIN the channel
             delete $self->{state}{users}{$unick}{invites}{$uchannel};
             # Add user
-            $self->{state}{users}{$unick}{chans}{$uchannel} = '';
-            $self->{state}{chans}{$uchannel}{users}{$unick} = '';
+            $self->{state}{uids}{$uid}{chans}{$uchannel} = '';
+            $self->{state}{chans}{$uchannel}{users}{$uid} = '';
             # Send JOIN message to peers and local users.
             $self->send_output(
                 {
-                    prefix  => $server,
-                    command => 'SJOIN',
-                    params  => [$chanrec->{ts}, $channel, '+', $nick],
+                    prefix  => $uid,
+                    command => 'JOIN',
+                    params  => [$chanrec->{ts}, $channel, '+'],
                 },
                 $self->_state_connected_peers(),
             ) if $channel !~ /^&/;
@@ -5096,6 +5102,7 @@ sub _daemon_peer_uid {
               # If userhosts different, collide existing user
               if ( $incoming ne $userhost ) {
                 # Send KILL for existing user UID to all servers
+                $self->daemon_server_kill( $exist->{uid}, 'Nick Collision' );
               }
               # If userhosts same, collide new user
               else {
@@ -5114,8 +5121,15 @@ sub _daemon_peer_uid {
             # Received TS == Existing TS
             if ( $args->[2] == $exist->{ts} ) {
               # Collide both
-              # Send KILL for existing user UID to all servers
-              # Send KILL for new user UID back to sending peer
+              $self->daemon_server_kill( $exist->{uid}, 'Nick Collision', $peer_id);
+              $self->send_output(
+                 {
+                    prefix  => $mysid,
+                    command => 'KILL',
+                    params  => [$args->[7], 'Nick Collision'],
+                 },
+                 $peer_id,
+              );
               last SWITCH;
             }
             # Received TS  > Existing TS
@@ -5123,6 +5137,7 @@ sub _daemon_peer_uid {
               # If userhosts same, collide existing user
               if ( $incoming eq $userhost ) {
                 # Send KILL for existing user UID to all servers
+                $self->daemon_server_kill( $exist->{uid}, 'Nick Collision' );
               }
               # If userhosts different, collide new user, drop message
               else {
@@ -5466,23 +5481,46 @@ sub _daemon_peer_kick {
 
 sub _daemon_peer_sjoin {
     my $self    = shift;
+    my $peer_id = shift;
+    $self->_daemon_peer_joins( $peer_id, 'SJOIN', @_ );
+}
+
+sub _daemon_peer_join {
+    my $self    = shift;
+    my $peer_id = shift;
+    $self->_daemon_peer_joins( $peer_id, 'JOIN', @_ );
+}
+
+sub _daemon_peer_joins {
+    my $self    = shift;
     my $peer_id = shift || return;
+    my $cmd     = shift;
     my $prefix  = shift;
     my $ref     = [ ];
     my $args    = [ @_ ];
     my $count   = @$args;
-    #my $peer = $self->{state}{conns}{$peer_id}{name};
+    my $server  = $self->server_name();
 
+    # We have to handle either SJOIN or JOIN
+    # :<SID> SJOIN <TS> <CHANNAME> +<CHANMODES> :<UIDS>
+    # :<UID>  JOIN <TS> <CHANNAME> +
     SWITCH: {
-        if (!$count || $count < 4) {
+        if ($cmd eq 'SJOIN' && ( !$count || $count < 4) ) {
+            last SWITCH;
+        }
+        if ($cmd eq 'JOIN' && ( !$count || $count < 3) ) {
             last SWITCH;
         }
         my $ts = $args->[0];
         my $chan = $args->[1];
-        my $nicks = pop @{ $args };
-        my $ignore_modes = 0;
+        my $uids;
+        if ( $cmd eq 'JOIN' ) {
+            $uids = $prefix;
+        }
+        else {
+           $uids = pop @{ $args };
+        }
         if (!$self->state_chan_exists($chan)) {
-            my $server = $self->server_name();
             my $chanrec = { name => $chan, ts => $ts };
             my @args = @{ $args }[2..$#{ $args }];
             my $cmode = shift @args;
@@ -5494,270 +5532,374 @@ sub _daemon_peer_sjoin {
                 $chanrec->{climit} = $arg if $mode eq 'l';
                 $chanrec->{ckey} = $arg if $mode eq 'k';
             }
-            push @$args, $nicks;
+            push @$args, $uids;
             my $uchan = uc_irc($chanrec->{name});
-            for my $nick (split /\s+/, $nicks) {
+            for my $uid (split /\s+/, $uids) {
                 my $umode = '';
-                $umode .= 'o' if $nick =~ s/\@//g;
-                $umode = 'h' if $nick =~ s/\%//g;
-                $umode .= 'v' if $nick =~ s/\+//g;
-                my $unick = uc_irc($nick);
-                $chanrec->{users}{$unick} = $umode;
-                $self->{state}{users}{$unick}{chans}{$uchan} = $umode;
+                $umode .= 'o' if $uid =~ s/\@//g;
+                $umode = 'h' if $uid =~ s/\%//g;
+                $umode .= 'v' if $uid =~ s/\+//g;
+                $chanrec->{users}{$uid} = $umode;
+                $self->{state}{uids}{$uid}{chans}{$uchan} = $umode;
 
                 $self->send_event(
-                    "daemon_join",
-                    $self->state_user_full($nick),
+                    'daemon_join',
+                    $self->state_user_full($uid),
                     $chan,
                 );
                 $self->send_event(
-                    "daemon_mode",
+                    'daemon_mode',
                     $server,
                     $chan,
                     '+' . $umode,
-                    $nick,
+                    $self->state_user_nick($uid),
                 ) if $umode;
             }
             $self->{state}{chans}{$uchan} = $chanrec;
             $self->send_output(
                 {
                     prefix  => $prefix,
-                    command => 'SJOIN',
+                    command => $cmd,
                     params  => $args,
                 },
                 grep { $_ ne $peer_id } $self->_state_connected_peers(),
             );
             last SWITCH;
         }
+
+        # :8H8 SJOIN 1526826863 #ooby +cmntlk 699 secret :@7UPAAAAAA
+
         my $chanrec = $self->{state}{chans}{uc_irc($chan)};
-        my @local_users = map { $self->_state_user_route($_) }
-            grep { $self->_state_is_local_user($_) }
+        my @local_users = map { $self->_state_uid_route($_) }
+            grep { $self->_state_is_local_uid($_) }
             keys %{ $chanrec->{users} };
 
-        if ($ts < $chanrec->{ts}) {
-            # Incoming is older
-            if ($nicks =~ /^\@/) {
-                # Remove all modes expect bans/invex/excepts
-                # deop/dehalfop/devoice all existing users
-                my @deop;
-                my @deop_list;
-                my $common = { };
+        # If the TS received is lower than our TS of the channel a TS6 server must
+        # remove status modes (+ov etc) and channel modes (+nt etc).  If the
+        # originating server is TS6 capable (ie, it has a SID), the server must
+        # also remove any ban modes (+b etc).  The new modes and statuses are then
+        # accepted.
 
-                for my $user (keys %{ $chanrec->{users} }) {
-                    $common->{$user} = $self->_state_user_route($user)
-                        if $self->_state_is_local_user($user);
-                    next if !$chanrec->{users}{$user};
-                    my $current = $chanrec->{users}{$user};
-                    my $proper = $self->state_user_nick($user);
-                    $chanrec->{users}{$user} = '';
-                    $self->{state}{users}{$user}{chans}{uc_irc($chanrec->{name})} = '';
-                    push @deop, "-$current";
-                    push @deop_list, $proper for split //, $current;
+        if ( $ts < $chanrec->{ts} ) {
+          my @deop;
+          my @deop_list;
+          my $common = { };
+
+          # Remove all +ovh
+          for my $user (keys %{ $chanrec->{users} }) {
+             $common->{$user} = $self->_state_uid_route($user)
+               if $self->_state_is_local_uid($user);
+             next if !$chanrec->{users}{$user};
+             my $current = $chanrec->{users}{$user};
+             my $proper = $self->state_user_nick($user);
+             $chanrec->{users}{$user} = '';
+             $self->{state}{uids}{$user}{chans}{uc_irc($chanrec->{name})} = '';
+             push @deop, "-$current";
+             push @deop_list, $proper for split //, $current;
+          }
+
+          if (keys %$common && @deop) {
+             $self->send_event(
+                "daemon_mode",
+                $server,
+                $chanrec->{name},
+                unparse_mode_line(join '', @deop),
+                @deop_list,
+             );
+             my @output_modes;
+             my $length = length($server) + 4
+                          + length($chan) + 4;
+             my @buffer = ('', '');
+             for my $deop (@deop) {
+                my $arg = shift @deop_list;
+                my $mode_line = unparse_mode_line($buffer[0].$deop);
+                if (length(join ' ', $mode_line, $buffer[1],
+                           $arg) + $length > 510) {
+                   push @output_modes, {
+                     prefix   => $server,
+                     command  => 'MODE',
+                     colonify => 0,
+                     params   => [
+                       $chanrec->{name},
+                       $buffer[0],
+                       split /\s+/,
+                       $buffer[1],
+                     ],
+                   };
+                   $buffer[0] = $deop;
+                   $buffer[1] = $arg;
+                   next;
                 }
-
-                if (keys %$common && @deop) {
-                    my $server = $self->server_name();
-                    $self->send_event(
-                        "daemon_mode",
-                        $server,
-                        $chanrec->{name},
-                        unparse_mode_line(join '', @deop),
-                        @deop_list,
-                    );
-                    my @output_modes;
-                    my $length = length($server) + 4
-                                + length($chan) + 4;
-                    my @buffer = ('', '');
-                    for my $deop (@deop) {
-                        my $arg = shift @deop_list;
-                        my $mode_line = unparse_mode_line($buffer[0].$deop);
-                        if (length(join ' ', $mode_line, $buffer[1],
-                                $arg) + $length > 510) {
-                            push @output_modes, {
-                                prefix   => $server,
-                                command  => 'MODE',
-                                colonify => 0,
-                                params   => [
-                                    $chanrec->{name},
-                                    $buffer[0],
-                                    split /\s+/,
-                                    $buffer[1],
-                                ],
-                            };
-                            $buffer[0] = $deop;
-                            $buffer[1] = $arg;
-                            next;
-                        }
-                        $buffer[0] = $mode_line;
-                        if ($buffer[1]) {
-                            $buffer[1] = join ' ', $buffer[1], $arg;
-                        }
-                        else {
-                            $buffer[1] = $arg;
-                        }
-                    }
-                    push @output_modes, {
-                        prefix   => $server,
-                        command  => 'MODE',
-                        colonify => 0,
-                        params   => [
-                            $chanrec->{name},
-                            $buffer[0],
-                            split /\s+/, $buffer[1],
-                        ],
-                    };
-                    $self->send_output($_, values %$common)
-                        for @output_modes;
+                $buffer[0] = $mode_line;
+                if ($buffer[1]) {
+                  $buffer[1] = join ' ', $buffer[1], $arg;
                 }
-                my $origmode = $chanrec->{mode};
-                my @args = @{ $args }[2..$#{ $args }];
-                my $chanmode = shift @args;
-                my $reply = '';
-                my @reply_args;
-
-                for my $mode (grep { $_ ne '+' } split //, $chanmode) {
-                    my $arg;
-                    $arg = shift @args if $mode =~ /[lk]/;
-                    if ($mode eq 'l' && ($chanrec->{mode} !~ /l/
-                            || $arg ne $chanrec->{climit})) {
-                        $reply .= '+' . $mode;
-                        push @reply_args, $arg;
-                        if ($chanrec->{mode} !~ /$mode/) {
-                            $chanrec->{mode} .= $mode;
-                        }
-                        $chanrec->{mode} = join '', sort split //,
-                        $chanrec->{mode};
-                        $chanrec->{climit} = $arg;
-                    }
-                    elsif ($mode eq 'k' && ($chanrec->{mode} !~ /k/
-                        || $arg ne $chanrec->{ckey})) {
-                        $reply .= '+' . $mode;
-                        push @reply_args, $arg;
-                        if ($chanrec->{mode} !~ /$mode/) {
-                            $chanrec->{mode} .= $mode;
-                        }
-                        $chanrec->{mode} = join '', sort split //,
-                            $chanrec->{mode};
-                        $chanrec->{ckey} = $arg;
-                    }
-                    elsif ($chanrec->{mode} !~ /$mode/) {
-                        $reply .= '+' . $mode;
-                        $chanrec->{mode} = join '', sort split //,
-                            $chanrec->{mode};
-                    }
+                else {
+                  $buffer[1] = $arg;
                 }
+             }
+             push @output_modes, {
+               prefix   => $server,
+               command  => 'MODE',
+               colonify => 0,
+               params   => [
+                 $chanrec->{name},
+                 $buffer[0],
+                 split /\s+/, $buffer[1],
+               ],
+             };
+             $self->send_output($_, values %$common)
+                for @output_modes;
+          }
 
-                if (keys %$common && ($reply || $origmode)) {
-                    $origmode = join '', grep { $chanmode !~ /$_/ }
-                        split //, ($origmode || '');
-                    $chanrec->{mode} =~ s/[$origmode]//g if $origmode;
-                    $reply = '-' . $origmode . $reply if $origmode;
-                    if ($origmode && $origmode =~ /k/) {
-                        unshift @reply_args, '*';
-                        delete $chanrec->{ckey};
-                    }
-                    if ($origmode and $origmode =~ /l/) {
-                        delete $chanrec->{climit};
-                    }
-                    $self->send_output(
-                        {
-                            prefix   => $self->server_name(),
-                            command  => 'MODE',
-                            colonify => 0,
-                            params   => [
-                                $chanrec->{name},
-                                unparse_mode_line($reply),
-                                @reply_args,
-                            ],
-                        },
-                        values %$common,
-                        ) if $reply;
-                    }
-                    # NOTICE HERE
-                    $self->send_output(
-                    {
-                        prefix  => $self->server_name(),
-                        command => 'NOTICE',
-                        params  => [
-                            $chanrec->{name},
-                            "*** Notice -- TS for " . $chanrec->{name}
-                                . " changed from " . $chanrec->{ts}
-                                . " to $ts",
-                        ],
-                    },
-                    @local_users,
-                );
-                $chanrec->{ts} = $ts;
+          # Remove all +beI modes
+          if ( $cmd eq 'SJOIN' ) {
+            my $tmap = { bans => 'b', excepts => 'e', invex => 'I' };
+            my @types; my @mask_list;
+            foreach my $type ( qw[bans excepts invex] ) {
+              next if !$chanrec->{$type};
+              foreach my $umask ( keys %{ $chanrec->{$type} } ) {
+                my $rec = delete $chanrec->{$type}{$umask};
+                push @types, '-' . $tmap->{$type};
+                push @mask_list, $rec->[0];
+              }
             }
-            elsif (grep { /^\@/ } $self->state_chan_list_prefixed($chan)) {
-                $args->[0] = $chanrec->{ts};
+            $self->send_event(
+               "daemon_mode",
+               $server,
+               $chanrec->{name},
+               unparse_mode_line(join '', @types),
+               @mask_list,
+            );
+            if ( @local_users && @types ) {
+              my @output_modes;
+              my $length = length($server) + 4
+                           + length($chan) + 4;
+              my @buffer = ('', '');
+              for my $type (@types) {
+                my $arg = shift @mask_list;
+                my $mode_line = unparse_mode_line($buffer[0].$type);
+                if (length(join ' ', $mode_line, $buffer[1],
+                           $arg) + $length > 510) {
+                   push @output_modes, {
+                     prefix   => $server,
+                     command  => 'MODE',
+                     colonify => 0,
+                     params   => [
+                       $chanrec->{name},
+                       $buffer[0],
+                       split /\s+/,
+                       $buffer[1],
+                     ],
+                   };
+                   $buffer[0] = $type;
+                   $buffer[1] = $arg;
+                   next;
+                }
+                $buffer[0] = $mode_line;
+                if ($buffer[1]) {
+                  $buffer[1] = join ' ', $buffer[1], $arg;
+                }
+                else {
+                  $buffer[1] = $arg;
+                }
+              }
+              push @output_modes, {
+                prefix   => $server,
+                command  => 'MODE',
+                colonify => 0,
+                params   => [
+                  $chanrec->{name},
+                  $buffer[0],
+                  split /\s+/, $buffer[1],
+                ],
+              };
+              $self->send_output($_, @local_users)
+                  for @output_modes;
             }
-            else {
-                # NOTICE HERE
-                $self->send_output(
-                    {
-                        prefix  => $self->server_name(),
-                        command => 'NOTICE',
-                        params  => [
-                            $chanrec->{name},
-                            "*** Notice -- TS for " . $chanrec->{name}
-                            . " changed from " . $chanrec->{ts}
-                            . " to $ts",
-                        ],
-                    },
-                    @local_users,
-                );
-                $chanrec->{ts} = $ts;
-            }
+          }
+
+          # Remove TOPIC
+          if ( $chanrec->{topic} ) {
+             delete $chanrec->{topic};
+             $self->send_output(
+                 {
+                    prefix  => $server,
+                    command => 'TOPIC',
+                    params  => ,
+                    params  => [$chan, ''],
+                 },
+                 @local_users,
+            );
+          }
+          # Set TS to incoming TS and send NOTICE
+          $self->send_output(
+              {
+                 prefix  => $server,
+                 command => 'NOTICE',
+                 params  => [
+                    $chanrec->{name},
+                    "*** Notice -- TS for " . $chanrec->{name}
+                    . " changed from " . $chanrec->{ts}
+                    . " to $ts",
+                 ],
+              },
+              @local_users,
+          );
+          $chanrec->{ts} = $ts;
+          # Remove channel modes and apply incoming modes
+          my $origmode = $chanrec->{mode};
+          my @args = @{ $args }[2..$#{ $args }];
+          my $chanmode = shift @args;
+          my $reply = '';
+          my @reply_args;
+          for my $mode (grep { $_ ne '+' } split //, $chanmode) {
+             my $arg;
+             $arg = shift @args if $mode =~ /[lk]/;
+             if ($mode eq 'l' && ($chanrec->{mode} !~ /l/
+                 || $arg ne $chanrec->{climit})) {
+                $reply .= '+' . $mode;
+                push @reply_args, $arg;
+                if ($chanrec->{mode} !~ /$mode/) {
+                  $chanrec->{mode} .= $mode;
+                }
+                $chanrec->{mode} = join '', sort split //,
+                $chanrec->{mode};
+                $chanrec->{climit} = $arg;
+             }
+             elsif ($mode eq 'k' && ($chanrec->{mode} !~ /k/
+                    || $arg ne $chanrec->{ckey})) {
+                $reply .= '+' . $mode;
+                push @reply_args, $arg;
+                if ($chanrec->{mode} !~ /$mode/) {
+                  $chanrec->{mode} .= $mode;
+                }
+                $chanrec->{mode} = join '', sort split //,
+                $chanrec->{mode};
+                $chanrec->{ckey} = $arg;
+             }
+             elsif ($chanrec->{mode} !~ /$mode/) {
+                $reply .= '+' . $mode;
+                $chanrec->{mode} = join '', sort split //,
+                $chanrec->{mode};
+             }
+          }
+          $origmode = join '', grep { $chanmode !~ /$_/ }
+                      split //, ($origmode || '');
+          $chanrec->{mode} =~ s/[$origmode]//g if $origmode;
+          $reply = '-' . $origmode . $reply if $origmode;
+          if ($origmode && $origmode =~ /k/) {
+             unshift @reply_args, '*';
+             delete $chanrec->{ckey};
+          }
+          if ($origmode and $origmode =~ /l/) {
+             delete $chanrec->{climit};
+          }
+          $self->send_output(
+             {
+                prefix   => $server,
+                command  => 'MODE',
+                colonify => 0,
+                params   => [
+                   $chanrec->{name},
+                   unparse_mode_line($reply),
+                   @reply_args,
+                ],
+             },
+             @local_users,
+          ) if $reply;
+          # Take incomers and announce +ovh
+          # Actually do it later
         }
-        elsif ($ts > $chanrec->{ts}) {
-            # Incoming is younger
-            if ($nicks !~ /^\@/) {
-                $args->[0] = $chanrec->{ts};
-            }
-            elsif (grep { /^\@/ } $self->state_chan_list_prefixed($chan)) {
-                pop @$args while $#{ $args } > 2;
-                $args->[2] = '+';
-                $args->[0] = $chanrec->{ts};
-                $nicks = join ' ', map { my $s = $_; $s =~ s/[@%+]//g; $s; }
-                    split /\s+/, $nicks;
-            }
-            else {
-                $chanrec->{ts} = $ts;
-            }
+
+        # If the TS received is equal to our TS of the channel the server should keep
+        # its current modes and accept the received modes and statuses.
+
+        elsif ( $ts == $chanrec->{ts} ) {
+          # Have to merge chanmodes
+          my $origmode = $chanrec->{mode};
+          my @args = @{ $args }[2..$#{ $args }];
+          my $chanmode = shift @args;
+          my $reply = '';
+          my @reply_args;
+          for my $mode (grep { $_ ne '+' } split //, $chanmode) {
+             my $arg;
+             $arg = shift @args if $mode =~ /[lk]/;
+             if ($mode eq 'l' && ($chanrec->{mode} !~ /l/
+                 || $arg > $chanrec->{climit})) {
+                $reply .= '+' . $mode;
+                push @reply_args, $arg;
+                if ($chanrec->{mode} !~ /$mode/) {
+                  $chanrec->{mode} .= $mode;
+                }
+                $chanrec->{mode} = join '', sort split //,
+                $chanrec->{mode};
+                $chanrec->{climit} = $arg;
+             }
+             elsif ($mode eq 'k' && ($chanrec->{mode} !~ /k/
+                    || ($arg cmp $chanrec->{ckey}) > 0 )) {
+                $reply .= '+' . $mode;
+                push @reply_args, $arg;
+                if ($chanrec->{mode} !~ /$mode/) {
+                  $chanrec->{mode} .= $mode;
+                }
+                $chanrec->{mode} = join '', sort split //,
+                $chanrec->{mode};
+                $chanrec->{ckey} = $arg;
+             }
+             elsif ($chanrec->{mode} !~ /$mode/) {
+                $reply .= '+' . $mode;
+                $chanrec->{mode} = join '', sort split //,
+                $chanrec->{mode};
+             }
+          }
+          $self->send_output(
+             {
+                prefix   => $server,
+                command  => 'MODE',
+                colonify => 0,
+                params   => [
+                   $chanrec->{name},
+                   unparse_mode_line($reply),
+                   @reply_args,
+                ],
+             },
+             @local_users,
+          ) if $reply;
         }
-        # Propagate SJOIN to connected peers except the one that told us.
-        push @$args, $nicks;
+
+        # If the TS received is higher than our TS of the channel the server should keep
+        # its current modes and ignore the received modes and statuses.  Any statuses
+        # given in the received message will be removed.
+
+        else {
+           $uids = join ' ', map { my $s = $_; $s =~ s/[@%+]//g; $s; }
+                    split /\s+/, $uids;
+        }
+        # Send it on
         $self->send_output(
-            {
-                prefix  => $prefix,
-                command => 'SJOIN',
-                params  => $args,
-            },
-            grep { $_ ne $peer_id } $self->_state_connected_peers(),
+           {
+             prefix  => $prefix,
+             command => $cmd,
+             params  => $args,
+           },
+           grep { $_ ne $peer_id } $self->_state_connected_peers(),
         );
-        # Generate appropriate JOIN messages for all local
-        # channel members
+        # Joins and modes for new arrivals
         my $uchan = uc_irc($chanrec->{name});
-        #my @local_users = map { $self->_state_user_route($_) }
-        #    grep { $self->_state_is_local_user($_) }
-        #    keys %{ $chanrec->{users} };
         my $modes;
         my @mode_parms;
-        for my $nick (split /\s+/, $nicks) {
-            my $proper = $nick;
-            $proper =~ s/[@%+]//g;
-            $nick = uc_irc($nick);
+        for my $uid (split /\s+/, $uids) {
             my $umode = '';
             my @op_list;
-            $umode .= 'o' if $nick =~ s/\@//g;
-            $umode = 'h' if $nick =~ s/\%//g;
-            $umode .= 'v' if $nick =~ s/\+//g;
-            $chanrec->{users}{$nick} = $umode;
-            $self->{state}{users}{$nick}{chans}{$uchan} = $umode;
-            push @op_list, $proper for split //, $umode;
+            $umode .= 'o' if $uid =~ s/\@//g;
+            $umode = 'h'  if $uid =~ s/\%//g;
+            $umode .= 'v' if $uid =~ s/\+//g;
+            $chanrec->{users}{$uid} = $umode;
+            $self->{state}{uids}{$uid}{chans}{$uchan} = $umode;
+            push @op_list, $self->state_user_nick($uid) for split //, $umode;
             my $output = {
-                prefix  => $self->state_user_full($nick),
+                prefix  => $self->state_user_full($uid),
                 command => 'JOIN',
                 params  => [$chanrec->{name}],
             };
@@ -5773,7 +5915,6 @@ sub _daemon_peer_sjoin {
             }
         }
         if ($modes) {
-            my $server = $self->server_name();
             $self->send_event(
                 "daemon_mode",
                 $server,
@@ -5858,7 +5999,7 @@ sub _daemon_peer_mode {
             $arg = shift @{ $parsed_mode->{args} }
                 if $mode =~ /^(\+[ohvklbIe]|-[ohvbIe])/;
                     if (my ($flag,$char) = $mode =~ /^(\+|-)([ohv])/) {
-                    if ($flag eq '+' 
+                    if ($flag eq '+'
                         && $record->{users}{uc_irc($arg)} !~ /$char/) {
                         # Update user and chan record
                         $arg = uc_irc($arg);
@@ -7457,6 +7598,19 @@ sub state_user_nick {
     }
 }
 
+sub state_user_uid {
+    my $self = shift;
+    my $nick = shift || return;
+    if ( $nick =~ m!^\d! ) {
+      return if !$self->state_uid_exists($nick);
+      return $self->{state}{uids}{$nick}{uid};
+    }
+    else {
+      return if !$self->state_nick_exists($nick);
+      return $self->{state}{users}{uc_irc($nick)}{uid};
+    }
+}
+
 sub _state_user_ip {
     my $self = shift;
     my $nick = shift || return;
@@ -7577,14 +7731,14 @@ sub state_chan_list {
 
     $status_msg =~ s/[^@%+]//g;
     my $record = $self->{state}{chans}{uc_irc($chan)};
-    return map { $self->{state}{users}{$_}{nick} }
+    return map { $self->{state}{uids}{$_}{nick} }
         keys %{ $record->{users} } if !$status_msg;
 
     my %map = qw(o 3 h 2 v 1);
     my %sym = qw(@ 3 % 2 + 1);
     my $lowest = (sort map { $sym{$_} } split //, $status_msg)[0];
 
-    return map { $self->{state}{users}{$_}{nick} }
+    return map { $self->{state}{uids}{$_}{nick} }
         grep {
             $record->{users}{ $_ } and (reverse sort map { $map{$_} }
             split //, $record->{users}{$_})[0] >= $lowest
@@ -7598,7 +7752,7 @@ sub state_chan_list_prefixed {
     my $record = $self->{state}{chans}{uc_irc($chan)};
 
     return map {
-        my $n = $self->{state}{users}{$_}{nick};
+        my $n = $self->{state}{uids}{$_}{nick};
         my $m = $record->{users}{$_};
         my $p = '';
         $p = '@' if $m =~ /o/;
@@ -7627,9 +7781,15 @@ sub state_chan_topic {
 sub _state_is_local_user {
     my $self = shift;
     my $nick = shift || return;
-    return if !$self->state_nick_exists($nick);
-    my $record = $self->{state}{peers}{uc $self->server_name()};
-    return 1 if defined $record->{uids}{ $nick } || defined $record->{users}{uc_irc($nick)};
+    my $record = $self->{state}{sids}{uc $self->server_sid()};
+    if ( $nick =~ m!^\d! ) {
+      return if !$self->state_uid_exists($nick);
+      return 1 if defined $record->{uids}{$nick};
+    }
+    else {
+      return if !$self->state_nick_exists($nick);
+      return 1 if defined $record->{users}{uc_irc($nick)};
+    }
     return 0;
 }
 
@@ -7853,6 +8013,12 @@ sub _client_nickname {
     return $self->{state}{conns}{$wheel_id}{nick};
 }
 
+sub _client_uid {
+    my $self = shift;
+    my $wheel_id = $_[0] || return;
+    return '*' if !$self->{state}{conns}{$wheel_id}{uid};
+    return $self->{state}{conns}{$wheel_id}{uid};
+}
 
 sub _client_ip {
     my $self = shift;
@@ -8106,7 +8272,7 @@ sub _send_output_to_channel {
         && $output->{command} ne 'JOIN') {
         my $full = $output->{prefix};
         my $nick = (split /!/, $full)[0];
-        my $output2 = { %$output }; 
+        my $output2 = { %$output };
         $output2->{prefix} = $nick;
         $self->send_output($output2, keys %$peers);
     }
@@ -8298,6 +8464,7 @@ sub _terminate_conn_error {
 sub daemon_server_kill {
     my $self   = shift;
     my $server = $self->server_name();
+    my $mysid  = $self->server_sid();
     my $ref    = [ ];
     my $args   = [ @_ ];
     my $count  = @$args;
@@ -8309,7 +8476,10 @@ sub daemon_server_kill {
         if ($self->state_peer_exists($args->[0])) {
             last SWITCH;
         }
-        if (!$self->state_nick_exists($args->[0])) {
+        if ( $args->[0] =~ m!^\d! && !$self->state_uid_exists($args->[0]) ) {
+            last SWITCH;
+        }
+        elsif (!$self->state_nick_exists($args->[0])) {
             last SWITCH;
         }
 
@@ -8350,18 +8520,19 @@ sub daemon_server_kill {
     }
     else {
         $self->{state}{users}{uc_irc($target)}{killed} = 1;
+        my $tuid = $self->state_user_uid( $target );
         $self->send_output(
             {
-                prefix  => $server,
+                prefix  => $mysid,
                 command => 'KILL',
-                params  => [$target, "$server ($comment)"],
+                params  => [$tuid, "$server ($comment)"],
             },
             grep { !$conn_id || $_ ne $conn_id }
                 $self->_state_connected_peers(),
         );
         $self->send_output(
             @{ $self->_daemon_peer_quit(
-                $target,
+                $tuid,
                 "Killed ($server ($comment))"
             ) });
         }
@@ -8732,6 +8903,7 @@ sub _spoofed_command {
     return if $self->_state_user_route($nick) ne 'spoofed';
 
     $nick = $self->state_user_nick($nick);
+    my $uid = $self->state_user_uid($nick);
     $state =~ s/daemon_cmd_//;
     my $command = "_daemon_cmd_" . $state;
 
@@ -8748,11 +8920,11 @@ sub _spoofed_command {
         my $ts = $self->_state_chan_timestamp($chan) - 10;
         $self->_daemon_peer_sjoin(
             'spoofed',
-            $self->server_name(),
+            $self->server_sid(),
             $ts,
             $chan,
             '+nt',
-            '@' . $nick,
+            '@' . $uid,
         );
         return;
     }
