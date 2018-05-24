@@ -3821,6 +3821,7 @@ sub _daemon_cmd_join {
             }
             # JOIN the channel
             delete $self->{state}{users}{$unick}{invites}{$uchannel};
+            delete $self->{state}{chans}{$uchannel}{invites}{$uid};
             # Add user
             $self->{state}{uids}{$uid}{chans}{$uchannel} = '';
             $self->{state}{chans}{$uchannel}{users}{$uid} = '';
@@ -4017,6 +4018,7 @@ sub _daemon_cmd_invite {
     my $self   = shift;
     my $nick   = shift || return;
     my $server = $self->server_name();
+    my $sid    = $self->server_sid();
     my $ref    = [ ];
     my $args   = [@_];
     my $count  = @$args;
@@ -4046,43 +4048,76 @@ sub _daemon_cmd_invite {
             last SWITCH;
         }
         if ($self->state_chan_mode_set($chan, 'i')
-                && !$self->state_is_chan_op($nick, $chan)) {
+                && ( !$self->state_is_chan_op($nick, $chan)
+                 || !$self->state_is_chan_hop($nick, $chan) ) ) {
             push @$ref, ['482', $chan];
             last SWITCH;
         }
-        my $local;
-        if ($self->_state_is_local_user($who)) {
-            my $record = $self->{state}{users}{uc_irc($who)};
-            $record->{invites}{uc_irc($chan)} = time;
-            $local = 1;
+        my $local; my $invite_only;
+        my $wuid = $self->state_user_uid($who);
+        my $settime = time;
+        # Only store the INVITE if the channel is invite-only
+        if ($self->state_chan_mode_set($chan, 'i')) {
+           $self->{state}{chans}{uc_irc $chan}{invites}{$wuid} = $settime;
+           if ($self->_state_is_local_uid($wuid)) {
+              my $record = $self->{state}{uids}{$wuid};
+              $record->{invites}{uc_irc($chan)} = $settime;
+              $local = 1;
+           }
+           $invite_only = 1;
         }
-        my $away = $self->_state_user_away_msg($who);
-        my $route_id = $self->_state_user_route($who);
-        my $output = {
-            prefix   => $self->state_user_full($nick),
-            command  => 'INVITE',
-            params   => [$who, $chan],
-            colonify => 0,
-        };
-        if ($route_id eq 'spoofed') {
-            $self->send_event(
-                "daemon_invite",
-                $output->{prefix},
-                @{ $output->{params} }
-            );
+        {
+          my $route_id = $self->_state_uid_route($wuid);
+          my $output = {
+              prefix   => $self->state_user_full($nick),
+              command  => 'INVITE',
+              params   => [$who, $chan],
+              colonify => 0,
+          };
+          if ($route_id eq 'spoofed') {
+              $self->send_event(
+                  "daemon_invite",
+                  $output->{prefix},
+                  @{ $output->{params} }
+              );
+          }
+          elsif ( $local ) {
+              $self->send_output($output, $route_id);
+          }
         }
-        else {
-            if (!$local) {
-                $output->{prefix} = $nick;
-                push @{ $output->{params} }, time;
-            }
-            $self->send_output($output, $route_id);
-        }
+        # Send INVITE to all connected peers
+        $self->send_output(
+            {
+              prefix   => $self->state_user_uid($nick),
+              command  => 'INVITE',
+              params   => [ $wuid, $chan, $self->_state_chan_timestamp($chan) ],
+              colonify => 0,
+            },
+            $self->_state_connected_peers(),
+        );
         push @$ref, {
             prefix  => $server,
             command => '341',
             params  => [$chan, $who],
         };
+        # Send NOTICE to local channel +oh users
+        if ( $invite_only ) {
+           my $output = {
+               prefix  => $server,
+               command => 'NOTICE',
+               params  => [
+                   $chan,
+                   sprintf(
+                      "%s is inviting %s to %s.",
+                      $nick,
+                      $who,
+                      $chan,
+                   ),
+               ],
+           };
+           $self->_send_output_channel_local($chan,$output,'','oh');
+        }
+        my $away = $self->{state}{uids}{$wuid}{away};
         if (defined $away) {
             push @$ref, {
                 prefix  => $server,
@@ -5747,6 +5782,13 @@ sub _daemon_peer_joins {
               @local_users,
           );
           $chanrec->{ts} = $ts;
+          # Remove invites
+          my $invites = delete $chanrec->{invites} || {};
+          foreach my $invite ( keys %{ $invites } ) {
+            next unless $self->state_uid_exists( $invite );
+            next unless $self->_state_is_local_uid( $invite );
+            delete $self->{state}{uids}{$invite}{invites}{uc_irc $chanrec->{name}};
+          }
           # Remove channel modes and apply incoming modes
           my $origmode = $chanrec->{mode};
           my @args = @{ $args }[2..$#{ $args }];
@@ -6637,46 +6679,71 @@ sub _daemon_peer_topic {
 sub _daemon_peer_invite {
     my $self    = shift;
     my $peer_id = shift || return;
-    my $nick    = shift || return;
+    my $uid     = shift || return;
     my $server  = $self->server_name();
     my $ref     = [ ];
     my $args    = [ @_ ];
     my $count   = @$args;
 
+    # :7UPAAAAAA INVITE 8H8AAAAAA #dummynet 1525787545
     SWITCH: {
         if (!$count || $count < 3) {
             last SWITCH;
         }
         my ($who, $chan) = @$args;
-        $who = $self->state_user_nick($who);
         $chan = $self->_state_chan_name($chan);
-        my $local;
-        if ($self->_state_is_local_user($who)) {
-            my $record = $self->{state}{users}{uc_irc($who)};
-            $record->{invites}{uc_irc($chan)} = time;
-            $local = 1;
-        }
-        my $route_id = $self->_state_user_route($who);
-        my $output = {
-            prefix   => $self->state_user_full($nick),
-            command  => 'INVITE',
-            params   => [$who, $chan],
-            colonify => 0,
-        };
-        if ($route_id eq 'spoofed') {
-            $self->send_event(
-                "daemon_invite",
-                $output->{prefix},
-                @{ $output->{params} },
-            );
-        }
-        else {
-            if (!$local) {
-                $output->{prefix} = $nick;
-                push @{ $output->{params} }, $args->[2];
+        my $uchan = uc_irc($chan);
+        my $chanrec = $self->{state}{chans}{$uchan};
+        if ($self->_state_is_local_uid($who)) {
+            my $record = $self->{state}{uids}{$who};
+            $record->{invites}{$uchan} = time;
+            my $route_id = $self->_state_uid_route($who);
+            my $output = {
+                prefix   => $self->state_user_full($uid),
+                command  => 'INVITE',
+                params   => [$self->state_user_nick($who), $chan],
+                colonify => 0,
+            };
+            if ($route_id eq 'spoofed') {
+                $self->send_event(
+                    "daemon_invite",
+                    $output->{prefix},
+                    @{ $output->{params} },
+                );
             }
-            $self->send_output($output, $route_id);
+            else {
+                $self->send_output( $output, $route_id );
+            }
         }
+        if ( $chanrec->{mode} && $chanrec->{mode} =~ m!i! ) {
+           $chanrec->{invites}{$who} = time;
+           # Send NOTICE to +oh local channel members
+           # ":%s NOTICE %%%s :%s is inviting %s to %s."
+           my $output = {
+               prefix  => $server,
+               command => 'NOTICE',
+               params  => [
+                   $chan,
+                   sprintf(
+                      "%s is inviting %s to %s.",
+                      $self->state_user_nick($uid),
+                      $self->state_user_nick($who),
+                      $chan,
+                   ),
+               ],
+           };
+           $self->_send_output_channel_local($chan,$output,'','oh');
+        }
+        # Send it on to other peers
+        $self->send_output(
+            {
+                prefix   => $uid,
+                command  => 'INVITE',
+                params   => $args,
+                colonify => 0,
+            },
+            grep { $_ ne $peer_id } $self->_state_connected_peers(),
+        );
     }
 
     return @$ref if wantarray;
@@ -8247,6 +8314,53 @@ sub _send_output_to_client {
             $self->send_output($input, $wheel_id);
         }
     }
+
+    return 1;
+}
+
+sub _send_output_channel_local {
+    my $self    = shift;
+    my $channel = shift || return;
+    return if !$self->state_chan_exists($channel);
+    my ($output,$conn_id,$status,$poscap,$negcap) = @_;
+    return if !$output;
+    my $sid = $self->server_sid();
+
+    # TODO: $poscap and $negcap stuff
+
+    my $chanrec = $self->{state}{chans}{uc_irc($channel)};
+    my @targs;
+    UID: foreach my $uid ( keys %{ $chanrec->{users} } ) {
+      next if $uid !~ m!^$sid!;
+      my $route_id = $self->_state_uid_route( $uid );
+      if ( $conn_id && $conn_id eq $route_id ) {
+        next UID;
+      }
+      if ( $status ) {
+        my $matched;
+        foreach my $stat ( split //, $status ) {
+          $matched++ if $chanrec->{users}{$uid} =~ m!$stat!;
+        }
+        next UID if !$matched;
+      }
+      if ( $poscap ) { # and $uid has poscap
+      }
+      if ( $negcap ) { # and $uid has negcap
+      }
+      # Default
+      push @targs, $route_id;
+    }
+
+    $self->send_output($output,@targs);
+
+    my $is_msg = ( $output->{command} =~ m!^(PRIVMSG|NOTICE)$! ? 1 : 0 );
+    my $spoofs = grep { $_ eq 'spoofed' } @targs;
+
+    $self->send_event(
+        "daemon_" . lc $output->{command},
+        $output->{prefix},
+        @{ $output->{params} },
+    ) if !$is_msg || $spoofs;
 
     return 1;
 }

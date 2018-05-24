@@ -122,7 +122,7 @@ sub ircd_daemon_eob {
   is( $args[1], '6FU', 'Correct server ID in EOB' );
   use Data::Dumper;
   local $Data::Dumper::Indent=1;
-  diag(Dumper($_[HEAP]->{ircd}{state}));
+  #diag(Dumper($_[HEAP]->{ircd}{state}));
   return;
 }
 
