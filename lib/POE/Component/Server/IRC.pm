@@ -2201,6 +2201,7 @@ sub _daemon_cmd_nick {
     my $nick   = shift || return;
     my $new    = shift;
     my $server = uc $self->server_name();
+    my $sid    = $self->server_sid();
     my $ref    = [ ];
 
     SWITCH: {
@@ -2225,14 +2226,15 @@ sub _daemon_cmd_nick {
         }
         my $full = $self->state_user_full($nick);
         my $record = $self->{state}{users}{$unick};
-        my $common = { $nick => $record->{route_id} };
+        my $common = { $record->{uid} => $record->{route_id} };
 
         for my $chan (keys %{ $record->{chans} }) {
-            for my $user ($self->state_chan_list($chan)) {
-                next if !$self->_state_is_local_user($user);
-                $common->{$user} = $self->_state_user_route($user);
+            for my $user ( keys %{ $self->{state}{chans}{$chan}{users} } ) {
+                next if $user !~ m!^$sid!;
+                $common->{$user} = $self->_state_uid_route($user);
             }
         }
+
         if ($unick eq $unew) {
             $record->{nick} = $new;
             $record->{ts} = time;
@@ -2249,21 +2251,18 @@ sub _daemon_cmd_nick {
             $self->{state}{users}{$unew} = $record;
             delete $self->{state}{peers}{$server}{users}{$unick};
             $self->{state}{peers}{$server}{users}{$unew} = $record;
-
-            for my $chan (keys %{ $record->{chans} }) {
-                $self->{state}{chans}{$chan}{users}{$unew}
-                    = delete $self->{state}{chans}{$chan}{users}{$unick};
-            }
         }
-        my @peers = $self->_state_connected_peers();
+
         $self->send_output(
             {
-                prefix  => $nick,
+                prefix  => $record->{uid},
                 command => 'NICK',
                 params  => [$new, $record->{ts}],
             },
-            @peers,
+            $self->_state_connected_peers(),
         );
+
+        $self->send_event("daemon_nick", $full, $new);
 
         $self->send_output(
             {
@@ -2271,9 +2270,8 @@ sub _daemon_cmd_nick {
                 command => 'NICK',
                 params  => [$new],
             },
-            map{ $common->{$_} } keys %$common,
+            values %$common,
         );
-        $self->send_event("daemon_nick", $full, $new);
     }
 
     return @$ref if wantarray;
@@ -3930,21 +3928,45 @@ sub _daemon_cmd_kick {
             last SWITCH;
         }
         $chan = $self->_state_chan_name($chan);
+        if (!$self->state_is_chan_op($nick, $chan) || !$self->state_is_chan_hop($nick, $chan)) {
+            push @$ref, ['482', $chan];
+            last SWITCH;
+        }
         if (!$self->state_nick_exists($who) ) {
             push @$ref, ['401', $who];
             last SWITCH;
         }
         $who = $self->state_user_nick($who);
-        if (!$self->state_is_chan_op($nick, $chan)) {
-            push @$ref, ['482', $chan];
-            last SWITCH;
-        }
         if (!$self->state_is_chan_member($who, $chan)) {
             push @$ref, ['441', $who, $chan];
             last SWITCH;
         }
+        if (
+             $self->state_is_chan_hop($nick, $chan) &&
+             !$self->state_is_chan_op($nick, $chan) &&
+             $self->state_is_chan_op($who, $chan)
+           ) {
+               push @$ref, ['482', $chan];
+               last SWITCH;
+        }
         my $comment = $args->[2] || $who;
-        $self->_send_output_to_channel(
+        my $uid  = $self->state_user_uid($nick);
+        my $wuid = $self->state_user_uid($who);
+        $chan = uc_irc($chan);
+        delete $self->{state}{chans}{$chan}{users}{$wuid};
+        delete $self->{state}{uids}{$wuid}{chans}{$chan};
+        if (!keys %{ $self->{state}{chans}{$chan}{users} }) {
+            delete $self->{state}{chans}{$chan};
+        }
+        $self->send_output(
+            {
+                prefix  => $uid,
+                command => 'KICK',
+                params  => [$chan, $wuid, $comment],
+            },
+            $self->_state_connected_peers(),
+        );
+        $self->_send_output_channel_local(
             $chan,
             {
                 prefix  => $self->state_user_full($nick),
@@ -3952,13 +3974,6 @@ sub _daemon_cmd_kick {
                 params  => [$chan, $who, $comment],
             },
         );
-        $who = uc_irc($who);
-        $chan = uc_irc($chan);
-        delete $self->{state}{chans}{$chan}{users}{$who};
-        delete $self->{state}{users}{$who}{chans}{$chan};
-        if (!keys %{ $self->{state}{chans}{$chan}{users} }) {
-            delete $self->{state}{chans}{$chan};
-        }
     }
 
     return @$ref if wantarray;
@@ -4001,7 +4016,22 @@ sub _daemon_cmd_remove {
         }
         my $comment = "Requested by $nick";
         $comment .= qq{ "$args->[2]"} if $args->[2];
-        $self->_send_output_to_channel(
+        $chan = uc_irc($chan);
+        my $uid = $self->state_user_uid($who);
+        delete $self->{state}{chans}{$chan}{users}{$uid};
+        delete $self->{state}{uids}{$uid}{chans}{$chan};
+        if (! keys %{ $self->{state}{chans}{$chan}{users} }) {
+            delete $self->{state}{chans}{$chan};
+        }
+        $self->send_output(
+            {
+                prefix  => $uid,
+                command => 'PART',
+                params  => [$chan, $comment],
+            },
+            $self->_state_connected_peers(),
+        );
+        $self->_send_output_channel_local(
             $chan,
             {
                 prefix  => $fullwho,
@@ -4009,13 +4039,6 @@ sub _daemon_cmd_remove {
                 params  => [$chan, $comment],
             },
         );
-        $who = uc_irc($who);
-        $chan = uc_irc($chan);
-        delete $self->{state}{chans}{$chan}{users}{$who};
-        delete $self->{state}{users}{$who}{chans}{$chan};
-        if (! keys %{ $self->{state}{chans}{$chan}{users} }) {
-            delete $self->{state}{chans}{$chan};
-        }
     }
 
     return @$ref if wantarray;
@@ -5451,11 +5474,11 @@ sub _daemon_peer_part {
         if (!$self->state_uid_chan_member($uid, $chan)) {
             last SWITCH;
         }
-        $chan = uc_irc($chan);
-        delete $self->{state}{chans}{$chan}{users}{$uid};
-        delete $self->{state}{uids}{$uid}{chans}{$chan};
-        if (!keys %{ $self->{state}{chans}{$chan}{users} }) {
-            delete $self->{state}{chans}{$chan};
+        my $uchan = uc_irc($chan);
+        delete $self->{state}{chans}{$uchan}{users}{$uid};
+        delete $self->{state}{uids}{$uid}{chans}{$uchan};
+        if (!keys %{ $self->{state}{chans}{$uchan}{users} }) {
+            delete $self->{state}{chans}{$uchan};
         }
         $self->send_output(
              {
@@ -5471,7 +5494,6 @@ sub _daemon_peer_part {
                 command => 'PART',
                 params  => [$chan, ($args->[0] || '')],
             },
-            $peer_id,
         );
     }
 
@@ -5482,7 +5504,7 @@ sub _daemon_peer_part {
 sub _daemon_peer_kick {
     my $self    = shift;
     my $peer_id = shift || return;
-    my $nick    = shift || return;
+    my $uid     = shift || return;
     my $ref     = [ ];
     my $args    = [ @_ ];
     my $count   = @$args;
@@ -5492,37 +5514,39 @@ sub _daemon_peer_kick {
             last SWITCH;
         }
         my $chan = (split /,/, $args->[0])[0];
-        my $who = (split /,/, $args->[1])[0];
+        my $wuid = (split /,/, $args->[1])[0];
         if (!$self->state_chan_exists($chan)) {
             last SWITCH;
         }
-        $chan = $self->_state_chan_name($chan);
-        if ( !$self->state_nick_exists($who)) {
+        if ( !$self->state_nick_exists($wuid)) {
             last SWITCH;
         }
-        $who = $self->state_user_nick($who);
-        if (!$self->state_is_chan_op($nick, $chan)) {
+        if (!$self->state_uid_chan_member($wuid, $chan)) {
             last SWITCH;
         }
-        if (!$self->state_is_chan_member($who, $chan)) {
-            last SWITCH;
-        }
+        my $who = $self->state_user_nick($wuid);
         my $comment = $args->[2] || $who;
-        $self->_send_output_to_channel(
+        my $uchan = uc_irc($chan);
+        delete $self->{state}{chans}{$uchan}{users}{$wuid};
+        delete $self->{state}{uids}{$wuid}{chans}{$uchan};
+        if (!keys %{ $self->{state}{chans}{$uchan}{users} }) {
+            delete $self->{state}{chans}{$uchan};
+        }
+        $self->send_output(
+             {
+                 prefix  => $uid,
+                 command => 'KICK',
+                 params  => [$chan, $wuid, $comment],
+             },
+             grep { $_ ne $peer_id } $self->_state_connected_peers(),
+         );
+        $self->_send_output_channel_local(
             $chan, {
-                prefix  => $self->state_user_full($nick),
+                prefix  => $self->state_user_full($uid),
                 command => 'KICK',
                 params  => [$chan, $who, $comment],
             },
-            $peer_id,
         );
-        $who = uc_irc($who);
-        $chan = uc_irc($chan);
-        delete $self->{state}{chans}{$chan}{users}{$who};
-        delete $self->{state}{users}{$who}{chans}{$chan};
-        if (! keys %{ $self->{state}{chans}{$chan}{users} }) {
-            delete $self->{state}{chans}{$chan};
-        }
     }
 
     return @$ref if wantarray;
