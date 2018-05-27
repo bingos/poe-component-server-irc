@@ -243,6 +243,7 @@ sub _client_register {
     return if !$self->_connection_exists($conn_id);
     return if !$self->{state}{conns}{$conn_id}{nick};
     return if !$self->{state}{conns}{$conn_id}{user};
+    return if $self->{state}{conns}{$conn_id}{capneg};
 
     my $auth = $self->_auth_finished($conn_id);
     return if !$auth;
@@ -400,6 +401,11 @@ sub _cmd_from_unknown {
         }
         if ($cmd eq 'QUIT') {
             $self->_terminate_conn_error($wheel_id, 'Client Quit');
+            last SWITCH;
+        }
+
+        if ($cmd eq 'CAP' ) {
+            $self->_daemon_cmd_cap($wheel_id, @$params);
             last SWITCH;
         }
 
@@ -691,6 +697,11 @@ sub _cmd_from_client {
             last SWITCH;
         }
 
+        if ($cmd eq 'CAP') {
+            $self->_daemon_cmd_cap($wheel_id, @$params);
+            last SWITCH;
+        }
+
         if ($self->can($method)) {
             $self->_send_output_to_client(
                 $wheel_id,
@@ -705,6 +716,88 @@ sub _cmd_from_client {
 
     return 1 if $invalid;
     $self->_state_cmd_stat($cmd, $input->{raw_line});
+    return 1;
+}
+
+sub _daemon_cmd_cap {
+    my $self     = shift;
+    my $wheel_id = shift || return;
+    my $subcmd   = shift;
+    my $args     = [@_];
+    my $server   = $self->server_name();
+
+    my $registered = $self->_connection_registered($wheel_id);
+
+    SWITCH: {
+        if (!$subcmd) {
+          $self->_send_output_to_client($wheel_id, '461', 'CAP');
+          last SWITCH;
+        }
+        $subcmd = uc $subcmd;
+        if( $subcmd !~ m!^(LS|LIST|REQ|ACK|NAK|CLEAR|END)$! ) {
+          $self->_send_output_to_client($wheel_id, '410', $subcmd);
+          last SWITCH;
+        }
+        if ( $subcmd eq 'END' && $registered  ) { #NOOP
+          last SWITCH;
+        }
+        if ( $subcmd eq 'END' && !$registered ) {
+          my $capneg = delete $self->{state}{conns}{$wheel_id}{capneg};
+          $self->_client_register($wheel_id) if $capneg;
+          last SWITCH;
+        }
+        $self->{state}{conns}{$wheel_id}{capneg} = 1 if !$registered && $subcmd =~ m!^(LS|REQ)$!;
+        if ( $subcmd eq 'LS' ) {
+          my $output = {
+              prefix  => $server,
+              command => 'CAP',
+              params  => [ $self->_client_nickname($wheel_id), $subcmd, ],
+          };
+          push @{ $output->{params} }, join ' ', sort keys %{ $self->{state}{caps} };
+          $self->_send_output_to_client($wheel_id, $output);
+          last SWITCH;
+        }
+        if ( $subcmd eq 'LIST' ) {
+          my $output = {
+              prefix  => $server,
+              command => 'CAP',
+              params  => [ $self->_client_nickname($wheel_id), $subcmd, ],
+          };
+          push @{ $output->{params} }, join ' ', sort keys %{ $self->{state}{conns}{$wheel_id}{caps} };
+          $self->_send_output_to_client($wheel_id, $output);
+          last SWITCH;
+        }
+        if ( $subcmd eq 'REQ' ) {
+          foreach my $cap ( split ' ', $args->[0] ) {
+             my $ocap = $cap;
+             my $neg = $cap =~ s!^\-!!;
+             $cap = lc $cap;
+             if ( !$self->{state}{caps}{$cap} ) {
+                my $output = {
+                    prefix  => $server,
+                    command => 'CAP',
+                    params  => [ $self->_client_nickname($wheel_id), 'NAK', $args->[0] ],
+                };
+                $self->_send_output_to_client($wheel_id, $output);
+                last SWITCH;
+             }
+             if ( $neg ) {
+               delete $self->{state}{conns}{$wheel_id}{caps}{$cap};
+             }
+             else {
+               $self->{state}{conns}{$wheel_id}{caps}{$cap} = 1;
+             }
+          }
+          my $output = {
+             prefix  => $server,
+             command => 'CAP',
+             params  => [ $self->_client_nickname($wheel_id), 'ACK', $args->[0] ],
+          };
+          $self->_send_output_to_client($wheel_id, $output);
+          last SWITCH;
+        }
+    }
+
     return 1;
 }
 
@@ -4097,9 +4190,10 @@ sub _daemon_cmd_invite {
            }
            $invite_only = 1;
         }
+        my $invite;
         {
           my $route_id = $self->_state_uid_route($wuid);
-          my $output = {
+          $invite = {
               prefix   => $self->state_user_full($nick),
               command  => 'INVITE',
               params   => [$who, $chan],
@@ -4108,12 +4202,12 @@ sub _daemon_cmd_invite {
           if ($route_id eq 'spoofed') {
               $self->send_event(
                   "daemon_invite",
-                  $output->{prefix},
-                  @{ $output->{params} }
+                  $invite->{prefix},
+                  @{ $invite->{params} }
               );
           }
           elsif ( $local ) {
-              $self->send_output($output, $route_id);
+              $self->send_output($invite, $route_id);
           }
         }
         # Send INVITE to all connected peers
@@ -4131,9 +4225,9 @@ sub _daemon_cmd_invite {
             command => '341',
             params  => [$chan, $who],
         };
-        # Send NOTICE to local channel +oh users
+        # Send NOTICE to local channel +oh users or invite-notify if applicable
         if ( $invite_only ) {
-           my $output = {
+           my $notice = {
                prefix  => $server,
                command => 'NOTICE',
                params  => [
@@ -4146,7 +4240,8 @@ sub _daemon_cmd_invite {
                    ),
                ],
            };
-           $self->_send_output_channel_local($chan,$output,'','oh');
+           $self->_send_output_channel_local($chan,$notice,'','oh','','invite-notify'); # Traditional NOTICE
+           $self->_send_output_channel_local($chan,$invite,'','oh','invite-notify',''); # invite-notify extension
         }
         my $away = $self->{state}{uids}{$wuid}{away};
         if (defined $away) {
@@ -6758,7 +6853,7 @@ sub _daemon_peer_invite {
            $chanrec->{invites}{$who} = time;
            # Send NOTICE to +oh local channel members
            # ":%s NOTICE %%%s :%s is inviting %s to %s."
-           my $output = {
+           my $notice = {
                prefix  => $server,
                command => 'NOTICE',
                params  => [
@@ -6771,7 +6866,14 @@ sub _daemon_peer_invite {
                    ),
                ],
            };
-           $self->_send_output_channel_local($chan,$output,'','oh');
+           my $invite = {
+                prefix   => $self->state_user_full($uid),
+                command  => 'INVITE',
+                params   => [$self->state_user_nick($who), $chan],
+                colonify => 0,
+           };
+           $self->_send_output_channel_local($chan,$notice,'','oh','','invite-notify');
+           $self->_send_output_channel_local($chan,$invite,'','oh','invite-notify','');
         }
         # Send it on to other peers
         $self->send_output(
@@ -6864,6 +6966,10 @@ sub _state_create {
         ops_online => 0,
         invisible  => 0,
         cmds       => { },
+    };
+
+    $self->{state}{caps} = {
+      'invite-notify' => 1,
     };
 
     return 1;
@@ -8263,6 +8369,7 @@ EOF
         407 => [1, "Too many targets"],
         408 => [1, "No such service"],
         409 => [1, "No origin specified"],
+        410 => [1, "Invalid CAP subcommand"],
         411 => [0, "No recipient given (%s)"],
         412 => [0, "No text to send"],
         413 => [1, "No toplevel domain specified"],
@@ -8392,9 +8499,11 @@ sub _send_output_channel_local {
         }
         next UID if !$matched;
       }
-      if ( $poscap ) { # and $uid has poscap
+      if ( $poscap ) {
+        next UID if !$self->{state}{uids}{$uid}{caps}{$poscap};
       }
-      if ( $negcap ) { # and $uid has negcap
+      if ( $negcap ) {
+        next UID if $self->{state}{uids}{$uid}{caps}{$negcap};
       }
       # Default
       push @targs, $route_id;
