@@ -3090,6 +3090,7 @@ sub _daemon_cmd_names {
     my $args   = [@_];
     my $count  = @$args;
 
+    # TODO: hybrid only seems to support NAMES #channel so fix this
     SWITCH: {
         my (@chans, $query);
         if (!$count) {
@@ -3135,6 +3136,11 @@ sub _daemon_cmd_names {
                 $query = '*';
             }
         }
+
+        my $chan_prefix_method = 'state_chan_list_prefixed';
+        my $uid = $self->state_user_uid($nick);
+        $chan_prefix_method = 'state_chan_list_multi_prefixed'
+          if $self->{state}{uids}{$uid}{caps}{'multi-prefix'};
 
         for my $chan (@chans) {
             my $record = $self->{state}{chans}{uc_irc($chan)};
@@ -3387,6 +3393,8 @@ sub _daemon_cmd_who {
         }
         if ($self->state_chan_exists($who)
             && $self->state_is_chan_member($nick, $who)) {
+            my $uid = $self->state_user_uid($nick);
+            my $multiprefix = $self->{state}{uids}{$uid}{caps}{'multi-prefix'};
             my $record = $self->{state}{chans}{uc_irc($who)};
             $who = $record->{name};
             for my $member (keys %{ $record->{users} }) {
@@ -3395,17 +3403,28 @@ sub _daemon_cmd_who {
                     command => '352',
                     params  => [$nick, $who],
                 };
-                my $memrec = $self->{state}{users}{$member};
+                my $memrec = $self->{state}{uids}{$member};
                 push @{ $rpl_who->{params} }, $memrec->{auth}{ident};
                 push @{ $rpl_who->{params} }, $memrec->{auth}{hostname};
                 push @{ $rpl_who->{params} }, $memrec->{server};
                 push @{ $rpl_who->{params} }, $memrec->{nick};
                 my $status = ($memrec->{away} ? 'G' : 'H');
                 $status .= '*' if $memrec->{umode} =~ /o/;
-                $status .= '@' if $record->{users}{$member} =~ /o/;
-                $status .= '%' if $record->{users}{$member} =~ /h/;
-                $status .= '+' if $record->{users}{$member} !~ /o/
-                    and $record->{users}{$member} =~ /v/;
+                {
+                  my $stat = $record->{users}{$member};
+                  if ( $stat ) {
+                    if ( !$multiprefix ) {
+                      $stat =~ s![vh]!!g if $stat =~ /o/;
+                      $stat =~ s![v]!!g  if $stat =~ /h/;
+                    }
+                    else {
+                      my $ostat = join '', grep { $stat =~ m!$_! } qw[o h v];
+                      $stat = $ostat;
+                    }
+                    $stat =~ tr/ohv/@%+/;
+                    $status .= $stat;
+                  }
+                }
                 push @{ $rpl_who->{params} }, $status;
                 push @{ $rpl_who->{params} }, "$memrec->{hops} "
                     . $memrec->{ircname};
@@ -6970,6 +6989,7 @@ sub _state_create {
 
     $self->{state}{caps} = {
       'invite-notify' => 1,
+      'multi-prefix'  => 1,
     };
 
     return 1;
@@ -7974,6 +7994,22 @@ sub state_chan_list_prefixed {
     } keys %{ $record->{users} };
 }
 
+sub state_chan_list_multi_prefixed {
+    my $self = shift;
+    my $chan = shift || return;
+    return if !$self->state_chan_exists($chan);
+    my $record = $self->{state}{chans}{uc_irc($chan)};
+
+    return map {
+        my $n = $self->{state}{uids}{$_}{nick};
+        my $m = $record->{users}{$_};
+        my $p = '';
+        $p .= '@' if $m =~ /o/;
+        $p .= '%' if $m =~ /h/;
+        $p .= '+' if $m =~ /v/;
+        $p . $n;
+    } keys %{ $record->{users} };
+}
 sub _state_chan_timestamp {
     my $self = shift;
     my $chan = shift || return;

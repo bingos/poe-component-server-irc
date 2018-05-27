@@ -91,7 +91,7 @@ sub testc_input {
         pass('Not registered so NICK is *');
       }
       if ( $in->{params}[1] eq 'LS' ) {
-        is( $in->{params}[2], 'invite-notify', 'LS listed invite-notify' );
+        is( $in->{params}[2], 'invite-notify multi-prefix', 'LS listed "invite-notify multi-prefix"' );
         $poe_kernel->post( $sender, 'send_to_server', { command => 'CAP', params => [ 'REQ', 'bogus invite-notify' ], colonify => 1 } );
         last SWITCH;
       }
