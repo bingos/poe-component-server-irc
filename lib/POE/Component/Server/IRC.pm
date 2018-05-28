@@ -3150,7 +3150,7 @@ sub _daemon_cmd_names {
             my $length = length($server)+3+length($chan)+length($nick)+7;
             my $buffer = '';
 
-            for my $name (sort $self->state_chan_list_prefixed($record->{name})) {
+            for my $name (sort $self->$chan_prefix_method($record->{name})) {
                 if (length(join ' ', $buffer, $name) + $length > 510) {
                     push @$ref, {
                         prefix  => $server,
@@ -3523,7 +3523,7 @@ sub _daemon_cmd_mode {
         my $nick_is_op = $self->state_is_chan_op($nick, $chan);
         my $nick_is_hop = $self->state_is_chan_hop($nick, $chan);
         my $reply;
-        my @reply_args;
+        my @reply_args; my %subs;
         my $parsed_mode = parse_mode_line(@$args);
         my $mode_count = 0;
 
@@ -3631,25 +3631,14 @@ sub _daemon_cmd_mode {
                     && $record->{users}{$self->state_user_uid($arg)} !~ /$char/) {
                     # Update user and chan record
                     $arg = $self->state_user_uid($arg);
-                    if ($mode eq '+h' && $record->{users}{$arg} =~ /o/) {
-                        next;
-                    }
-                    if ($char eq 'h' && $record->{users}{$arg} =~ /v/) {
-                        $record->{users}{$arg} =~ s/v//g;
-                        $reply .= '-v';
-                        push @reply_args, $self->state_user_nick($arg);
-                    }
-                    if ($char eq 'o' && $record->{users}{$arg} =~ /h/ ) {
-                        $record->{users}{$arg} =~ s/h//g;
-                        $reply .= '-h';
-                        push @reply_args, $self->state_user_nick($arg);
-                    }
                     $record->{users}{$arg} = join('', sort
                         split //, $record->{users}{$arg} . $char);
-                    $self->{state}{users}{$arg}{chans}{uc_irc($chan)}
+                    $self->{state}{uids}{$arg}{chans}{uc_irc($chan)}
                         = $record->{users}{$arg};
                     $reply .= $mode;
-                    push @reply_args, $self->state_user_nick($arg);
+                    my $anick = $self->state_user_nick($arg);
+                    $subs{$anick} = $arg;
+                    push @reply_args, $anick;
                 }
 
                 if ($flag eq '-' && $record->{users}{uc_irc($arg)}
@@ -3660,7 +3649,9 @@ sub _daemon_cmd_mode {
                     $self->{state}{uids}{$arg}{chans}{uc_irc($chan)}
                         = $record->{users}{$arg};
                     $reply .= $mode;
-                    push @reply_args, $self->state_user_nick($arg);
+                    my $anick = $self->state_user_nick($arg);
+                    $subs{$anick} = $arg;
+                    push @reply_args, $anick;
                 }
                 next;
             }
@@ -3772,13 +3763,24 @@ sub _daemon_cmd_mode {
 
         if ($reply) {
             $reply = unparse_mode_line($reply);
+            my @reply_args_peer = map {
+              ( defined $subs{$_} ? $subs{$_} : $_ )
+            } @reply_args;
+            $self->send_output(
+               {
+                  prefix  => $self->state_user_uid($nick),
+                  command => 'MODE',
+                  params  => [$chan, $reply, @reply_args_peer],
+               },
+               $self->_state_connected_peers(),
+            );
             my $output = {
                 prefix   => $self->state_user_full($nick),
                 command  => 'MODE',
                 params   => [$chan, $reply, @reply_args],
                 colonify => 0,
             };
-            $self->_send_output_to_channel($chan, $output);
+            $self->_send_output_channel_local( $chan, $output );
         }
     } # SWITCH
 
@@ -6169,9 +6171,10 @@ sub _daemon_peer_joins {
 sub _daemon_peer_mode {
     my $self    = shift;
     my $peer_id = shift || return;
-    my $nick    = shift || return;
+    my $uid     = shift || return;
     my $chan    = shift;
     my $server  = $self->server_name();
+    my $sid     = $self->server_sid();
     my $ref     = [ ];
     my $args    = [ @_ ];
     my $count   = scalar @$args;
@@ -6183,10 +6186,10 @@ sub _daemon_peer_mode {
         my $record = $self->{state}{chans}{uc_irc($chan)};
         $chan = $record->{name};
         my $full;
-        $full = $self->state_user_full($nick)
-            if $self->state_nick_exists($nick);
+        $full = $self->state_uid_full($uid)
+            if $self->state_uid_exists($uid);
         my $reply;
-        my @reply_args;
+        my @reply_args; my %subs;
         my $parsed_mode = parse_mode_line(@$args);
 
         while (my $mode = shift (@{ $parsed_mode->{modes} })) {
@@ -6197,35 +6200,23 @@ sub _daemon_peer_mode {
                     if ($flag eq '+'
                         && $record->{users}{uc_irc($arg)} !~ /$char/) {
                         # Update user and chan record
-                        $arg = uc_irc($arg);
-                        next if $mode eq '+h'
-                            && $record->{users}{$arg} =~ /o/;
-                        if ($char eq 'h' && $record->{users}{$arg} =~ /v/) {
-                            $record->{users}{$arg} =~ s/v//g;
-                            $reply .= '-v';
-                            push @reply_args, $self->state_user_nick($arg);
-                        }
-                        if ($char eq 'o' && $record->{users}{$arg} =~ /h/) {
-                            $record->{users}{$arg} =~ s/h//g;
-                            $reply .= '-h';
-                            push @reply_args, $self->state_user_nick($arg);
-                        }
                         $record->{users}{$arg} = join('', sort split //,
                             $record->{users}{$arg} . $char);
-                        $self->{state}{users}{$arg}{chans}{uc_irc($chan)}
+                        $self->{state}{uids}{$arg}{chans}{uc_irc($chan)}
                             = $record->{users}{$arg};
                         $reply .= "+$char";
-                        push @reply_args, $self->state_user_nick($arg);
+                        $subs{$arg} = $self->state_user_nick($arg);
+                        push @reply_args, $arg;
                     }
                     if ($flag eq '-' && $record->{users}{uc_irc($arg)}
                         =~ /$char/) {
                         # Update user and chan record
-                        $arg = uc_irc($arg);
                         $record->{users}{$arg} =~ s/$char//g;
-                        $self->{state}{users}{$arg}{chans}{uc_irc($chan)}
+                        $self->{state}{uids}{$arg}{chans}{uc_irc($chan)}
                             = $record->{users}{$arg};
                         $reply .= "-$char";
-                        push @reply_args, $self->state_user_nick($arg);
+                        $subs{$arg} = $self->state_user_nick($arg);
+                        push @reply_args, $arg;
                     }
                     next;
                 }
@@ -6328,7 +6319,7 @@ sub _daemon_peer_mode {
             my $parsed_line = unparse_mode_line($reply);
             $self->send_output(
                 {
-                    prefix   => $nick,
+                    prefix   => $uid,
                     command  => 'MODE',
                     colonify => 0,
                     params   => [
@@ -6339,6 +6330,9 @@ sub _daemon_peer_mode {
                 },
                 grep { $_ ne $peer_id } $self->_state_connected_peers(),
             );
+            my @reply_args_chan = map {
+              ( defined $subs{$_} ? $subs{$_} : $_ )
+            } @reply_args;
             $self->send_output(
                 {
                     prefix   => ($full || $server),
@@ -6347,11 +6341,11 @@ sub _daemon_peer_mode {
                     params   => [
                         $record->{name},
                         $parsed_line,
-                        @reply_args,
+                        @reply_args_chan,
                     ],
                 },
-                map { $self->_state_user_route($_) }
-                    grep { $self->_state_is_local_user($_) }
+                map { $self->_state_uid_route($_) }
+                    grep { m!^$sid! }
                     keys %{ $record->{users} },
             );
             $self->send_event(
@@ -6359,7 +6353,7 @@ sub _daemon_peer_mode {
                 ($full || $server),
                 $record->{name},
                 $parsed_line,
-                @reply_args,
+                @reply_args_chan,
             );
         }
     } # SWITCH
