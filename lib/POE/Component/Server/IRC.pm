@@ -549,6 +549,7 @@ sub _cmd_from_peer {
     my $cmd     = $input->{command};
     my $params  = $input->{params};
     my $prefix  = $input->{prefix};
+    my $sid = $self->server_sid();
     my $invalid = 0;
 
     SWITCH: {
@@ -563,10 +564,19 @@ sub _cmd_from_peer {
             last SWITCH;
         }
 
-        if ($cmd =~ /\d{3}/) {
+        if ($cmd =~ /\d{3}/ && $params->[0] !~ m!^$sid!) {
             $self->send_output(
                 $input,
-                $self->_state_user_route($params->[0])
+                $self->_state_uid_route($params->[0])
+            );
+            last SWITCH;
+        }
+        if ($cmd =~ /\d{3}/ && $params->[0] !~ m!^$sid!) {
+            $input->{prefix} = $self->server_name();
+            $input->{params}[0] = $self->state_user_nick($params->[0]);
+            $self->send_output(
+                $input,
+                $self->_state_uid_route($params->[0])
             );
             last SWITCH;
         }
@@ -821,6 +831,8 @@ sub _daemon_cmd_message {
 
         my $targets     = 0;
         my $max_targets = $self->server_config('MAXTARGETS');
+        my $uid         = $self->state_user_uid($nick);
+        my $sid         = $self->server_sid();
         my $full        = $self->state_user_full($nick);
         my $targs       = $self->_state_parse_msg_targets($args->[0]);
 
@@ -894,7 +906,7 @@ sub _daemon_cmd_message {
 
                 $self->send_output(
                     {
-                        prefix  => $nick,
+                        prefix  => $uid,
                         command => $type,
                         params  => [$target, $args->[1]],
                     },
@@ -959,7 +971,7 @@ sub _daemon_cmd_message {
 
                 $self->send_output(
                     {
-                        prefix  => $nick,
+                        prefix  => $uid,
                         command => $type,
                         params  => [$target, $args->[1]],
                     },
@@ -998,7 +1010,7 @@ sub _daemon_cmd_message {
                 if ($targs->{$target}[1] ne $self->server_name()) {
                     $self->send_output(
                         {
-                            prefix  => $nick,
+                            prefix  => $uid,
                             command => $type,
                             params  => [$target, $args->[1]],
                         },
@@ -1098,7 +1110,7 @@ sub _daemon_cmd_message {
                 }
                 delete $common->{ $self->_state_user_route($nick) };
                 for my $route_id (keys %$common) {
-                    $msg->{prefix} = $nick;
+                    $msg->{prefix} = $uid;
                     if ($self->_connection_is_client($route_id)) {
                         $msg->{prefix} = $full;
                     }
@@ -1135,6 +1147,8 @@ sub _daemon_cmd_message {
                 # Target user has CALLERID on
                 if ($targ_umode && $targ_umode =~ /[Gg]/) {
                     my $targ_rec = $self->{state}{users}{uc_irc($target)};
+                    my $targ_uid = $targ_rec->{uid};
+                    my $local = $targ_uid =~ m!^sid!;
                     if (($targ_umode =~ /G/
                         && (!$self->state_users_share_chan($target, $nick)
                         || !$targ_rec->{accepts}{uc_irc($nick)}))
@@ -1155,13 +1169,13 @@ sub _daemon_cmd_message {
                             || time() - $targ_rec->{last_caller} >= 60) {
 
                             my ($n, $uh) = split /!/,
-                            $self->state_user_full($nick);
+                              $self->state_user_full($nick);
                             $self->send_output(
                                 {
-                                    prefix  => $server,
+                                    prefix  => ( $local ? $server : $sid ),
                                     command => '718',
                                     params => [
-                                        $target,
+                                        ( $local ? $target : $targ_uid ),
                                         "$n\[$uh\]",
                                         'is messaging you, and you are umode +g.',
                                 ]
@@ -1183,10 +1197,11 @@ sub _daemon_cmd_message {
                     }
                 }
 
+                my $targ_uid = $self->state_user_uid($target);
                 my $msg = {
-                    prefix  => $nick,
+                    prefix  => $uid,
                     command => $type,
-                    params  => [$target, $args->[1]],
+                    params  => [$targ_uid, $args->[1]],
                 };
                 my $route_id = $self->_state_user_route($target);
 
@@ -1202,6 +1217,7 @@ sub _daemon_cmd_message {
                 else {
                     if ($self->_connection_is_client($route_id)) {
                         $msg->{prefix} = $full;
+                        $msg->{params}[0] = $target;
                     }
                     $self->send_output($msg, $route_id);
                 }
