@@ -5045,7 +5045,7 @@ sub _daemon_peer_ping {
               last SWITCH;
             }
             if ( $self->state_uid_exists($args->[1]) ) {
-              my $route_id = $self->state_uid_route($args->[1]);
+              my $route_id = $self->_state_uid_route($args->[1]);
               if ( $args->[1] =~ m!^$sid! ) {
                 $self->send_output(
                   {
@@ -5067,6 +5067,7 @@ sub _daemon_peer_ping {
                 );
               }
             }
+            last SWITCH;
         }
         $self->send_output(
             {
@@ -5109,7 +5110,7 @@ sub _daemon_peer_pong {
               last SWITCH;
             }
             if ( $self->state_uid_exists($args->[1]) ) {
-              my $route_id = $self->state_uid_route($args->[1]);
+              my $route_id = $self->_state_uid_route($args->[1]);
               if ( $args->[1] =~ m!^$sid! ) {
                 $self->send_output(
                   {
@@ -7467,17 +7468,6 @@ sub _state_send_burst {
         );
     }
 
-    # EOB for each connected peer if EOB supported
-    if ( $burst && scalar keys %eobs ) {
-      $self->send_output(
-          {
-              prefix  => $_,
-              command => 'EOB',
-          },
-          $conn_id,
-      ) for keys %eobs;
-    }
-
     # Send SJOIN+MODE burst
     for my $chan (keys %{ $self->{state}{chans} }) {
         next if $chan =~ /^\&/;
@@ -7556,13 +7546,25 @@ sub _state_send_burst {
         $self->send_output($_, $conn_id) for @output_modes;
     }
 
-    $self->send_output(
+    # EOB for each connected peer if EOB supported
+    # and our own EOB first
+    if ( $burst ) {
+      $self->send_output(
         {
             prefix  => $sid,
             command => 'EOB',
         },
         $conn_id,
-    ) if $burst;
+      );
+      delete $eobs{$sid};
+      $self->send_output(
+          {
+              prefix  => $_,
+              command => 'EOB',
+          },
+          $conn_id,
+      ) for keys %eobs;
+    }
 
     return 1;
 }
@@ -8012,7 +8014,7 @@ sub _state_sid_route {
     my $self = shift;
     my $sid = shift || return;
     return if !$self->state_sid_exists($sid);
-    my $record = $self->{state}{sid}{$sid};
+    my $record = $self->{state}{sids}{$sid};
     return $record->{route_id};
 }
 
