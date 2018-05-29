@@ -8,11 +8,10 @@ use Test::POE::Client::TCP;
 my $ts = time();
 
 my $pocosi = POE::Component::Server::IRC->spawn(
-    servername   => 'listen.server.irc',
     auth         => 0,
     antiflood    => 0,
     plugin_debug => 1,
-    config => { sid => '1FU' },
+    config => { sid => '1FU', servername   => 'listen.server.irc', },
 );
 
 POE::Session->create(

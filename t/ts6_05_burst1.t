@@ -10,11 +10,10 @@ my $ts = time();
 my $uidts;
 
 my $pocosi = POE::Component::Server::IRC->spawn(
-    servername   => 'listen.server.irc',
     auth         => 0,
     antiflood    => 0,
     plugin_debug => 1,
-    config => { sid => '1FU' },
+    config => { sid => '1FU', servername   => 'listen.server.irc', },
 );
 
 POE::Session->create(
@@ -100,6 +99,7 @@ sub testc_connected {
 
 sub testc_input {
   my ($heap,$input) = @_[HEAP,ARG0];
+  diag($input->{raw_line}, "\n");
   return unless $input->{command} eq 'EOB';
   pass($input->{command});
   $poe_kernel->delay( _terminate => 5 );

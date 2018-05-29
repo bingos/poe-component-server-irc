@@ -10,11 +10,10 @@ my $ts = time();
 my $uidts;
 
 my $pocosi = POE::Component::Server::IRC->spawn(
-    servername   => 'listen.server.irc',
     auth         => 0,
     antiflood    => 0,
     plugin_debug => 1,
-    config => { sid => '1FU' },
+    config => { servername => 'listen.server.irc', sid => '1FU' },
 );
 
 POE::Session->create(

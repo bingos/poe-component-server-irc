@@ -10,11 +10,10 @@ my $ts = time();
 my $uidts;
 
 my $pocosi = POE::Component::Server::IRC->spawn(
-    servername   => 'listen.server.irc',
     auth         => 0,
     antiflood    => 0,
     plugin_debug => 1,
-    config => { sid => '1FU' },
+    config => { servername  => 'listen.server.irc', sid => '1FU' },
 );
 
 POE::Session->create(
@@ -31,7 +30,7 @@ POE::Session->create(
             testc_disconnected
         )],
     ],
-    heap => { ircd => $pocosi, registered => 0, end => 0, shutdown => 0, 315 => 0 },
+    heap => { ircd => $pocosi, registered => 0, end => 0, shutdown => 0, 315 => 0, mode => 0 },
 );
 
 $poe_kernel->run();
@@ -97,6 +96,10 @@ sub testc_input {
   my $context = $sender->get_heap()->{context};
   #diag($in->{raw_line}, "\n");
   my $nick = $context->[0];
+  if ( $in->{command} eq 'MODE' && $in->{params}[0] eq '#nursery' ) {
+    $heap->{mode}++;
+    return;
+  }
   if ( $in->{command} eq '315' ) {
     $heap->{315}++;
     $poe_kernel->yield('_terminate') if $heap->{315} == 2;
@@ -129,7 +132,7 @@ sub testc_input {
     }
     else {
       diag("Delay JOIN for $nick\n");
-      $poe_kernel->delay_add( '_join', int(rand(10)), $sender->ID() );
+      $poe_kernel->delay_add( '_join', int(rand(10)), $sender->ID(), $nick );
       return;
     }
   }
@@ -151,9 +154,15 @@ sub testc_input {
 }
 
 sub _join {
-  my ($kernel,$sess) = @_[KERNEL,ARG0];
+  my ($kernel,$heap,$sess,$nick) = @_[KERNEL,HEAP,ARG0,ARG1];
   my $sender = $kernel->alias_resolve( $sess );
-  $kernel->post( $sender, 'send_to_server', { command => 'JOIN', params => [ '#nursery' ], colonify => 0 } );
+  if ( !$heap->{mode} ) {
+    diag("Delay JOIN for $nick\n");
+    $poe_kernel->delay_add( '_join', int(rand(10)), $sess, $nick );
+  }
+  else {
+    $kernel->post( $sender, 'send_to_server', { command => 'JOIN', params => [ '#nursery' ], colonify => 0 } );
+  }
   return;
 }
 

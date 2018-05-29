@@ -614,7 +614,7 @@ sub _cmd_from_peer {
         }
 
         if ($cmd =~ /^(PING|PONG)$/i && $self->can($method)) {
-            $self->$method($conn_id, @{ $params });
+            $self->$method($conn_id, $prefix, @{ $params });
             last SWITCH;
         }
 
@@ -1350,13 +1350,15 @@ sub _daemon_cmd_quit {
     my $ref  = [ ];
     my $full = $self->state_user_full($nick);
     my $name = uc $self->server_name();
+    my $sid  = $self->server_sid();
 
     $nick = uc_irc($nick);
     my $record = delete $self->{state}{peers}{$name}{users}{$nick};
-    delete $self->{state}{peers}{$name}{uids}{ $record->{uid} } if $record->{uid};
+    delete $self->{state}{peers}{$name}{uids}{ $record->{uid} };
+    my $uid = $record->{uid};
     $self->send_output(
         {
-            prefix  => $record->{uid},
+            prefix  => $uid,
             command => 'QUIT',
             params  => [$qmsg],
         },
@@ -1378,10 +1380,10 @@ sub _daemon_cmd_quit {
     # Okay, all 'local' users who share a common channel with user.
     my $common = { };
     for my $uchan (keys %{ $record->{chans} }) {
-        delete $self->{state}{chans}{$uchan}{users}{$nick};
-        for my $user ($self->state_chan_list($uchan)) {
-            next if !$self->_state_is_local_user($user);
-            $common->{$user} = $self->_state_user_route($user);
+        delete $self->{state}{chans}{$uchan}{users}{$uid};
+        for my $user ( keys %{ $self->{state}{chans}{$uchan}{users} } ) {
+            next if $user !~ m!^$sid!;
+            $common->{$user} = $self->_state_uid_route($user);
         }
 
         if (!keys %{ $self->{state}{chans}{$uchan}{users} }) {
@@ -1403,6 +1405,7 @@ sub _daemon_cmd_ping {
     my $self   = shift;
     my $nick   = shift || return;
     my $server = $self->server_name();
+    my $sid    = $self->server_sid();
     my $args   = [ @_ ];
     my $count  = @$args;
     my $ref    = [ ];
@@ -1418,18 +1421,19 @@ sub _daemon_cmd_ping {
             last SWITCH;
         }
         if ($count >= 2 && (uc $args->[1] ne uc $server)) {
-            my $target = $self->_state_peer_name($args->[1]);
+            my $target = $self->_state_peer_sid($args->[1]);
             $self->send_output(
                 {
+                    prefix  => $self->state_user_uid($nick),
                     command => 'PING',
                     params  => [$nick, $target],
                 },
-                $self->_state_peer_route($args->[1]),
+                $self->_state_sid_route($target),
             );
             last SWITCH;
         }
         push @$ref, {
-            prefix  => $server,
+            prefix  => $sid,
             command => 'PONG',
             params  => [$server, $args->[0]],
         };
@@ -1456,13 +1460,14 @@ sub _daemon_cmd_pong {
             last SWITCH;
         }
         if ($count >= 2 && uc $args->[1] ne uc $server) {
-            my $target = $self->_state_peer_name($args->[1]);
+            my $target = $self->_state_peer_sid($args->[1]);
             $self->send_output(
                 {
+                    prefix  => $self->state_user_uid($nick),
                     command => 'PONG',
                     params  => [$nick, $target],
                 },
-                $self->_state_peer_route($args->[1]),
+                $self->_state_sid_route($target),
             );
             last SWITCH;
         }
@@ -1522,10 +1527,11 @@ sub _daemon_cmd_oper {
             params  => [$nick, 'You are now an IRC operator'],
         };
 
+        my $uid = $self->state_user_uid($nick);
         my $reply = {
-            prefix  => $nick,
+            prefix  => $uid,
             command => 'MODE',
-            params  => [$nick, '+o'],
+            params  => [$uid, '+o'],
         };
 
         $self->send_output(
@@ -1665,6 +1671,7 @@ sub _daemon_cmd_wallops {
     return $ref;
 }
 
+# TODO: this has been replaced by GLOBOPS
 sub _daemon_cmd_operwall {
     my $self   = shift;
     my $nick   = shift || return;
@@ -5012,36 +5019,58 @@ sub _daemon_peer_svinfo {
 }
 
 sub _daemon_peer_ping {
-    my $self = shift;
+    my $self    = shift;
     my $peer_id = shift || return;
-    my $server = $self->server_name();
-    my $ref = [ ];
-    my $args = [ @_ ];
-    my $count = @$args;
+    my $server  = $self->server_name();
+    my $sid     = $self->server_sid();
+    my $ref     = [ ];
+    my $prefix  = shift;
+    my $args    = [ @_ ];
+    my $count   = @$args;
 
     SWITCH: {
         if (!$count) {
             last SWITCH;
         }
-        if ($count >= 2 && uc $server ne uc $args->[1]) {
-            $self->send_output(
+        if ($count >= 2 && $sid ne $args->[1]) {
+            if ( $self->state_sid_exists($args->[1]) ) {
+              $self->send_output(
                 {
+                    prefix  => $prefix,
                     command => 'PING',
                     params  => $args,
                 },
-                $self->_state_peer_route($args->[1]),
-            ) if $self->state_peer_exists($args->[1]);
-            $self->send_output(
-                {
+                $self->_state_sid_route($args->[1]),
+              );
+              last SWITCH;
+            }
+            if ( $self->state_uid_exists($args->[1]) ) {
+              my $route_id = $self->state_uid_route($args->[1]);
+              if ( $args->[1] =~ m!^$sid! ) {
+                $self->send_output(
+                  {
+                    prefix  => $self->_state_sid_name($prefix),
+                    command => 'PING',
+                    params  => [ $args->[0], $self->state_user_nick($args->[1]) ],
+                  },
+                  $route_id,
+                );
+              }
+              else {
+                $self->send_output(
+                  {
+                    prefix  => $prefix,
                     command => 'PING',
                     params  => $args,
-                },
-                $self->_state_user_route($args->[1]),
-            ) if $self->state_nick_exists($args->[1]);
-            last SWITCH;
+                  },
+                  $route_id,
+                );
+              }
+            }
         }
         $self->send_output(
             {
+                prefix  => $sid,
                 command => 'PONG',
                 params  => [$server, $args->[0]],
             },
@@ -5056,7 +5085,10 @@ sub _daemon_peer_ping {
 sub _daemon_peer_pong {
     my $self    = shift;
     my $peer_id = shift || return;
+    my $server  = $self->server_name();
+    my $sid     = $self->server_sid();
     my $ref     = [ ];
+    my $prefix  = shift;
     my $args    = [ @_ ];
     my $count   = @$args;
 
@@ -5064,22 +5096,42 @@ sub _daemon_peer_pong {
         if (!$count) {
             last SWITCH;
         }
-        if ($count >= 2 && uc $self->server_name() ne uc $args->[1]) {
-            $self->send_output(
+        if ($count >= 2 && uc $sid ne $args->[1]) {
+            if ( $self->state_sid_exists($args->[1]) ) {
+              $self->send_output(
                 {
+                    prefix  => $prefix,
                     command => 'PONG',
-                    params => $args,
+                    params  => $args,
                 },
-                $self->_state_peer_route($args->[1]),
-            ) if $self->state_peer_exists($args->[1]);
-            $self->send_output(
-                {
+                $self->_state_sid_route($args->[1]),
+              );
+              last SWITCH;
+            }
+            if ( $self->state_uid_exists($args->[1]) ) {
+              my $route_id = $self->state_uid_route($args->[1]);
+              if ( $args->[1] =~ m!^$sid! ) {
+                $self->send_output(
+                  {
+                    prefix  => $self->_state_sid_name($prefix),
                     command => 'PONG',
-                    params => $args,
-                },
-                $self->_state_user_route($args->[1]),
-            ) if $self->state_nick_exists($args->[1]);
-            last SWITCH;
+                    params  => [ $args->[0], $self->state_user_nick($args->[1]) ],
+                  },
+                  $route_id,
+                );
+              }
+              else {
+                $self->send_output(
+                  {
+                    prefix  => $prefix,
+                    command => 'PONG',
+                    params  => $args,
+                  },
+                  $route_id,
+                );
+              }
+              last SWITCH;
+            }
         }
         delete $self->{state}{conns}{$peer_id}{pinged};
     }
@@ -5160,6 +5212,7 @@ sub _daemon_peer_sid {
     return $ref;
 }
 
+# TODO: this is not applicable any more replaced by SID ^^
 sub _daemon_peer_server {
     my $self    = shift;
     my $peer_id = shift || return;
@@ -7785,6 +7838,13 @@ sub _state_peer_name {
     my $peer = shift || return;
     return if !$self->state_peer_exists($peer);
     return $self->{state}{peers}{uc $peer}{name};
+}
+
+sub _state_peer_sid {
+    my $self = shift;
+    my $peer = shift || return;
+    return if !$self->state_peer_exists($peer);
+    return $self->{state}{peers}{uc $peer}{sid};
 }
 
 sub _state_sid_name {
