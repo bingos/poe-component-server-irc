@@ -31,7 +31,7 @@ sub spawn {
             {
                 map { +"daemon_cmd_$_" => '_spoofed_command' }
                     qw(join part mode kick topic nick privmsg notice gline
-                       kline unkline sjoin locops wallops operwall)
+                       kline unkline sjoin locops wallops globops)
             },
         ],
     );
@@ -1500,6 +1500,7 @@ sub _daemon_cmd_oper {
     my $self   = shift;
     my $nick   = shift || return;
     my $server = $self->server_name();
+    my $sid    = $self->server_sid();
     my $ref    = [ ];
     my $args   = [@_];
     my $count  = @$args;
@@ -1516,7 +1517,7 @@ sub _daemon_cmd_oper {
             push @$ref, ['491'];
             last SWITCH;
         }
-
+        my $opuser = $args->[0];
         $self->{stats}{ops}++;
         my $record = $self->{state}{users}{uc_irc($nick)};
         $record->{umode} .= 'o';
@@ -1527,7 +1528,29 @@ sub _daemon_cmd_oper {
             params  => [$nick, 'You are now an IRC operator'],
         };
 
-        my $uid = $self->state_user_uid($nick);
+        my @peers = $self->_state_connected_peers();
+        my $uid = $record->{uid};
+        my $full = $record->{nick} . '!' . $record->{auth}{ident}
+                    . '@' . $record->{auth}{hostname};
+
+        $self->send_output(
+          {
+            prefix  => $sid,
+            command => 'GLOBOPS',
+            params  => [ sprintf("%s{%s} is now an operator",$full,$opuser) ],
+          },
+          @peers,
+        );
+
+        $self->send_output(
+          {
+            prefix  => $sid,
+            command => 'NOTICE',
+            params  => [ sprintf("%s{%s} is now an operator",$full,$opuser) ],
+          },
+          keys %{ $self->{state}{localops} },
+        );
+
         my $reply = {
             prefix  => $uid,
             command => 'MODE',
@@ -1536,7 +1559,7 @@ sub _daemon_cmd_oper {
 
         $self->send_output(
             $reply,
-            $self->_state_connected_peers(),
+            @peers,
         );
         $self->send_event(
             "daemon_umode",
@@ -1544,7 +1567,7 @@ sub _daemon_cmd_oper {
             '+o',
         );
 
-        my $route_id = $self->_state_user_route($nick);
+        my $route_id = $record->{route_id};
         $self->{state}{localops}{$route_id} = time;
         $self->antiflood($route_id, 0);
         push @$ref, $reply;
@@ -1604,7 +1627,7 @@ sub _daemon_cmd_locops {
 
     SWITCH: {
         if (!$self->state_user_is_operator($nick)) {
-            push @$ref, ['481'];
+            push @$ref, ['723', 'locops'];
             last SWITCH;
         }
         if (!$count) {
@@ -1614,9 +1637,9 @@ sub _daemon_cmd_locops {
         my $full = $self->state_user_full($nick);
         $self->send_output(
             {
-                prefix  => $full,
-                command => 'WALLOPS',
-                params  => ['LOCOPS - ' . $args->[0]],
+                prefix  => $server,
+                command => 'NOTICE',
+                params  => [ "*** LocOps -- from $nick: " . $args->[0] ],
             },
             keys %{ $self->{state}{locops} },
         );
@@ -1637,18 +1660,20 @@ sub _daemon_cmd_wallops {
 
     SWITCH: {
         if (!$self->state_user_is_operator($nick)) {
-            push @$ref, ['481'];
+            push @$ref, ['723', 'wallops'];
             last SWITCH;
         }
         if (!$count) {
             push @$ref, ['461', 'WALLOPS'];
             last SWITCH;
         }
+
         my $full = $self->state_user_full($nick);
+        my $uid  = $self->state_user_uid($nick);
 
         $self->send_output(
             {
-                prefix  => $nick,
+                prefix  => $uid,
                 command => 'WALLOPS',
                 params  => [$args->[0]],
             },
@@ -1659,59 +1684,59 @@ sub _daemon_cmd_wallops {
             {
                 prefix  => $full,
                 command => 'WALLOPS',
-                params  => ['OPERWALL - ' . $args->[0]],
+                params  => [$args->[0]],
             },
-            keys %{ $self->{state}{operwall} },
+            keys %{ $self->{state}{wallops} },
         );
 
-        $self->send_event("daemon_operwall", $full, $args->[0]);
+        $self->send_event("daemon_wallops", $full, $args->[0]);
     }
 
     return @$ref if wantarray;
     return $ref;
 }
 
-# TODO: this has been replaced by GLOBOPS
-sub _daemon_cmd_operwall {
+sub _daemon_cmd_globops {
     my $self   = shift;
     my $nick   = shift || return;
     my $server = $self->server_name();
+    my $sid    = $self->server_sid();
     my $ref    = [ ];
     my $args   = [@_];
     my $count  = @$args;
 
     SWITCH: {
         if (!$self->state_user_is_operator($nick)) {
-            push @$ref, ['481'];
+            push @$ref, ['723', 'globops'];
             last SWITCH;
         }
         if (!$count) {
-            push @$ref, ['461', 'OPERWALL'];
+            push @$ref, ['461', 'GLOBOPS'];
             last SWITCH;
         }
-        my $full = $self->state_user_full($nick);
+
+        my $msg = "*** Global -- from $nick: " . $args->[0];
 
         $self->send_output(
             {
-                prefix  => $nick,
-                command => 'WALLOPS',
-                params  => [$args->[0]],
+                prefix  => $sid,
+                command => 'GLOBOPS',
+                params  => [ $msg ],
             },
             $self->_state_connected_peers(),
         );
 
         $self->send_output(
             {
-                prefix  => $full,
-                command => 'WALLOPS',
-                params  => ['OPERWALL - ' . $args->[0]],
+                prefix  => $server,
+                command => 'GLOBOPS',
+                params  => [ $msg ],
             },
-            keys %{ $self->{state}{operwall} },
+            keys %{ $self->{state}{wallops} },
         );
 
-        $self->send_event("daemon_operwall", $full, $args->[0]);
+        $self->send_event("daemon_globops", $self->state_user_full($nick), $args->[0]);
     }
-
     return @$ref if wantarray;
     return $ref;
 }
@@ -4326,7 +4351,7 @@ sub _daemon_cmd_umode {
             next if $mode eq '+o';
             my ($action, $char) = split //, $mode;
             if ($action eq '+' && $record->{umode} !~ /$char/) {
-                next if $char =~ /[wzl]a/ && $record->{umode} !~ /o/;
+                next if $char =~ /[wl]a/ && $record->{umode} !~ /o/;
                 $record->{umode} .= $char;
                 if ($char eq 'i') {
                     $self->{state}{stats}{invisible}++;
@@ -4334,9 +4359,6 @@ sub _daemon_cmd_umode {
                 }
                 if ($char eq 'w') {
                     $self->{state}{wallops}{$route_id} = time;
-                }
-                if ($char eq 'z') {
-                    $self->{state}{operwall}{$route_id} = time;
                 }
                 if ($char eq 'l') {
                     $self->{state}{locops}{$route_id} = time;
@@ -4353,9 +4375,6 @@ sub _daemon_cmd_umode {
                 }
                 if ($char eq 'w') {
                     delete $self->{state}{wallops}{$route_id};
-                }
-                if ($char eq 'z') {
-                    delete $self->{state}{operwall}{$route_id};
                 }
                 if ($char eq 'l') {
                     delete $self->{state}{locops}{$route_id};
@@ -4830,7 +4849,6 @@ sub _daemon_peer_wallops {
     my $count   = @$args;
 
     SWITCH: {
-        my $full = $self->state_user_full($prefix) || $prefix;
         $self->send_output(
             {
                 prefix  => $prefix,
@@ -4839,34 +4857,26 @@ sub _daemon_peer_wallops {
             },
             grep { $_ ne $peer_id } $self->_state_connected_peers(),
         );
-        if ($self->state_peer_exists($full)) {
-            $self->send_output(
-                {
-                    prefix  => $full,
-                    command => 'WALLOPS',
-                    params  => ['OPERWALL - ' . $args->[0]],
-                }, keys %{ $self->{state}{wallops} },
-            );
-            $self->send_event("daemon_wallops", $full, $args->[0]);
-        }
-        else {
-            $self->send_output(
-                {
-                    prefix  => $full,
-                    command => 'WALLOPS',
-                    params  => ['OPERWALL - ' . $args->[0]],
-                },
-                keys %{ $self->{state}{operwall} },
-            );
-            $self->send_event("daemon_operwall", $full, $args->[0]);
-        }
+        # Prefix can either be SID or UID
+        my $full = $self->_state_sid_name( $prefix );
+        $full = $self->state_user_full( $prefix ) if !$full;
+
+        $self->send_output(
+            {
+                prefix  => $full,
+                command => 'WALLOPS',
+                params  => [$args->[0]],
+            },
+            keys %{ $self->{state}{wallops} },
+         );
+         $self->send_event("daemon_wallops", $full, $args->[0]);
     }
 
     return @$ref if wantarray;
     return $ref;
 }
 
-sub _daemon_peer_operwall {
+sub _daemon_peer_globops {
     my $self    = shift;
     my $peer_id = shift || return;
     my $prefix  = shift || return;
@@ -4875,37 +4885,28 @@ sub _daemon_peer_operwall {
     my $count   = @$args;
 
     SWITCH: {
-        my $full = $self->state_user_full($prefix) || $prefix;
+        # Hot potato
         $self->send_output(
             {
                 prefix  => $prefix,
-                command => 'WALLOPS',
+                command => 'GLOBOPS',
                 params  => [$args->[0]],
             },
             grep { $_ ne $peer_id } $self->_state_connected_peers(),
         );
-        if ($self->state_peer_exists($full)) {
-            $self->send_output(
-                {
-                    prefix  => $full,
-                    command => 'WALLOPS',
-                    params  => ['OPERWALL - ' . $args->[0]],
-                },
-                keys %{ $self->{state}{wallops} },
-            );
-            $self->send_event("daemon_wallops", $full, $args->[0]);
-        }
-        else {
-            $self->send_output(
-                {
-                    prefix  => $full,
-                    command => 'WALLOPS',
-                    params  => ['OPERWALL - ' . $args->[0]],
-                },
-                keys %{ $self->{state}{operwall} },
-            );
-            $self->send_event("daemon_operwall", $full, $args->[0]);
-        }
+        # Prefix can either be SID or UID
+        my $full = $self->_state_sid_name( $prefix );
+        $full = $self->state_user_full( $prefix ) if !$full;
+
+        $self->send_output(
+            {
+                prefix  => $full,
+                command => 'GLOBOPS',
+                params  => [$args->[0]],
+            },
+            keys %{ $self->{state}{wallops} },
+         );
+         $self->send_event("daemon_globops", $full, $args->[0]);
     }
 
     return @$ref if wantarray;
@@ -8522,6 +8523,7 @@ EOF
         491 => [0, "No O-lines for your host"],
         501 => [0, "Unknown MODE flag"],
         502 => [0, "Cannot change mode for other users"],
+        723 => [1, "Insufficient oper privileges."],
     };
 
     $self->{config}{isupport} = {
@@ -9185,7 +9187,7 @@ sub daemon_server_wallops {
                 params  => [$args->[0]],
             },
             $self->_state_connected_peers(),
-            keys %{ $self->{state}{operwall} },
+            keys %{ $self->{state}{wallops} },
         );
         $self->send_event("daemon_wallops", $server, $args->[0]);
     }
@@ -9930,7 +9932,7 @@ local operators.
 Takes two arguments, a spoofed nickname and the text message to send to
 all operators.
 
-=head3 C<daemon_cmd_operwall>
+=head3 C<daemon_cmd_globops>
 
 Takes two arguments, a spoofed nickname and the text message to send to
 all operators.
@@ -10445,11 +10447,11 @@ B<Note:> the component will shutdown, this is a feature;
 
 =back
 
-=head2 C<ircd_daemon_operwall>
+=head2 C<ircd_daemon_globops>
 
 =over
 
-=item Emitted: when an oper issues a WALLOPS or OPERWALL command;
+=item Emitted: when an oper or server issues a GLOBOPS;
 
 =item Target: all plugins and registered sessions;
 
@@ -10457,9 +10459,9 @@ B<Note:> the component will shutdown, this is a feature;
 
 =over 4
 
-=item * C<ARG0>, the full nick!user@host;
+=item * C<ARG0>, the full nick!user@host or server name;
 
-=item * C<ARG1>, the wallops or operwall message;
+=item * C<ARG1>, the globops message;
 
 =back
 
