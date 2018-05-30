@@ -8476,7 +8476,7 @@ EOF
         406 => [1, "There was no such nickname"],
         407 => [1, "Too many targets"],
         408 => [1, "No such service"],
-        409 => [1, "No origin specified"],
+        409 => [0, "No origin specified"],
         410 => [1, "Invalid CAP subcommand"],
         411 => [0, "No recipient given (%s)"],
         412 => [0, "No text to send"],
