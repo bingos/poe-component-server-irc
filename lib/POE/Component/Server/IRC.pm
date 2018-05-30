@@ -3817,8 +3817,9 @@ sub _daemon_cmd_mode {
             $self->send_output(
                {
                   prefix  => $self->state_user_uid($nick),
-                  command => 'MODE',
-                  params  => [$chan, $reply, @reply_args_peer],
+                  command => 'TMODE',
+                  params  => [$record->{ts}, $chan, $reply, @reply_args_peer],
+                  colonify => 0,
                },
                $self->_state_connected_peers(),
             );
@@ -5214,62 +5215,6 @@ sub _daemon_peer_sid {
     return $ref;
 }
 
-# TODO: this is not applicable any more replaced by SID ^^
-sub _daemon_peer_server {
-    my $self    = shift;
-    my $peer_id = shift || return;
-    my $prefix  = shift || return;
-    my $server  = $self->server_name();
-    my $ref     = [ ];
-    my $args    = [ @_ ];
-    my $count   = @$args;
-    my $peer    = $self->{state}{conns}{$peer_id}{name};
-
-    SWITCH: {
-        if (!$count || $count < 2) {
-            last SWITCH;
-        }
-        if ($self->state_peer_exists($args->[0])) {
-            $self->_terminate_conn_error($peer_id, 'Server exists');
-            last SWITCH;
-        }
-        my $record = {
-            name => $args->[0],
-            hops => $args->[1],
-            desc => ( $args->[2] || '' ),
-            route_id => $peer_id,
-            type => 'r',
-            peer => $prefix,
-            peers => { },
-            users => { },
-        };
-        my $uname = uc $record->{name};
-        $self->{state}{peers}{$uname} = $record;
-        $self->{state}{peers}{uc $prefix}{peers}{$uname} = $record;
-        $self->send_output(
-            {
-                prefix  => $prefix,
-                command => 'SERVER',
-                params  => [
-                    $record->{name},
-                    $record->{hops} + 1,
-                    $record->{desc},
-                ],
-            },
-            grep { $_ ne $peer_id } $self->_state_connected_peers(),
-        );
-        $self->send_event(
-            "daemon_server",
-            $record->{name},
-            $prefix,
-            $record->{hops},
-            $record->{desc},
-        );
-    }
-    return @$ref if wantarray;
-    return $ref;
-}
-
 sub _daemon_peer_quit {
     my $self    = shift;
     my $uid     = shift || return;
@@ -5355,6 +5300,7 @@ sub _daemon_peer_uid {
               # If userhosts different, collide existing user
               if ( $incoming ne $userhost ) {
                 # Send KILL for existing user UID to all servers
+                $exist->{nick_collision} = 1;
                 $self->daemon_server_kill( $exist->{uid}, 'Nick Collision' );
               }
               # If userhosts same, collide new user
@@ -5374,6 +5320,7 @@ sub _daemon_peer_uid {
             # Received TS == Existing TS
             if ( $args->[2] == $exist->{ts} ) {
               # Collide both
+              $exist->{nick_collision} = 1;
               $self->daemon_server_kill( $exist->{uid}, 'Nick Collision', $peer_id);
               $self->send_output(
                  {
@@ -5390,6 +5337,7 @@ sub _daemon_peer_uid {
               # If userhosts same, collide existing user
               if ( $incoming eq $userhost ) {
                 # Send KILL for existing user UID to all servers
+                $exist->{nick_collision} = 1;
                 $self->daemon_server_kill( $exist->{uid}, 'Nick Collision' );
               }
               # If userhosts different, collide new user, drop message
@@ -5456,6 +5404,146 @@ sub _daemon_peer_uid {
 }
 
 sub _daemon_peer_nick {
+    my $self    = shift;
+    my $peer_id = shift || return;
+    my $prefix  = shift;
+    my $mysid   = $self->server_sid();
+    my $ref     = [ ];
+    my $args    = [ @_ ];
+    my $count   = @$args;
+    my $peer    = $self->{state}{conns}{$peer_id}{name};
+    my $nicklen = $self->server_config('NICKLEN');
+
+    SWITCH: {
+        if (!$count || $count < 2) {
+          last SWITCH;
+        }
+        if ( !$self->state_uid_exists( $prefix ) ) {
+          last SWITCH;
+        }
+        my $newts = $args->[1];
+        if ( $self->state_nick_exists($args->[0]) && $prefix ne $self->state_user_uid($args->[0]) ) {
+            my $unick = uc_irc($args->[0]);
+            my $exist = $self->{state}{users}{ $unick };
+            my $userhost = ( split /!/, $self->state_user_full($args->[0]) )[1];
+            my $incoming = ( split /!/, $self->state_user_full($prefix) )[1];
+            # Received TS  < Existing TS
+            if ( $newts < $exist->{ts} ) {
+              # If userhosts different, collide existing user
+              if ( $incoming ne $userhost ) {
+                # Send KILL for existing user UID to all servers
+                $exist->{nick_collision} = 1;
+                $self->daemon_server_kill( $exist->{uid}, 'Nick Collision' );
+              }
+              # If userhosts same, collide new user
+              else {
+                # Send KILL for new user UID back to sending peer
+                $self->send_output(
+                  {
+                    prefix  => $mysid,
+                    command => 'KILL',
+                    params  => [$prefix, 'Nick Collision'],
+                  },
+                  $peer_id,
+                );
+                last SWITCH;
+              }
+            }
+            # Received TS == Existing TS
+            if ( $args->[2] == $exist->{ts} ) {
+              # Collide both
+              $exist->{nick_collision} = 1;
+              $self->daemon_server_kill( $exist->{uid}, 'Nick Collision', $peer_id);
+              $self->send_output(
+                 {
+                    prefix  => $mysid,
+                    command => 'KILL',
+                    params  => [$prefix, 'Nick Collision'],
+                 },
+                 $peer_id,
+              );
+              last SWITCH;
+            }
+            # Received TS  > Existing TS
+            if ( $newts > $exist->{ts} ) {
+              # If userhosts same, collide existing user
+              if ( $incoming eq $userhost ) {
+                # Send KILL for existing user UID to all servers
+                $exist->{nick_collision} = 1;
+                $self->daemon_server_kill( $exist->{uid}, 'Nick Collision' );
+              }
+              # If userhosts different, collide new user, drop message
+              else {
+                # Send KILL for new user UID back to sending peer
+                $self->send_output(
+                  {
+                    prefix  => $mysid,
+                    command => 'KILL',
+                    params  => [$prefix, 'Nick Collision'],
+                  },
+                  $peer_id,
+                );
+                last SWITCH;
+              }
+            }
+            #last SWITCH;
+        }
+
+        my $new = $args->[0];
+        my $unew = uc_irc($new);
+        my $ts = $args->[1] || time;
+        my $record = $self->{state}{uids}{$prefix};
+        my $unick = uc_irc($record->{nick});
+        my $sid    = $record->{sid};
+        my $full   = $self->state_user_full($prefix);
+
+        if ($unick eq $unew) {
+            $record->{nick} = $new;
+            $record->{ts} = $ts;
+        }
+        else {
+            $record->{nick} = $new;
+            $record->{ts} = $ts;
+            # Remove from peoples accept lists
+            delete $self->{state}{users}{$_}{accepts}{$unick}
+                for keys %{ $record->{accepts} };
+            delete $record->{accepts};
+            delete $self->{state}{users}{$unick};
+            $self->{state}{users}{$unew} = $record;
+            delete $self->{state}{sids}{$sid}{users}{$unick};
+            $self->{state}{sids}{$sid}{users}{$unew} = $record;
+        }
+        my $common = { };
+        for my $chan (keys %{ $record->{chans} }) {
+            for my $user ( keys %{ $self->{state}{chans}{uc_irc $chan}{users} } ) {
+                next if $user !~ m!^$mysid!;
+                $common->{$user} = $self->_state_uid_route($user);
+            }
+        }
+        $self->send_output(
+             {
+                prefix  => $prefix,
+                command => 'NICK',
+                params  => $args,
+             },
+             grep { $_ ne $peer_id } $self->_state_connected_peers(),
+        );
+        $self->send_output(
+            {
+                prefix  => $full,
+                command => 'NICK',
+                params  => [$new],
+            },
+            map{ $common->{$_} } keys %{ $common },
+        );
+        $self->send_event("daemon_nick", $full, $new);
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _daemon_peer_nick_old {
     my $self    = shift;
     my $peer_id = shift || return;
     my $prefix  = shift;
