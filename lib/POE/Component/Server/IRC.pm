@@ -1841,20 +1841,21 @@ sub _daemon_cmd_squit {
         $args->[0] = $self->_state_peer_name($peer);
         $args->[1] = $reason;
 
+        my $conn_id = $self->_state_peer_route($peer);
+
         if ( !grep { $_ eq $peer }
                 keys %{ $self->{state}{peers}{uc $server}{peers} }) {
             $self->send_output(
                 {
-                    prefix  => $nick,
+                    prefix  => $self->state_user_uid($nick),
                     command => 'SQUIT',
-                    params  => $args,
+                    params  => [ $self->_state_peer_sid($peer), $reason ],
                 },
-                $self->_state_peer_route($args->[0]),
+                $conn_id,
             );
             last SWITCH;
         }
 
-        my $conn_id = $self->_state_peer_route($peer);
         $self->disconnect($conn_id, $reason);
         $self->send_output(
             {
@@ -4567,6 +4568,7 @@ sub _daemon_cmd_links {
 sub _daemon_peer_squit {
     my $self    = shift;
     my $peer_id = shift || return;
+    my $sid     = $self->server_sid();
     my $ref     = [ ];
     my $args    = [ @_ ];
     my $count   = @$args;
@@ -4591,23 +4593,24 @@ sub _daemon_peer_squit {
                 },
                 grep { $_ ne $peer_id } $self->_state_connected_peers(),
             );
-            $self->send_event("daemon_squit", @$args);
+            my $qsid  = $args->[0];
+            my $qpeer = $self->_state_sid_name($qsid);
+            $self->send_event("daemon_squit", $qpeer, $args->[1]);
             my $quit_msg = join ' ',
-                $self->_state_peer_for_peer($args->[0]), $args->[0];
+                $self->{state}{sids}{$qsid}{peer}, $qpeer;
 
-            for my $nick ($self->_state_server_squit($args->[0])) {
+            for my $uid ($self->_state_server_squit($qsid)) {
                 my $output = {
-                    prefix  => $self->state_user_full($nick),
+                    prefix  => $self->state_user_full($uid),
                     command => 'QUIT',
                     params  => [$quit_msg],
                 };
                 my $common = { };
-                for my $uchan ($self->state_user_chans($nick)) {
-                    $uchan = uc_irc($uchan);
-                    delete $self->{state}{chans}{$uchan}{users}{$nick};
-                    for my $user ($self->state_chan_list($uchan)) {
-                        next if !$self->_state_is_local_user($user);
-                        $common->{$user} = $self->_state_user_route($user);
+                for my $uchan ( keys %{ $self->{state}{uids}{$uid}{chans} } ) {
+                    delete $self->{state}{chans}{$uchan}{users}{$uid};
+                    for my $user ( keys %{ $self->{state}{chans}{$uchan}{users} } ) {
+                        next if $user !~ m!^$sid!;
+                        $common->{$user} = $self->_state_uid_route($user);
                     }
                     if (!keys %{ $self->{state}{chans}{$uchan}{users} }) {
                         delete $self->{state}{chans}{$uchan};
@@ -4619,7 +4622,8 @@ sub _daemon_peer_squit {
                     $output->{prefix},
                     $output->{params}[0],
                 );
-                my $record = delete $self->{state}{users}{$nick};
+                my $record = delete $self->{state}{uids}{$uid};
+                delete $self->{state}{users}{uc_irc($record->{nick})};
                 if ($record->{umode} =~ /o/) {
                     $self->{state}{stats}{ops_online}--;
                 }
@@ -7753,18 +7757,21 @@ sub _state_peer_for_peer {
 
 sub _state_server_squit {
     my $self = shift;
-    my $peer = shift || return;
-    return if !$self->state_peer_exists($peer);
+    my $sid = shift || return;
+    return if !$self->state_sid_exists($sid);
     my $ref = [ ];
-    my $upeer = uc $peer;
-    push @$ref, $_ for keys %{ $self->{state}{peers}{$upeer}{users} };
+    push @$ref, $_ for keys %{ $self->{state}{sids}{$sid}{uids} };
 
-    for my $server (keys %{ $self->{state}{peers}{$upeer}{peers} }) {
-        push @$ref, $_ for $self->_state_server_squit($server);
+    for my $psid (keys %{ $self->{state}{sids}{$sid}{sids} }) {
+        push @$ref, $_ for $self->_state_server_squit($psid);
     }
 
+    my $rec = delete $self->{state}{sids}{$sid};
+    my $upeer = uc $rec->{name};
+    my $me = uc $self->server_name();
     delete $self->{state}{peers}{$upeer};
-    delete $self->{state}{peers}{uc $self->server_name()}{peers}{$upeer};
+    delete $self->{state}{peers}{$me}{peers}{$upeer};
+    delete $self->{state}{peers}{$me}{sids}{$sid};
     return @$ref if wantarray;
     return $ref;
 }
