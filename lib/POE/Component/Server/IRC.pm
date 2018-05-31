@@ -6338,10 +6338,11 @@ sub _daemon_peer_joins {
     return $ref;
 }
 
-sub _daemon_peer_mode {
+sub _daemon_peer_tmode {
     my $self    = shift;
     my $peer_id = shift || return;
     my $uid     = shift || return;
+    my $ts      = shift;
     my $chan    = shift;
     my $server  = $self->server_name();
     my $sid     = $self->server_sid();
@@ -6354,6 +6355,9 @@ sub _daemon_peer_mode {
             last SWITCH;
         }
         my $record = $self->{state}{chans}{uc_irc($chan)};
+        if ( $ts > $record->{ts} ) {
+            last SWITCH;
+        }
         $chan = $record->{name};
         my $full;
         $full = $self->state_uid_full($uid)
@@ -6490,7 +6494,7 @@ sub _daemon_peer_mode {
             $self->send_output(
                 {
                     prefix   => $uid,
-                    command  => 'MODE',
+                    command  => 'TMODE',
                     colonify => 0,
                     params   => [
                         $record->{name},
