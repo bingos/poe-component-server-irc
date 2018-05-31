@@ -629,7 +629,9 @@ sub _cmd_from_peer {
             last SWITCH;
         }
 
-        if ($cmd eq 'MODE' && $self->state_nick_exists($params->[0])) {
+        # Chanmode and umode have distinct commands now
+        # No need for check, MODE is always umode
+        if ($cmd eq 'MODE') {
             $method = '_daemon_peer_umode';
         }
 
@@ -4392,9 +4394,9 @@ sub _daemon_cmd_umode {
         my $set = gen_mode_change($previous, $record->{umode});
         if ($pset && !$peer_ignore ) {
             my $hashref = {
-                prefix  => $nick,
+                prefix  => $record->{uid},
                 command => 'MODE',
-                params  => [$nick, $pset],
+                params  => [$record->{uid}, $pset],
             };
             $self->send_output(
                 $hashref,
@@ -4489,7 +4491,16 @@ sub _daemon_cmd_topic {
                 time,
             ];
         }
-        $self->_send_output_to_channel(
+        $self->send_output(
+            {
+                prefix  => $self->state_user_uid($nick),
+                command => 'TOPIC',
+                params  => [$chan_name, $args->[1]],
+            },
+            $self->_state_connected_peers(),
+        );
+
+        $self->_send_output_channel_local(
             $args->[0],
             {
                 prefix  => $self->state_user_full($nick),
@@ -6525,11 +6536,10 @@ sub _daemon_peer_umode {
     my $self        = shift;
     my $peer_id     = shift || return;
     my $prefix      = shift || return;
-    my $nick        = shift || return;
+    my $uid         = shift || return;
     my $umode       = shift;
-    my $server      = $self->server_name();
     my $ref         = [ ];
-    my $record      = $self->{state}{users}{uc_irc($nick)};
+    my $record      = $self->{state}{uids}{$uid};
     my $parsed_mode = parse_mode_line($umode);
 
     while (my $mode = shift @{ $parsed_mode->{modes} }) {
@@ -6553,13 +6563,13 @@ sub _daemon_peer_umode {
         {
             prefix  => $prefix,
             command => 'MODE',
-            params  => [$nick, $umode],
+            params  => [$uid, $umode],
         },
         grep { $_ ne $peer_id } $self->_state_connected_peers(),
     );
     $self->send_event(
         "daemon_umode",
-        $self->state_user_full($nick),
+        $self->state_user_full($uid),
         $umode,
     );
 
@@ -6950,7 +6960,7 @@ sub _daemon_peer_message {
 sub _daemon_peer_topic {
     my $self    = shift;
     my $peer_id = shift || return;
-    my $nick    = shift || return;
+    my $uid     = shift || return;
     my $server  = $self->server_name();
     my $ref     = [ ];
     my $args    = [ @_ ];
@@ -6963,18 +6973,30 @@ sub _daemon_peer_topic {
         if (!$self->state_chan_exists($args->[0])) {
             last SWITCH;
         }
-        my $chan_name = $self->_state_chan_name($args->[0]);
         my $record = $self->{state}{chans}{uc_irc($args->[0])};
-        $record->{topic}
-            = [$args->[1], $self->state_user_full($nick), time];
-        $self->_send_output_to_channel(
-            $args->[0],
+        my $chan_name = $record->{name};
+        if ( $args->[1] ) {
+          $record->{topic}
+            = [$args->[1], $self->state_user_full($uid), time];
+        }
+        else {
+          delete $record->{topic};
+        }
+        $self->send_output(
             {
-                prefix  => $self->state_user_full($nick),
+                prefix  => $uid,
                 command => 'TOPIC',
                 params  => [$chan_name, $args->[1]],
             },
-            $peer_id,
+            grep { $_ ne $peer_id } $self->_state_connected_peers(),
+        );
+        $self->_send_output_channel_local(
+            $chan_name,
+            {
+                prefix  => $self->state_user_full($uid),
+                command => 'TOPIC',
+                params  => [$chan_name, $args->[1]],
+            },
         );
     }
 
@@ -8680,8 +8702,7 @@ sub _send_output_channel_local {
     return if !$output;
     my $sid = $self->server_sid();
 
-    # TODO: $poscap and $negcap stuff
-
+    my $is_msg = ( $output->{command} =~ m!^(PRIVMSG|NOTICE)$! ? 1 : 0 );
     my $chanrec = $self->{state}{chans}{uc_irc($channel)};
     my @targs;
     UID: foreach my $uid ( keys %{ $chanrec->{users} } ) {
@@ -8703,13 +8724,15 @@ sub _send_output_channel_local {
       if ( $negcap ) {
         next UID if $self->{state}{uids}{$uid}{caps}{$negcap};
       }
+      if ( $is_msg && $self->{state}{uids}{$uid}{umode} =~ m!D! ) { # +D 'deaf'
+        next UID;
+      }
       # Default
       push @targs, $route_id;
     }
 
     $self->send_output($output,@targs);
 
-    my $is_msg = ( $output->{command} =~ m!^(PRIVMSG|NOTICE)$! ? 1 : 0 );
     my $spoofs = grep { $_ eq 'spoofed' } @targs;
 
     $self->send_event(
