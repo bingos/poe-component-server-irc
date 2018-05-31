@@ -5,7 +5,7 @@ use warnings;
 use Carp qw(carp croak);
 use IRC::Utils qw(uc_irc parse_mode_line unparse_mode_line normalize_mask
                   matches_mask gen_mode_change is_valid_nick_name
-                  is_valid_chan_name);
+                  is_valid_chan_name has_color has_formatting);
 use List::Util qw(sum);
 use POE;
 use POE::Component::Server::IRC::Common qw(chkpasswd);
@@ -149,7 +149,7 @@ sub IRCD_disconnected {
     return PCSI_EAT_CLIENT if !$self->_connection_exists($conn_id);
 
     if ($self->_connection_is_peer($conn_id)) {
-        my $peer = $self->{state}{conns}{$conn_id}{name};
+        my $peer = $self->{state}{conns}{$conn_id}{sid};
         $self->send_output(
             @{ $self->_daemon_peer_squit($conn_id, $peer, $errstr) }
         );
@@ -663,7 +663,7 @@ sub _cmd_from_client {
         if ($cmd eq 'QUIT') {
             $self->_terminate_conn_error(
                 $wheel_id,
-                ($pcount ? qq{"$params->[0]"} : 'Client Quit'),
+                ($pcount ? qq{Quit: "$params->[0]"} : 'Client Quit'),
             );
             last SWITCH;
         }
@@ -1091,6 +1091,11 @@ sub _daemon_cmd_message {
             if ($channel && $self->_state_user_banned($nick, $channel)
                     && !$self->state_user_chan_mode($nick, $channel)) {
                 push @$ref, ['404', $channel];
+                next LOOP;
+            }
+            if ($channel && $self->state_chan_mode_set($channel, 'c')
+                    && ( has_color($args->[1]) || has_formatting($args->[1]) ) ){
+                push @$ref, ['408', $channel];
                 next LOOP;
             }
             if ($channel) {
@@ -3573,7 +3578,7 @@ sub _daemon_cmd_mode {
         my $mode_count = 0;
 
         while (my $mode = shift @{ $parsed_mode->{modes} }) {
-            if ($mode !~ /[eIbklimnpstohv]/) {
+            if ($mode !~ /[ceIbklimnpstohv]/) {
                 push @$ref, [
                     '472',
                     (split //, $mode)[1],
@@ -3936,10 +3941,6 @@ sub _daemon_cmd_join {
                     $route_id,
                     (ref $_ eq 'ARRAY' ? @$_ : $_),
                 ) for $self->_daemon_cmd_names($nick, $channel);
-                $self->_send_output_to_client(
-                    $route_id,
-                    (ref $_ eq 'ARRAY' ? @$_ : $_ ),
-                ) for $self->_daemon_cmd_topic($nick, $channel);
                 next LOOP;
             }
             # Numpty user is already on channel
@@ -4039,13 +4040,10 @@ sub _daemon_cmd_part {
             push @$ref, ['442', $chan];
             last SWITCH;
         }
-        $chan = uc_irc($chan);
+
+        $chan = $self->_state_chan_name($chan);
         my $uid = $self->state_user_uid($nick);
-        delete $self->{state}{chans}{$chan}{users}{$uid};
-        delete $self->{state}{uids}{$uid}{chans}{$chan};
-        if (! keys %{ $self->{state}{chans}{$chan}{users} }) {
-            delete $self->{state}{chans}{$chan};
-        }
+
         $self->send_output(
             {
                 prefix  => $uid,
@@ -4062,6 +4060,13 @@ sub _daemon_cmd_part {
                 params  => [$chan, ($args->[0] || $nick)],
             },
         );
+
+        $chan = uc_irc($chan);
+        delete $self->{state}{chans}{$chan}{users}{$uid};
+        delete $self->{state}{uids}{$uid}{chans}{$chan};
+        if (! keys %{ $self->{state}{chans}{$chan}{users} }) {
+            delete $self->{state}{chans}{$chan};
+        }
     }
 
     return @$ref if wantarray;
@@ -4565,20 +4570,20 @@ sub _daemon_peer_squit {
     my $ref     = [ ];
     my $args    = [ @_ ];
     my $count   = @$args;
-    return if !$self->state_peer_exists($args->[0]);
+    return if !$self->state_sid_exists($args->[0]);
 
     SWITCH: {
-        if ($peer_id ne $self->_state_peer_route($args->[0])) {
+        if ($peer_id ne $self->_state_sid_route($args->[0])) {
             $self->send_output(
                 {
                     command => 'SQUIT',
                     params  => $args,
                 },
-                $self->_state_peer_route($args->[0]),
+                $self->_state_sid_route($args->[0]),
             );
             last SWITCH;
         }
-        if ($peer_id eq $self->_state_peer_route($args->[0])) {
+        if ($peer_id eq $self->_state_sid_route($args->[0])) {
             $self->send_output(
                 {
                     command => 'SQUIT',
@@ -8587,7 +8592,7 @@ EOF
         405 => [1, "You have joined too many channels"],
         406 => [1, "There was no such nickname"],
         407 => [1, "Too many targets"],
-        408 => [1, "No such service"],
+        408 => [1, "You cannot use control codes on this channel"],
         409 => [0, "No origin specified"],
         410 => [1, "Invalid CAP subcommand"],
         411 => [0, "No recipient given (%s)"],
@@ -8643,7 +8648,7 @@ EOF
         CALLERID  => undef,
         CHANTYPES => '#&',
         PREFIX    => '(ohv)@%+',
-        CHANMODES => 'eIb,k,l,imnpst',
+        CHANMODES => 'eIb,k,l,cimnpst',
         STATUSMSG => '@%+',
         DEAF      => 'D',
         MAXLIST   => 'beI:' . $self->{config}{MAXBANS},

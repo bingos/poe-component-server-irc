@@ -688,7 +688,7 @@ sub _disconnected {
     $self->send_event(
         "$self->{prefix}disconnected",
         $wheel_id,
-        $errstr || 'Client Quit',
+        $errstr || 'Remote host closed the connection',
     );
 
     if ( $^O =~ /(cygwin|MSWin)/ ) {
