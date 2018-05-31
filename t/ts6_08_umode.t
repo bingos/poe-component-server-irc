@@ -159,77 +159,65 @@ sub client_input {
   my $prefix = $in->{prefix};
   my $cmd    = $in->{command};
   my $params = $in->{params};
+  if ( $cmd eq 'MODE' && $prefix =~ m'^bobbins' && $params->[1] eq '+i' ) {
+    $poe_kernel->post( $sender, 'send_to_server', { command => 'MODE', params => [ 'bobbins', '+G' ] } );
+    return;
+  }
   if ( $cmd eq 'MODE' && $prefix =~ m'^bobbins' ) {
-    $poe_kernel->post( $sender, 'send_to_server', { command => 'PING', colonify => 0  } );
+    pass($cmd);
+    like( $prefix, qr'^bobbins!', 'The prefix is correct: bobbins' );
+    is( $params->[0], 'bobbins', 'The first arg is correct: bobbins' );
+    is( $params->[1], '+G', 'The UMODE set was +G' );
+    $poe_kernel->post( $sender, 'send_to_server', { command => 'MODE', params => [ 'bobbins' ] } );
     return;
   }
-  if ( $cmd eq '409' ) {
-    pass('Got a 409');
-    is($params->[0], 'bobbins', 'They know my name');
-    is($params->[1], 'No origin specified','There was no origin');
-    $poe_kernel->post( $sender, 'send_to_server', { command => 'PING', params => [ 'rubbish', 'zeppo.server.irc' ] } );
+  if ( $cmd eq '221' ) {
+    pass('IRC' . $cmd);
+    is( $params->[0], 'bobbins', 'Correct NICK in 221' );
+    is( $params->[1], '+Gi', 'UMODE should be +Gi' );
+    $poe_kernel->post( $sender, 'send_to_server', { command => 'MODE', params => [ 'bobbins', '+t' ] } );
     return;
   }
-  if ( $cmd eq '402' ) {
-    pass('Got a 402');
-    is($params->[0], 'bobbins', 'They know my name');
-    is($params->[1], 'zeppo.server.irc', 'The servername we sent');
-    is($params->[2], 'No such server','No such server');
-    $poe_kernel->post( $sender, 'send_to_server', { command => 'PING', params => [ 'rubbish', 'groucho.server.irc' ] } );
-    return;
-  }
-  # :groucho.server.irc PONG groucho.server.irc :bobbins
-  if ( $cmd eq 'PONG' ) {
-    pass('Received a PONG');
-    is($prefix,'groucho.server.irc','The prefix is: groucho.server.irc');
-    is($params->[0],'groucho.server.irc','The servername is correct: groucho.server.irc');
-    is($params->[1],'bobbins','My name is correct: bobbins');
+  if ( $cmd eq '501' ) {
+    pass('IRC' . $cmd);
+    is( $params->[0], 'bobbins', 'Correct NICK in 501' );
+    is( $params->[1], 'Unknown MODE flag', 'Unknown MODE flag' );
     $poe_kernel->post( $sender, 'terminate' );
+    return;
   }
   return;
 }
 
 sub groucho_input {
   my ($heap,$sender,$in) = @_[HEAP,SENDER,ARG0];
+  #diag($in->{raw_line}, "\n");
   my $prefix = $in->{prefix};
   my $cmd    = $in->{command};
   my $params = $in->{params};
-  if ( $cmd eq 'PONG' ) {
-    if ( $params->[1] eq '7UP' ) {
-      pass('PONG reply from ' . $params->[0]);
-    }
-  }
-  if ( $cmd eq 'PING' ) {
-    if ( $params->[1] eq '4AK' ) {
-      pass('PING for 4AK');
-      is( $prefix, '9T9AAAAAA', 'Ping is from 9T9AAAAAA' );
-      $poe_kernel->post( $sender, 'send_to_server', { prefix => '4AK', command => 'PONG', params => [ 'fake.server.irc', $prefix ], colonify => 1 } );
-    }
-    if ( $params->[1] eq '7UP' ) {
-      pass('PING for 7UP');
-      is( $prefix, '1FUAAAAAA', 'Ping is from 1FUAAAAAA' );
-      $poe_kernel->post( $sender, 'send_to_server', { prefix => '7UP', command => 'PONG', params => [ 'groucho.server.irc', $prefix ], colonify => 1 } );
-    }
+  if ( $cmd eq 'MODE' ) {
+    pass($cmd);
+    is( $prefix, '1FUAAAAAA', 'The prefix is correct: 1FUAAAAAA' );
+    is( $params->[0], '1FUAAAAAA', 'The first arg is correct: 1FUAAAAAA' );
+    is( $params->[1], '+G', 'The UMODE set was +G' );
+    is( $prefix, $params->[0], 'Prefix should match first arg for UMODE' );
+    return;
   }
   return;
 }
 
 sub harpo_input {
   my ($heap,$in) = @_[HEAP,ARG0];
+  #diag($in->{raw_line}, "\n");
   my $prefix = $in->{prefix};
   my $cmd    = $in->{command};
   my $params = $in->{params};
-  if ( $cmd eq 'PONG' ) {
-    if ( $params->[1] eq '9T9' ) {
-      pass('PONG reply from ' . $params->[0]);
-      return;
-    }
-    if ( $params->[1] =~ m!^9T9! ) {
-      is( $params->[1], '9T9AAAAAA', 'The PONG is for 9T9AAAAAA' );
-      is( $prefix, '4AK', 'The PONG is from the correct SID: 4AK' );
-      #$poe_kernel->post( $_[SENDER], 'terminate' );
-      $poe_kernel->yield('_launch_client');
-    }
+  if ( $cmd eq 'MODE' ) {
+    pass($cmd);
+    is( $prefix, '1FUAAAAAA', 'The prefix is correct: 1FUAAAAAA' );
+    is( $params->[0], '1FUAAAAAA', 'The first arg is correct: 1FUAAAAAA' );
+    is( $params->[1], '+G', 'The UMODE set was +G' );
+    is( $prefix, $params->[0], 'Prefix should match first arg for UMODE' );
+    return;
   }
   return;
 }
@@ -271,9 +259,7 @@ sub ircd_daemon_eob {
     fail('No such server expected');
   }
   if ( $heap->{eob} >= 3 ) {
-    # Got 3 EOB so do PING test
-    # ->:7UPAAAAAA PING llestr :9T9
-    $kernel->post( 'harpo', 'send_to_server', { prefix => '9T9AAAAAA', command => 'PING', params => [ 'harpo', '4AK' ], colonify => 1 } );
+      $poe_kernel->yield('_launch_client');
   }
   return;
 }

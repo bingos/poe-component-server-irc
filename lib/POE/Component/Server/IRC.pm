@@ -699,13 +699,8 @@ sub _cmd_from_client {
                 last SWITCH;
             }
 
-            my $modestring = join('', @{ $params }[1..$#{ $params }]);
-            $modestring =~ s/\s+//g;
-            $modestring =~ s/[^a-zA-Z+-]+//g;
-            $modestring =~ s/[^DGglwiozl+-]+//g;
-            $modestring = unparse_mode_line($modestring);
-            $self->_send_output_to_client($wheel_id, $_)
-                for $self->_daemon_cmd_umode($nick, $modestring);
+            $self->_send_output_to_client($wheel_id, (ref $_ eq 'ARRAY' ? @{ $_ } : $_) )
+                for $self->_daemon_cmd_umode($nick, @{ $params }[1..$#{ $params }]);
             last SWITCH;
         }
 
@@ -4332,12 +4327,13 @@ sub _daemon_cmd_invite {
 sub _daemon_cmd_umode {
     my $self   = shift;
     my $nick   = shift || return;
-    my $umode  = shift;
+    my $args   = [ @_ ];
+    my $count  = @$args;
     my $server = $self->server_name();
     my $ref    = [ ];
     my $record = $self->{state}{users}{uc_irc($nick)};
 
-    if (!$umode) {
+    if (!$count) {
         push @$ref, {
             prefix  => $server,
             command => '221',
@@ -4345,6 +4341,14 @@ sub _daemon_cmd_umode {
         };
     }
     else {
+        my $modestring = join('', @$args);
+        $modestring =~ s/\s+//g;
+        my $cnt += $modestring =~ s/[^a-zA-Z+-]+//g;
+        $cnt += $modestring =~ s/[^DGglwiozl+-]+//g;
+
+        push @$ref, ['501'] if $cnt;
+
+        my $umode = unparse_mode_line($modestring);
         my $peer_ignore;
         my $parsed_mode = parse_mode_line($umode);
         my $route_id = $self->_state_user_route($nick);
@@ -4386,33 +4390,26 @@ sub _daemon_cmd_umode {
         }
 
         $record->{umode} = join '', sort split //, $record->{umode};
-        my $peerprev = $previous;
-        my $peerumode = $record->{umode};
-        $peerprev =~ s/[^aiow]//g;
-        $peerumode =~ s/[^aiow]//g;
-        my $pset = gen_mode_change($peerprev, $peerumode);
         my $set = gen_mode_change($previous, $record->{umode});
-        if ($pset && !$peer_ignore ) {
-            my $hashref = {
-                prefix  => $record->{uid},
-                command => 'MODE',
-                params  => [$record->{uid}, $pset],
-            };
-            $self->send_output(
-                $hashref,
-                $self->_state_connected_peers(),
-            );
-        }
         if ($set) {
+            my $full = $self->state_user_full($nick);
+            $self->send_output(
+                {
+                    prefix  => $record->{uid},
+                    command => 'MODE',
+                    params  => [$record->{uid}, $set],
+                },
+                $self->_state_connected_peers(),
+            ) if !$peer_ignore;
             my $hashref = {
-                prefix  => $nick,
+                prefix  => $full,
                 command => 'MODE',
                 params  => [$nick, $set],
             };
             $self->send_event(
                 "daemon_umode",
-                $self->state_user_full($nick),
-                $set
+                $full,
+                $set,
             ) if !$peer_ignore;
             push @$ref, $hashref;
         }
