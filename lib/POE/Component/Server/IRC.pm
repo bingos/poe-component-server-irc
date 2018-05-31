@@ -317,7 +317,7 @@ sub _client_register {
                 $nick,
                 $server,
                 $version,
-                'Dilowz',
+                'DGiglow',
                 'biklmnopstveIh',
                 'bkloveIh',
             ],
