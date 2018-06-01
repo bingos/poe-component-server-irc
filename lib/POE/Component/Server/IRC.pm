@@ -567,16 +567,17 @@ sub _cmd_from_peer {
         if ($cmd =~ /\d{3}/ && $params->[0] !~ m!^$sid!) {
             $self->send_output(
                 $input,
-                $self->_state_uid_route($params->[0])
+                $self->_state_uid_route($params->[0]),
             );
             last SWITCH;
         }
-        if ($cmd =~ /\d{3}/ && $params->[0] !~ m!^$sid!) {
-            $input->{prefix} = $self->server_name();
-            $input->{params}[0] = $self->state_user_nick($params->[0]);
+        if ($cmd =~ /\d{3}/ && $params->[0] =~ m!^$sid!) {
+            $input->{prefix} = $self->_state_sid_name($prefix);
+            my $uid = $params->[0];
+            $input->{params}[0] = $self->state_user_nick($uid);
             $self->send_output(
                 $input,
-                $self->_state_uid_route($params->[0])
+                $self->_state_uid_route($uid),
             );
             last SWITCH;
         }
@@ -3309,6 +3310,20 @@ sub _daemon_cmd_whois {
     return $ref;
 }
 
+sub _daemon_peer_whois {
+    my $self   = shift;
+    my $uid    = shift || return;
+    my $server = $self->server_name();
+    my $ref    = [ ];
+    my ($first, $second) = @_;
+
+    #SWITCH: {
+    #}
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
 sub _daemon_do_whois {
     my $self   = shift;
     my $uid    = shift || return;
@@ -3425,7 +3440,7 @@ sub _daemon_do_whois {
      push @$ref, {
         prefix  => $sid,
         command => '318',
-        params  => [$uid, $query, 'End of /WHOIS list.'],
+        params  => [$uid, $record->{nick}, 'End of /WHOIS list.'],
      };
     return @$ref if wantarray;
     return $ref;
@@ -5714,6 +5729,7 @@ sub _daemon_peer_joins {
     # We have to handle either SJOIN or JOIN
     # :<SID> SJOIN <TS> <CHANNAME> +<CHANMODES> :<UIDS>
     # :<UID>  JOIN <TS> <CHANNAME> +
+
     SWITCH: {
         if ($cmd eq 'SJOIN' && ( !$count || $count < 4) ) {
             last SWITCH;
@@ -7439,10 +7455,10 @@ sub _state_send_burst {
         # TODO: may as well add TBURST gathering here if applicable
         #       but actually send after MODE burst
         my $chanrec = $self->{state}{chans}{$chan};
-        my @nicks = map { $_->[1] }
+        my @uids = map { $_->[1] }
             sort { $a->[0] cmp $b->[0] }
             map { my $w = $_; $w =~ tr/@%+/ABC/; [$w, $_] }
-            $self->state_chan_list_prefixed($chan);
+            $self->state_chan_list_multi_prefixed($chan,'UIDS');
 
         my $arrayref2 = [
             $chanrec->{ts},
@@ -7450,12 +7466,12 @@ sub _state_send_burst {
             '+' . $chanrec->{mode},
             ($chanrec->{ckey} || ()),
             ($chanrec->{climit} || ()),
-            join ' ', @nicks,
+            join ' ', @uids,
         ];
 
         $self->send_output(
             {
-                prefix  => $server,
+                prefix  => $sid,
                 command => 'SJOIN',
                 params  => $arrayref2,
             },
@@ -7466,15 +7482,15 @@ sub _state_send_burst {
         # Banlist|Exceptions|Invex
         my @output_modes;
         OUTER: for my $type (@lists) {
-            my $length = length($server) + 4 + length($chan) + 4;
+            my $length = length($sid) + 5 + length($chan) + 4;
             my @buffer = ( '', '' );
             INNER: for my $thing (keys %{ $chanrec->{$type} }) {
                 $thing = $chanrec->{$type}{$thing}[0];
                 if (length(join ' ', @buffer, $thing)+$length+1 > 510) {
                     $buffer[0] = '+' . $buffer[0];
                     push @output_modes, {
-                        prefix   => $server,
-                        command  => 'MODE',
+                        prefix   => $sid,
+                        command  => 'BMASK',
                         colonify => 0,
                         params   => [
                             $chanrec->{name},
@@ -8037,11 +8053,12 @@ sub state_chan_list_prefixed {
 sub state_chan_list_multi_prefixed {
     my $self = shift;
     my $chan = shift || return;
+    my $flag = shift;
     return if !$self->state_chan_exists($chan);
     my $record = $self->{state}{chans}{uc_irc($chan)};
 
     return map {
-        my $n = $self->{state}{uids}{$_}{nick};
+        my $n = ( !$flag ? $self->{state}{uids}{$_}{nick} : $_ );
         my $m = $record->{users}{$_};
         my $p = '';
         $p .= '@' if $m =~ /o/;
