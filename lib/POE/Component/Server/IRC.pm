@@ -5952,7 +5952,6 @@ sub _daemon_peer_joins {
                  {
                     prefix  => $server,
                     command => 'TOPIC',
-                    params  => ,
                     params  => [$chan, ''],
                  },
                  @local_users,
