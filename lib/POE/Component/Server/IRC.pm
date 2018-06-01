@@ -7480,22 +7480,24 @@ sub _state_send_burst {
 
         # TODO: MODE burst
         # Banlist|Exceptions|Invex
+        # :<SID> BMASK <TS> <CHANNAME> <TYPE> :<MASKS>
         my @output_modes;
         OUTER: for my $type (@lists) {
             my $length = length($sid) + 5 + length($chan) + 4;
             my @buffer = ( '', '' );
             INNER: for my $thing (keys %{ $chanrec->{$type} }) {
                 $thing = $chanrec->{$type}{$thing}[0];
-                if (length(join ' ', @buffer, $thing)+$length+1 > 510) {
+                if (length(join ' ', '1', $buffer[1], $thing)+$length+1 > 510) {
                     $buffer[0] = '+' . $buffer[0];
                     push @output_modes, {
                         prefix   => $sid,
                         command  => 'BMASK',
-                        colonify => 0,
+                        colonify => 1,
                         params   => [
+                            $chanrec->{ts},
                             $chanrec->{name},
-                            $buffer[0],
-                            split /\s+/, $buffer[1],
+                            $map{$type},
+                            $buffer[1],
                         ],
                     };
                     $buffer[0] = '+' . $map{$type};
@@ -7514,17 +7516,34 @@ sub _state_send_burst {
             }
 
             push @output_modes, {
-                prefix   => $server,
-                command  => 'MODE',
-                colonify => 0,
+                prefix   => $sid,
+                command  => 'BMASK',
+                colonify => 1,
                 params   => [
+                    $chanrec->{ts},
                     $chanrec->{name},
-                    $buffer[0],
-                    split /\s+/, $buffer[1],
+                    $map{$type},
+                    $buffer[1],
                 ],
-            } if $buffer[0];
+            } if $buffer[1];
         }
         $self->send_output($_, $conn_id) for @output_modes;
+
+        if ( $tburst && $chanrec->{topic} ) {
+            $self->send_output(
+                {
+                    prefix  => $sid,
+                    command => 'TBURST',
+                    params  => [
+                        $chanrec->{ts},
+                        $chanrec->{name},
+                        @{ $chanrec->{topic} }[2,1,0],
+                    ],
+                    colonify => 1,
+                },
+                $conn_id,
+            );
+        }
     }
 
     # EOB for each connected peer if EOB supported
