@@ -2282,16 +2282,18 @@ sub _daemon_cmd_kill {
             push @$ref, ['401', $args->[0]];
             last SWITCH;
         }
-        my $target = $self->state_user_nick($args->[0]);
+        my $target  = $self->state_user_nick($args->[0]);
+        my $targuid = $self->state_user_uid($target);
+        my $uid     = $self->state_user_uid($nick);
         my $comment = $args->[1] || '<No reason given>';
         if ($self->_state_is_local_user($target)) {
             my $route_id = $self->_state_user_route($target);
             $self->send_output(
                 {
-                    prefix  => $nick,
+                    prefix  => $uid,
                     command => 'KILL',
                     params  => [
-                        $target,
+                        $targuid,
                         join('!', $server, $nick )." ($comment)",
                     ]
                 },
@@ -2315,13 +2317,13 @@ sub _daemon_cmd_kill {
             }
         }
         else {
-            $self->{state}{users}{uc_irc($target)}{killed} = 1;
+            $self->{state}{uids}{$targuid}{killed} = 1;
             $self->send_output(
                 {
-                    prefix  => $nick,
+                    prefix  => $uid,
                     command => 'KILL',
                     params  => [
-                        $target,
+                        $targuid,
                         join('!', $server, $nick )." ($comment)",
                     ],
                 },
@@ -2329,7 +2331,7 @@ sub _daemon_cmd_kill {
             );
             $self->send_output(
                 @{ $self->_daemon_peer_quit(
-                    $target,
+                    $targuid,
                     "Killed ($nick ($comment))"
                 )}
             );
