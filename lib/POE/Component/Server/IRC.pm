@@ -603,7 +603,7 @@ sub _cmd_from_peer {
             last SWITCH;
         }
 
-        if ($cmd =~ /^(WHOIS|VERSION|TIME|NAMES|LINKS|ADMIN|INFO|MOTD|SQUIT)$/i ) {
+        if ($cmd =~ /^(VERSION|TIME|NAMES|LINKS|ADMIN|INFO|MOTD|SQUIT)$/i ) {
             my $client_method = '_daemon_cmd_' . lc $cmd;
             $self->_send_output_to_client(
                 $conn_id,
@@ -2454,7 +2454,7 @@ sub _daemon_cmd_away {
         $record->{away} = $msg;
         $self->send_output(
             {
-                prefix   => $nick,
+                prefix   => $record->{nick},
                 command  => 'AWAY',
                 params   => [$msg],
                 colonify => 0,
@@ -2530,9 +2530,9 @@ sub _daemon_cmd_info {
         if ($target && uc $server ne uc $target) {
             $self->send_output(
                 {
-                    prefix  => $nick,
+                    prefix  => $self->state_user_uid($nick),
                     command => 'INFO',
-                    params  => [$self->_state_peer_name($target)],
+                    params  => [$self->_state_peer_sid($target)],
                 },
                 $self->_state_peer_route($target),
             );
@@ -2573,9 +2573,9 @@ sub _daemon_cmd_version {
         if ($target && uc $server ne uc $target) {
             $self->send_output(
                 {
-                    prefix  => $nick,
+                    prefix  => $self->state_user_uid($nick),
                     command => 'VERSION',
-                    params  => [$self->_state_peer_name($target)],
+                    params  => [$self->_state_peer_sid($target)],
                 },
                 $self->_state_peer_route($target)
             );
@@ -2615,9 +2615,9 @@ sub _daemon_cmd_admin {
         if ($target && uc $server ne uc $target) {
             $self->send_output(
                 {
-                    prefix  => $nick,
+                    prefix  => $self->state_user_uid($nick),
                     command => 'ADMIN',
-                    params  => [$self->_state_peer_name($target)],
+                    params  => [$self->_state_peer_sid($target)],
                 },
                 $self->_state_peer_route($target),
             );
@@ -2678,9 +2678,9 @@ sub _daemon_cmd_time {
         if ($target && uc $server ne uc $target) {
             $self->send_output(
                 {
-                    prefix  => $nick,
+                    prefix  => $self->state_user_uid($nick),
                     command => 'TIME',
-                    params  => [$self->_state_peer_name($target)],
+                    params  => [$self->_state_peer_sid($target)],
                 },
                 $self->_state_peer_route($target),
             );
@@ -2706,9 +2706,10 @@ sub _daemon_cmd_users {
     my $self   = shift;
     my $nick   = shift || return;
     my $server = $self->server_name();
+    my $sid    = $self->server_sid();
     my $ref    = [ ];
-    my $global = keys %{ $self->{state}{users} };
-    my $local  = keys %{ $self->{state}{peers}{uc $server}{users} };
+    my $global = keys %{ $self->{state}{uids} };
+    my $local  = keys %{ $self->{state}{sids}{$sid}{uids} };
 
     push @$ref, {
         prefix  => $server,
@@ -2738,13 +2739,14 @@ sub _daemon_cmd_lusers {
     my $self       = shift;
     my $nick       = shift || return;
     my $server     = $self->server_name();
+    my $sid        = $self->server_sid();
     my $ref        = [ ];
     my $invisible  = $self->{state}{stats}{invisible};
     my $users      = keys(%{ $self->{state}{users} }) - $invisible;
     my $servers    = keys %{ $self->{state}{peers} };
     my $chans      = keys %{ $self->{state}{chans} };
-    my $local      = keys %{ $self->{state}{peers}{uc $server}{users} };
-    my $peers      = keys %{ $self->{state}{peers}{uc $server}{peers} };
+    my $local      = keys %{ $self->{state}{sids}{$sid}{uids} };
+    my $peers      = keys %{ $self->{state}{sids}{$sid}{sids} };
     my $totalconns = $self->{state}{stats}{conns_cumlative};
     my $mlocal     = $self->{state}{stats}{maxlocal};
     my $conns      = $self->{state}{stats}{maxconns};
@@ -2814,9 +2816,9 @@ sub _daemon_cmd_motd {
         if ($target && uc $server ne uc $target) {
             $self->send_output(
                 {
-                    prefix  => $nick,
+                    prefix  => $self->state_user_uid($nick),
                     command => 'MOTD',
-                    params  => [$self->_state_peer_name($target)],
+                    params  => [$self->_state_peer_sid($target)],
                 },
                 $self->_state_peer_route($target),
             );
@@ -2881,11 +2883,11 @@ sub _daemon_cmd_stats {
         if ($target && uc $server ne uc $target) {
             $self->send_output(
                 {
-                    prefix  => $nick,
+                    prefix  => $self->state_user_uid($nick),
                     command => 'STATS',
                     params  => [
                         $char,
-                        $self->_state_peer_name($target),
+                        $self->_state_peer_sid($target),
                     ],
                 },
                 $self->_state_peer_route($target),
@@ -3264,140 +3266,167 @@ sub _daemon_cmd_whois {
         my $target;
         $query = $first if !$second;
         $query = $second if $second;
-        $target = $first if $second && uc $first ne uc$server;
+        $target = $first if $second && uc $first ne uc $server;
         if ($target && !$self->state_peer_exists($target)) {
             push @$ref, ['402', $target];
             last SWITCH;
         }
         if ($target) {
-            $self->send_output(
-                {
-                    prefix  => $nick,
-                    command => 'WHOIS',
-                    params  => [
-                        $self->_state_peer_name($target),
-                        $second,
-                    ],
-                },
-                $self->_state_peer_route($target),
-            );
-            last SWITCH;
         }
         # Okay we got here *phew*
         if (!$self->state_nick_exists($query)) {
             push @$ref, ['401', $query];
         }
         else {
-            my $record = $self->{state}{users}{uc_irc($query)};
-            push @$ref, {
-                prefix  => $server,
-                command => '311',
-                params  => [
-                    $nick,
-                    $record->{nick},
-                    $record->{auth}{ident},
-                    $record->{auth}{hostname},
-                    '*',
-                    $record->{ircname},
-                ],
-            };
-            my @chans;
-            LOOP: for my $chan (keys %{ $record->{chans} }) {
-                if ($self->{state}{chans}{$chan}{mode} =~ /[ps]/
-                        && !$self->state_is_chan_member($nick, $chan)) {
-                    next LOOP;
-                }
-                my $prefix = '';
-                $prefix .= '@' if $record->{chans}{$chan} =~ /o/;
-                $prefix .= '%' if $record->{chans}{$chan} =~ /h/;
-                $prefix .= '+' if $record->{chans}{$chan} =~ /v/;
-                push @chans, $prefix . $self->{state}{chans}{$chan}{name};
-            }
-            if (@chans) {
-                my $buffer = '';
-                my $length = length($server) + 3 + length($nick)
-                    + length($record->{nick}) + 7;
-
-                LOOP2: for my $chan (@chans) {
-                    if (length(join ' ', $buffer, $chan) + $length > 510) {
-                        push @$ref, {
-                            prefix  => $server,
-                            command => '319',
-                            params  => [$nick, $record->{nick}, $buffer],
-                        };
-                        $buffer = $chan;
-                        next LOOP2;
-                    }
-                    if ($buffer) {
-                        $buffer = join ' ', $buffer, $chan;
-                    }
-                    else {
-                        $buffer = $chan;
-                    }
-                }
-                push @$ref, {
-                    prefix  => $server,
-                    command => '319',
-                    params  => [$nick, $record->{nick}, $buffer],
-                };
-            }
-            push @$ref, {
-                prefix  => $server,
-                command => '312',
-                params  => [
-                    $nick,
-                    $record->{nick},
-                    $record->{server},
-                    $self->_state_peer_desc($record->{server}),
-                ],
-            };
-            push @$ref, {
-                prefix  => $server,
-                command => '301',
-                params  => [
-                    $nick,
-                    $record->{nick},
-                    $record->{away},
-                ],
-            } if $record->{type} eq 'c' && $record->{away};
-            push @$ref, {
-                prefix  => $server,
-                command => '313',
-                params  => [$nick, $record->{nick}, 'is an IRC Operator'],
-            } if $record->{umode} && $record->{umode} =~ /o/;
-            if ($record->{type} eq 'c'
-                && ($self->server_config('whoisactually')
-                    or $self->state_user_is_operator($nick))) {
-                push @$ref, {
-                    prefix  => $server,
-                    command => '338',
-                    params  => [
-                        $nick,
-                        $record->{nick},
-                        $record->{socket}[0],
-                        'actually using host',
-                    ],
-                };
-            }
-            push @$ref, {
-                prefix  => $server,
-                command => '317',
-                params  => [
-                    $nick,
-                    $record->{nick},
-                    time - $record->{idle_time},
-                    $record->{conn_time},
-                    'seconds idle, signon time',
-                ],
-            } if $record->{type} eq 'c';
+          my $uid = $self->state_user_uid($nick);
+          my $who =  $self->state_user_uid($query);
+          if ( $target ) {
+             my $tsid = $self->_state_peer_sid($target);
+             if ( $who =~ m!^$tsid! ) {
+               $self->send_output(
+                  {
+                      prefix  => $self->state_user_uid($nick),
+                      command => 'WHOIS',
+                      params  => [
+                          $tsid,
+                          $query,
+                      ],
+                  },
+                  $self->_state_sid_route($tsid),
+               );
+               last SWITCH;
+             }
+          }
+          $ref = $self->_daemon_do_whois($uid,$who);
+          foreach my $reply ( @$ref ) {
+            $reply->{prefix} = $server;
+            $reply->{params}[0] = $nick;
+          }
         }
-        push @$ref, {
-            prefix  => $server,
-            command => '318',
-            params  => [$nick, $query, 'End of /WHOIS list.'],
-        };
     }
 
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _daemon_do_whois {
+    my $self   = shift;
+    my $uid    = shift || return;
+    my $sid    = $self->server_sid();
+    my $server = $self->server_name();
+    my $nicklen = $self->server_config('NICKLEN');
+    my $ref    = [ ];
+    my $query  = shift;
+
+    my $record = $self->{state}{uids}{$query};
+
+    push @$ref, {
+       prefix  => $sid,
+       command => '311',
+       params  => [
+          $uid,
+          $record->{nick},
+          $record->{auth}{ident},
+          $record->{auth}{hostname},
+          '*',
+          $record->{ircname},
+       ],
+    };
+    my @chans;
+    LOOP: for my $chan (keys %{ $record->{chans} }) {
+        if ($self->{state}{chans}{$chan}{mode} =~ /[ps]/
+              && !defined $self->{state}{chans}{$chan}{users}{$uid}) {
+              next LOOP;
+        }
+        my $prefix = '';
+        $prefix .= '@' if $record->{chans}{$chan} =~ /o/;
+        $prefix .= '%' if $record->{chans}{$chan} =~ /h/;
+        $prefix .= '+' if $record->{chans}{$chan} =~ /v/;
+        push @chans, $prefix . $self->{state}{chans}{$chan}{name};
+    }
+    if (@chans) {
+        my $buffer = '';
+        my $length = length($server) + 3 + $nicklen
+                    + length($record->{nick}) + 7;
+
+        LOOP2: for my $chan (@chans) {
+             if (length(join ' ', $buffer, $chan) + $length > 510) {
+                 push @$ref, {
+                    prefix  => $sid,
+                    command => '319',
+                    params  => [$uid, $record->{nick}, $buffer],
+                 };
+                 $buffer = $chan;
+                 next LOOP2;
+             }
+             if ($buffer) {
+                 $buffer = join ' ', $buffer, $chan;
+             }
+             else {
+                 $buffer = $chan;
+             }
+        }
+        push @$ref, {
+             prefix  => $sid,
+             command => '319',
+             params  => [$uid, $record->{nick}, $buffer],
+        };
+    }
+    push @$ref, {
+        prefix  => $sid,
+        command => '312',
+        params  => [
+             $uid,
+             $record->{nick},
+             $record->{server},
+             $self->_state_peer_desc($record->{server}),
+        ],
+    };
+    push @$ref, {
+        prefix  => $sid,
+        command => '301',
+        params  => [
+              $uid,
+              $record->{nick},
+              $record->{away},
+        ],
+    } if $record->{type} eq 'c' && $record->{away};
+    push @$ref, {
+        prefix  => $sid,
+        command => '313',
+        params  => [$uid, $record->{nick}, 'is an IRC Operator'],
+    } if $record->{umode} && $record->{umode} =~ /o/;
+    if ($record->{type} eq 'c'
+         && ($self->server_config('whoisactually')
+         or $self->{state}{uids}{$uid}{umode} =~ /o/)) {
+        push @$ref, {
+               prefix  => $sid,
+               command => '338',
+               params  => [
+                    $uid,
+                    $record->{nick},
+                    $record->{socket}[0],
+                    'actually using host',
+               ],
+        };
+     }
+     push @$ref, {
+         prefix  => $sid,
+         command => '317',
+         params  => [
+               $uid,
+               $record->{nick},
+               time - $record->{idle_time},
+               $record->{conn_time},
+               'seconds idle, signon time',
+         ],
+     } if $record->{type} eq 'c';
+
+     push @$ref, {
+        prefix  => $sid,
+        command => '318',
+        params  => [$uid, $query, 'End of /WHOIS list.'],
+     };
     return @$ref if wantarray;
     return $ref;
 }
@@ -5556,193 +5585,6 @@ sub _daemon_peer_nick {
             map{ $common->{$_} } keys %{ $common },
         );
         $self->send_event("daemon_nick", $full, $new);
-    }
-
-    return @$ref if wantarray;
-    return $ref;
-}
-
-sub _daemon_peer_nick_old {
-    my $self    = shift;
-    my $peer_id = shift || return;
-    my $prefix  = shift;
-    my $server  = $self->server_name();
-    my $ref     = [ ];
-    my $args    = [ @_ ];
-    my $count   = @$args;
-    my $peer    = $self->{state}{conns}{$peer_id}{name};
-    my $nicklen = $self->server_config('NICKLEN');
-
-    SWITCH: {
-        if (!$count || $count < 8 && !$prefix) {
-            $self->_terminate_conn_error(
-                $peer_id,
-                'Not enough arguments to server command.',
-            );
-            last SWITCH;
-        }
-        if ($prefix && $self->state_nick_exists($args->[0])) {
-            $self->send_output(
-                {
-                    prefix  => $server,
-                    command => 'KILL',
-                    params  => [$args->[0], "$server (Nick exists)"],
-                },
-                $peer_id,
-            );
-            my $unick = uc_irc($prefix);
-            $self->{state}{users}{$unick}{nick_collision} = 1;
-            $self->daemon_server_kill($prefix, 'Nick Collision', $peer_id);
-            last SWITCH;
-        }
-        if ($prefix && length($args->[0]) > $nicklen) {
-            $self->send_output(
-                {
-                    prefix  => $server,
-                    command => 'KILL',
-                    params  => [$args->[0], "$server (Bad nickname)"],
-                },
-                $peer_id,
-            );
-            my $unick = uc_irc($prefix);
-            $self->{state}{users}{$unick}{nick_collision} = 1;
-            $self->daemon_server_kill($prefix, 'Nick Collision', $peer_id);
-            last SWITCH;
-        }
-        if ($prefix) {
-            my $full = $self->state_user_full($prefix);
-            my $unick = uc_irc($prefix);
-            my $new = $args->[0];
-            my $unew = uc_irc($new);
-            my $ts = $args->[1] || time;
-            my $record = $self->{state}{users}{$unick};
-            my $server = uc $record->{server};
-
-            if ($unick eq $unew) {
-                $record->{nick} = $new;
-                $record->{ts} = $ts;
-            }
-            else {
-                $record->{nick} = $new;
-                $record->{ts} = $ts;
-                # Remove from peoples accept lists
-                delete $self->{state}{users}{$_}{accepts}{$unick}
-                    for keys %{ $record->{accepts} };
-                delete $record->{accepts};
-                delete $self->{state}{users}{$unick};
-                $self->{state}{users}{$unew} = $record;
-                delete $self->{state}{peers}{$server}{users}{$unick};
-                $self->{state}{peers}{$server}{users}{$unew} = $record;
-
-                for my $chan (keys %{ $record->{chans} }) {
-                    $self->{state}{chans}{$chan}{users}{$unew}
-                      = delete $self->{state}{chans}{$chan}{users}{$unick};
-                }
-            }
-            my $common = { };
-            for my $chan (keys %{ $record->{chans} }) {
-                for my $user ($self->state_chan_list($chan)) {
-                    next if !$self->_state_is_local_user($user);
-                    $common->{$user} = $self->_state_user_route($user);
-                }
-            }
-            $self->send_output(
-                {
-                    prefix  => $prefix,
-                    command => 'NICK',
-                    params  => $args,
-                },
-                grep { $_ ne $peer_id } $self->_state_connected_peers(),
-            );
-            $self->send_output(
-                {
-                    prefix  => $full,
-                    command => 'NICK',
-                    params  => [$new],
-                },
-                map{ $common->{$_} } keys %{ $common },
-            );
-            $self->send_event("daemon_nick", $full, $new);
-            last SWITCH;
-        }
-        if ($self->state_nick_exists($args->[0])
-                and my ($nick, $userhost) = split /!/,
-                $self->state_user_full($args->[0])) {
-            my $unick = uc_irc $nick;
-            my $incoming = join '@', @{ $args }[4..5];
-            if ($userhost eq $incoming) {
-                my $ts = $self->{state}{users}{$unick}{ts};
-                if ($args->[2] > $ts) {
-                    $self->{state}{users}{$unick}{nick_collision} = 1;
-                    $self->daemon_server_kill(
-                        $nick,
-                        'Nick Collision',
-                        $peer_id,
-                    );
-                }
-                else {
-                    last SWITCH;
-                }
-            }
-            else {
-                my $ts = $self->{state}{users}{$unick}{ts};
-                if ($args->[2] < $ts) {
-                    $self->{state}{users}{$unick}{nick_collision} = 1;
-                    $self->daemon_server_kill(
-                        $nick,
-                        'Nick Collision',
-                        $peer_id,
-                    );
-                }
-                else {
-                    last SWITCH;
-                }
-            }
-        }
-        if (!$self->state_peer_exists($args->[6])) {
-            last SWITCH;
-        }
-        if (length( $args->[0] ) > $nicklen) {
-            $self->send_output(
-                {
-                    prefix  => $server,
-                    command => 'KILL',
-                    params  => [$args->[0], "$server (Bad nickname)"],
-                },
-                $peer_id,
-            );
-            last SWITCH;
-        }
-        my $unick = uc_irc($args->[0]);
-        $args->[3] =~ s/^\+//g;
-        my $record = {
-            nick  => $args->[0],
-            hops  => $args->[1],
-            ts    => $args->[2],
-            type  => 'r',
-            umode => $args->[3],
-            auth  => {
-                ident => $args->[4],
-                hostname => $args->[5],
-            },
-            route_id => $peer_id,
-            server => $args->[6],
-            ircname => ( $args->[7] || '' ),
-        };
-        $self->{state}{users}{ $unick } = $record;
-        $self->{state}{stats}{ops_online}++ if $record->{umode} =~ /o/;
-        $self->{state}{stats}{invisible}++ if $record->{umode} =~ /i/;
-        $self->{state}{peers}{uc $record->{server}}{users}{$unick}
-            = $record;
-        $self->_state_update_stats();
-        $self->send_output(
-             {
-                 command => 'NICK',
-                 params  => $args,
-             },
-             grep { $_ ne $peer_id } $self->_state_connected_peers(),
-         );
-        $self->send_event("daemon_nick", @$args);
     }
 
     return @$ref if wantarray;
