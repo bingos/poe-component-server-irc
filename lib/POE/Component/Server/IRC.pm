@@ -3313,12 +3313,29 @@ sub _daemon_cmd_whois {
 sub _daemon_peer_whois {
     my $self   = shift;
     my $uid    = shift || return;
-    my $server = $self->server_name();
+    my $sid    = $self->server_sid();
     my $ref    = [ ];
     my ($first, $second) = @_;
 
-    #SWITCH: {
-    #}
+    my $targ = substr $first, 0, 3;
+    SWITCH: {
+        if ( $targ !~ m!^$sid! ) {
+          $self->send_output(
+            {
+                prefix  => $uid,
+                command => 'WHOIS',
+                params  => [
+                    $first,
+                    $second,
+                ],
+           },
+           $self->_state_sid_route($targ),
+        );
+        last SWITCH;
+      }
+      my $who = $self->state_user_uid($second);
+      $ref = $self->_daemon_do_whois($uid,$who);
+    }
 
     return @$ref if wantarray;
     return $ref;
