@@ -9,6 +9,7 @@ my $mask = { };
 
 foreach my $tang ( metaname('legoharrypotter',1000) ) {
   if ( !keys %$mask ) {
+    $tang =~ s!^professor_!!;
     $mask->{nick} = substr $tang, 0, 9;
     next;
   }

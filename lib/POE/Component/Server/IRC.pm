@@ -2565,7 +2565,7 @@ sub _daemon_do_isupport {
                     ? join '=', $_, $self->{config}{isupport}{$_}
                     : $_
                 )
-                } qw(CALLERID EXCEPTS INVEX MAXCHANNELS MAXBANS MAXTARGETS
+                } qw(CALLERID EXCEPTS INVEX MAXCHANNELS MAXLIST MAXTARGETS
                      NICKLEN TOPICLEN KICKLEN)
             ),
             'are supported by this server',
@@ -5719,16 +5719,16 @@ sub _daemon_peer_kick {
 sub _daemon_peer_sjoin {
     my $self    = shift;
     my $peer_id = shift;
-    $self->_daemon_peer_joins( $peer_id, 'SJOIN', @_ );
+    $self->_daemon_do_joins( $peer_id, 'SJOIN', @_ );
 }
 
 sub _daemon_peer_join {
     my $self    = shift;
     my $peer_id = shift;
-    $self->_daemon_peer_joins( $peer_id, 'JOIN', @_ );
+    $self->_daemon_do_joins( $peer_id, 'JOIN', @_ );
 }
 
-sub _daemon_peer_joins {
+sub _daemon_do_joins {
     my $self    = shift;
     my $peer_id = shift || return;
     my $cmd     = shift;
@@ -5775,7 +5775,7 @@ sub _daemon_peer_joins {
             for my $uid (split /\s+/, $uids) {
                 my $umode = '';
                 $umode .= 'o' if $uid =~ s/\@//g;
-                $umode = 'h' if $uid =~ s/\%//g;
+                $umode .= 'h' if $uid =~ s/\%//g;
                 $umode .= 'v' if $uid =~ s/\+//g;
                 $chanrec->{users}{$uid} = $umode;
                 $self->{state}{uids}{$uid}{chans}{$uchan} = $umode;
@@ -6408,6 +6408,98 @@ sub _daemon_peer_tmode {
             );
         }
     } # SWITCH
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
+# :<SID> BMASK <TS> <CHANNAME> <TYPE> :<MASKS>
+sub _daemon_peer_bmask {
+    my $self        = shift;
+    my $peer_id     = shift || return;
+    my $prefix      = shift || return;
+    my $ref     = [ ];
+    my $args    = [ @_ ];
+    my $count   = scalar @$args;
+
+    SWITCH: {
+        if ( !$count || $count < 4 ) {
+            last SWITCH;
+        }
+        my ($ts,$chan,$trype,$masks) = @$args;
+        if ( !$self->state_chan_exists($chan) ) {
+            last SWITCH;
+        }
+        my $chanrec = $self->{state}{chans}{uc_irc($chan)};
+        # Simple TS rules apply
+        if ( $ts > $chanrec->{ts} ) {
+          # Drop MODE
+          last SWITCH;
+        }
+        $self->send_output(
+          {
+              prefix  => $prefix,
+              command => 'BMASK',
+              params  => $args,
+          },
+          grep { $_ ne $peer_id } $self->_state_connected_peers(),
+        );
+        # Only bother with the next bit if we have local users on the channel
+        my $sid = $self->server_sid();
+        my @local_users = map { $self->_state_uid_route( $_ ) }
+                           grep { $_ =~ m!^$sid! } keys %{ $chanrec->{users} };
+        if ( !@local_users ) {
+          last SWITCH;
+        }
+        my @mask_list = split m!\s+!, $masks;
+        my @types;
+        push @types, "+$trype" for @mask_list;
+        my @output_modes;
+        my $server = $self->server_name();
+        my $length = length($server) + 4
+                     + length($chan) + 4;
+        my @buffer = ('', '');
+        for my $type (@types) {
+            my $arg = shift @mask_list;
+            my $mode_line = unparse_mode_line($buffer[0].$type);
+            if (length(join ' ', $mode_line, $buffer[1],
+                       $arg) + $length > 510) {
+               push @output_modes, {
+                  prefix   => $server,
+                  command  => 'MODE',
+                  colonify => 0,
+                  params   => [
+                    $chanrec->{name},
+                    $buffer[0],
+                    split /\s+/,
+                    $buffer[1],
+                  ],
+               };
+               $buffer[0] = $type;
+               $buffer[1] = $arg;
+               next;
+            }
+            $buffer[0] = $mode_line;
+            if ($buffer[1]) {
+               $buffer[1] = join ' ', $buffer[1], $arg;
+            }
+            else {
+               $buffer[1] = $arg;
+            }
+        }
+        push @output_modes, {
+            prefix   => $server,
+            command  => 'MODE',
+            colonify => 0,
+            params   => [
+               $chanrec->{name},
+               $buffer[0],
+               split /\s+/, $buffer[1],
+            ],
+        };
+        $self->send_output($_, @local_users)
+               for @output_modes;
+    }
 
     return @$ref if wantarray;
     return $ref;
@@ -7494,7 +7586,7 @@ sub _state_send_burst {
         # :<SID> BMASK <TS> <CHANNAME> <TYPE> :<MASKS>
         my @output_modes;
         OUTER: for my $type (@lists) {
-            my $length = length($sid) + 5 + length($chan) + 4;
+            my $length = length($sid) + 5 + length($chan) + 4 + length($chanrec->{ts}) + 2;
             my @buffer = ( '', '' );
             INNER: for my $thing (keys %{ $chanrec->{$type} }) {
                 $thing = $chanrec->{$type}{$thing}[0];
@@ -8404,7 +8496,7 @@ sub configure {
         MAXACCEPT     => 20,
         MODES         => 4,
         MAXTARGETS    => 4,
-        MAXBANS       => 25,
+        MAXBANS       => 50,
         MAXBANLENGTH  => 1024,
         AUTH          => 1,
         ANTIFLOOD     => 1,
