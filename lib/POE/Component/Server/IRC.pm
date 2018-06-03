@@ -269,7 +269,7 @@ sub _client_register {
     }
 
     # Add new nick
-    $self->_state_register_client($conn_id);
+    my $uid       = $self->_state_register_client($conn_id);
     my $server    = $self->server_name();
     my $nick      = $self->_client_nickname($conn_id);
     my $port      = $self->{state}{conns}{$conn_id}{socket}[3];
@@ -324,7 +324,9 @@ sub _client_register {
         }
     );
 
-    for my $output (@{ $self->_daemon_cmd_isupport($nick) }) {
+    for my $output (@{ $self->_daemon_do_isupport($uid) }) {
+        $output->{prefix} = $server;
+        $output->{params}[0] = $nick;
         $self->_send_output_to_client($conn_id, $output);
     }
 
@@ -604,13 +606,14 @@ sub _cmd_from_peer {
             last SWITCH;
         }
 
-        if ($cmd =~ /^(VERSION|TIME|NAMES|LINKS|ADMIN|INFO|MOTD|SQUIT)$/i ) {
-            my $client_method = '_daemon_cmd_' . lc $cmd;
+        # TODO: SQUIT needs its own handler
+        if ($cmd =~ /^(VERSION|TIME|LINKS|ADMIN|INFO|MOTD)$/i ) {
+            my $client_method = '_daemon_peer_miscell';
             $self->_send_output_to_client(
                 $conn_id,
                 $prefix,
                 (ref $_ eq 'ARRAY' ? @{ $_ } : $_ )
-            ) for $self->$client_method($prefix, @$params);
+            ) for $self->$client_method($cmd, $prefix, @$params);
             last SWITCH;
         }
 
@@ -707,6 +710,14 @@ sub _cmd_from_client {
 
         if ($cmd eq 'CAP') {
             $self->_daemon_cmd_cap($wheel_id, @$params);
+            last SWITCH;
+        }
+
+        if ( $cmd =~ m!^(ADMIN|INFO|VERSION|TIME|MOTD)$! ) {
+            $self->_send_output_to_client(
+                $wheel_id,
+                (ref $_ eq 'ARRAY' ? @{ $_ } : $_),
+            ) for $self->_daemon_client_miscell($cmd, $nick, @$params);
             last SWITCH;
         }
 
@@ -2473,18 +2484,82 @@ sub _daemon_cmd_away {
     return $ref;
 }
 
-# Pseudo cmd for ISupport 005 numerics
-sub _daemon_cmd_isupport {
+sub _daemon_client_miscell {
     my $self   = shift;
+    my $cmd    = shift;
     my $nick   = shift || return;
+    my $target = shift;
     my $server = $self->server_name();
     my $ref    = [ ];
 
+    SWITCH: {
+        if ($target && !$self->state_peer_exists($target)) {
+            push @$ref, ['402', $target];
+            last SWITCH;
+        }
+        if ($target && uc $server ne uc $target) {
+            $target = $self->_state_peer_sid($target);
+            $self->send_output(
+                {
+                    prefix  => $self->state_user_uid($nick),
+                    command => 'INFO',
+                    params  => [$target],
+                },
+                $self->_state_sid_route($target),
+            );
+            last SWITCH;
+        }
+        my $method = '_daemon_do_' . lc $cmd;
+        my $uid = $self->state_user_uid($nick);
+        push @$ref, $_ for map { $_->{prefix} = $server; $_->{params}[0] = $nick; $_ }
+                       @{ $self->$method($uid) };
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _daemon_peer_miscell {
+    my $self   = shift;
+    my $cmd    = shift;
+    my $uid    = shift || return;
+    my $sid    = $self->server_sid();
+    my $args   = [@_];
+    my $count  = @$args;
+    my $ref    = [ ];
+
+    SWITCH: {
+        if ($args->[0] !~ m!^$sid!) {
+            $self->send_output(
+                {
+                    prefix  => $uid,
+                    command => $cmd,
+                    params  => $args,
+                },
+                $self->_state_sid_route($args->[0]),
+            );
+            last SWITCH;
+        }
+        my $method = '_daemon_do_' . lc $cmd;
+        $ref = $self->$method($uid, @$args);
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
+# Pseudo cmd for ISupport 005 numerics
+sub _daemon_do_isupport {
+    my $self   = shift;
+    my $uid    = shift || return;
+    my $sid    = $self->server_sid();
+    my $ref    = [ ];
+
     push @$ref, {
-        prefix  => $server,
+        prefix  => $sid,
         command => '005',
         params  => [
-            $nick,
+            $uid,
             join(' ', map {
                 (defined $self->{config}{isupport}{$_}
                     ? join '=', $_, $self->{config}{isupport}{$_}
@@ -2498,10 +2573,10 @@ sub _daemon_cmd_isupport {
     };
 
     push @$ref, {
-        prefix  => $server,
+        prefix  => $sid,
         command => '005',
         params  => [
-            $nick,
+            $uid,
             join(' ', map {
                 (defined $self->{config}{isupport}{$_}
                     ? join '=', $_, $self->{config}{isupport}{$_}
@@ -2516,42 +2591,25 @@ sub _daemon_cmd_isupport {
     return $ref;
 }
 
-sub _daemon_cmd_info {
+sub _daemon_do_info {
     my $self   = shift;
-    my $nick   = shift || return;
-    my $target = shift;
-    my $server = $self->server_name();
+    my $uid    = shift || return;
+    my $sid    = $self->server_sid();
     my $ref    = [ ];
 
-    SWITCH: {
-        if ($target && !$self->state_peer_exists($target)) {
-            push @$ref, ['402', $target];
-            last SWITCH;
-        }
-        if ($target && uc $server ne uc $target) {
-            $self->send_output(
-                {
-                    prefix  => $self->state_user_uid($nick),
-                    command => 'INFO',
-                    params  => [$self->_state_peer_sid($target)],
-                },
-                $self->_state_peer_route($target),
-            );
-            last SWITCH;
-        }
-
+    {
         for my $info (@{ $self->server_config('Info') }) {
             push @$ref, {
-                prefix => $server,
+                prefix => $sid,
                 command => '371',
-                params => [$nick, $info],
+                params => [$uid, $info],
             };
         }
 
         push @$ref, {
-            prefix  => $server,
+            prefix  => $sid,
             command => '374',
-            params  => [$nick, 'End of /INFO list.'],
+            params  => [$uid, 'End of /INFO list.'],
         };
     }
 
@@ -2559,94 +2617,59 @@ sub _daemon_cmd_info {
     return $ref;
 }
 
-sub _daemon_cmd_version {
+sub _daemon_do_version {
     my $self   = shift;
-    my $nick   = shift || return;
-    my $server = $self->server_name();
+    my $uid    = shift || return;
+    my $sid    = $self->server_sid();
     my $ref    = [ ];
-    my $target = shift;
 
-    SWITCH: {
-        if ($target && !$self->state_peer_exists($target)) {
-            push @$ref, ['402', $target];
-            last SWITCH;
-        }
-        if ($target && uc $server ne uc $target) {
-            $self->send_output(
-                {
-                    prefix  => $self->state_user_uid($nick),
-                    command => 'VERSION',
-                    params  => [$self->_state_peer_sid($target)],
-                },
-                $self->_state_peer_route($target)
-            );
-            last SWITCH;
-        }
+    push @$ref, {
+        prefix  => $sid,
+        command => '351',
+        params  => [
+             $uid,
+             $self->server_version(),
+             $self->server_name(),
+             'eGHIMZ TS6ow',
+        ],
+    };
 
-        push @$ref, {
-            prefix  => $server,
-            command => '351',
-            params  => [
-                $nick,
-                $self->server_version(),
-                $server,
-                'eGHIMZ TS6ow',
-            ],
-        };
-        push @$ref, $_ for @{ $self->_daemon_cmd_isupport($nick) };
-    }
+    push @$ref, $_ for @{ $self->_daemon_do_isupport($uid) };
 
     return @$ref if wantarray;
     return $ref;
 }
 
-sub _daemon_cmd_admin {
+sub _daemon_do_admin {
     my $self   = shift;
-    my $nick   = shift || return;
-    my $target = shift;
-    my $server = $self->server_name();
+    my $uid    = shift || return;
+    my $sid    = $self->server_sid();
     my $ref    = [ ];
     my $admin  = $self->server_config('Admin');
 
-    SWITCH: {
-        if ($target && !$self->state_peer_exists($target)) {
-            push @$ref, ['402', $target];
-            last SWITCH;
-        }
-        if ($target && uc $server ne uc $target) {
-            $self->send_output(
-                {
-                    prefix  => $self->state_user_uid($nick),
-                    command => 'ADMIN',
-                    params  => [$self->_state_peer_sid($target)],
-                },
-                $self->_state_peer_route($target),
-            );
-            last SWITCH;
-        }
-
+    {
         push @$ref, {
-            prefix  => $server,
+            prefix  => $sid,
             command => '256',
-            params  => [$nick, $server, 'Administrative Info'],
+            params  => [$uid, $self->server_name(), 'Administrative Info'],
         };
 
         push @$ref, {
-            prefix  => $server,
+            prefix  => $sid,
             command => '257',
-            params  => [$nick, $admin->[0]],
+            params  => [$uid, $admin->[0]],
         };
 
         push @$ref, {
-            prefix  => $server,
+            prefix  => $sid,
             command => '258',
-            params  => [$nick, $admin->[1]],
+            params  => [$uid, $admin->[1]],
         };
 
         push @$ref, {
-            prefix  => $server,
+            prefix  => $sid,
             command => '259',
-            params  => [$nick, $admin->[2]],
+            params  => [$uid, $admin->[2]],
         };
     }
 
@@ -2664,36 +2687,19 @@ sub _daemon_cmd_summon {
     return $ref;
 }
 
-sub _daemon_cmd_time {
+sub _daemon_do_time {
     my $self   = shift;
-    my $nick   = shift || return;
-    my $server = $self->server_name();
-    my $target = shift;
+    my $uid    = shift || return;
+    my $sid    = $self->server_sid();
     my $ref    = [ ];
 
-    SWITCH: {
-        if ($target && !$self->state_peer_exists($target)) {
-            push @$ref, ['402', $target];
-            last SWITCH;
-        }
-        if ($target && uc $server ne uc $target) {
-            $self->send_output(
-                {
-                    prefix  => $self->state_user_uid($nick),
-                    command => 'TIME',
-                    params  => [$self->_state_peer_sid($target)],
-                },
-                $self->_state_peer_route($target),
-            );
-            last SWITCH;
-        }
-
+    {
         push @$ref, {
-            prefix  => $server,
+            prefix  => $sid,
             command => '391',
             params  => [
-                $nick,
-                $server,
+                $uid,
+                $self->server_name(),
                 strftime("%A %B %e %Y -- %T %z", localtime),
             ],
         };
@@ -2801,49 +2807,38 @@ sub _daemon_cmd_lusers {
     return $ref;
 }
 
-sub _daemon_cmd_motd {
+sub _daemon_do_motd {
     my $self   = shift;
-    my $nick   = shift || return;
-    my $target = shift;
+    my $uid    = shift || return;
+    my $sid    = $self->server_sid();
     my $server = $self->server_name();
     my $ref    = [ ];
     my $motd   = $self->server_config('MOTD');
 
-    SWITCH: {
-        if ($target && !$self->state_peer_exists($target)) {
-            push @$ref, ['402', $target];
-            last SWITCH;
-        }
-        if ($target && uc $server ne uc $target) {
-            $self->send_output(
-                {
-                    prefix  => $self->state_user_uid($nick),
-                    command => 'MOTD',
-                    params  => [$self->_state_peer_sid($target)],
-                },
-                $self->_state_peer_route($target),
-            );
-            last SWITCH;
-        }
+    {
         if ($motd && ref $motd eq 'ARRAY') {
             push @$ref, {
-                prefix  => $server,
+                prefix  => $sid,
                 command => '375',
-                params  => [$nick, "- $server Message of the day - "],
+                params  => [$uid, "- $server Message of the day - "],
             };
             push @$ref, {
-                prefix  => $server,
+                prefix  => $sid,
                 command => '372',
-                params  => [$nick, "- $_"]
+                params  => [$uid, "- $_"]
             } for @$motd;
             push @$ref, {
-                prefix  => $server,
+                prefix  => $sid,
                 command => '376',
-                params  => [$nick, "End of MOTD command"],
+                params  => [$uid, "End of MOTD command"],
             };
         }
         else {
-            push @$ref, '422';
+            push @$ref, {
+                prefix  => $sid,
+                command => '422',
+                params  => [$uid, $self->{Error_Codes}{'422'}[1]],
+            };
         }
     }
 
@@ -7745,10 +7740,8 @@ sub _state_register_client {
     $record->{umode}    = '';
 
 
-    if ( my $ts6 = $self->{config}{SID} ) {
-        $record->{uid} = $self->_state_gen_uid();
-        $record->{sid} = substr $record->{uid}, 0, 3;
-    }
+    $record->{uid} = $self->_state_gen_uid();
+    $record->{sid} = substr $record->{uid}, 0, 3;
 
     if (!$record->{auth}{ident}) {
         $record->{auth}{ident} = '~' . $record->{user};
@@ -7793,7 +7786,7 @@ sub _state_register_client {
     $self->send_event('daemon_uid', @$arrayref);
     $self->send_event('daemon_nick', @{ $arrayref }[0..5], $record->{server}, ( $arrayref->[9] || '' ) );
     $self->_state_update_stats();
-    return 1;
+    return $record->{uid};
 }
 
 sub state_nicks {
@@ -8546,8 +8539,8 @@ EOF
     };
 
     $self->{config}{isupport} = {
-        INVEX     => undef,
-        EXCEPT    => undef,
+        INVEX     => 'I',
+        EXCEPT    => 'e',
         CALLERID  => undef,
         CHANTYPES => '#&',
         PREFIX    => '(ohv)@%+',
