@@ -1409,7 +1409,7 @@ sub _daemon_cmd_quit {
     $self->{state}{stats}{ops_online}-- if $record->{umode} =~ /o/;
     $self->{state}{stats}{invisible}-- if $record->{umode} =~ /i/;
     delete $self->{state}{users}{$nick} if !$record->{nick_collision};
-    delete $self->{state}{uids}{ $record->{uid} } if $record->{uid};
+    delete $self->{state}{uids}{ $record->{uid} };
     delete $self->{state}{localops}{$record->{route_id}};
     return @$ref if wantarray;
     return $ref;
@@ -5296,12 +5296,15 @@ sub _daemon_peer_quit {
     my $qmsg    = shift || 'Client Quit';
     my $conn_id = shift;
     my $ref     = [ ];
+    my $sid     = $self->server_sid();
     my $full    = $self->state_user_full($uid);
 
     my $record = delete $self->{state}{uids}{$uid};
     return $ref if !$record;
     my $nick = uc_irc($record->{nick});
     delete $self->{state}{users}{$nick};
+    delete $self->{state}{sids}{ $record->{sid} }{users}{$nick};
+    delete $self->{state}{sids}{ $record->{sid} }{uids}{$uid};
     $self->send_output(
         {
             prefix  => $uid,
@@ -5327,11 +5330,10 @@ sub _daemon_peer_quit {
     # Okay, all 'local' users who share a common channel with user.
     my $common = { };
     for my $uchan (keys %{ $record->{chans} }) {
-        delete $self->{state}{chans}{$uchan}{users}{$nick};
-        delete $self->{state}{chans}{$uchan}{uids}{$uid};
-        for my $user ($self->state_chan_list($uchan)) {
-            next if !$self->_state_is_local_user($user);
-            $common->{$user} = $self->_state_user_route($user);
+        delete $self->{state}{chans}{$uchan}{users}{$uid};
+        for my $user ( keys %{ $self->{state}{chans}{$uchan}{users} } ) {
+            next if $user !~ m!^$sid!;
+            $common->{$user} = $self->_state_uid_route($user);
         }
         if (!keys %{ $self->{state}{chans}{$uchan}{users} }) {
             delete $self->{state}{chans}{$uchan};
