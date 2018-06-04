@@ -6505,6 +6505,66 @@ sub _daemon_peer_bmask {
     return $ref;
 }
 
+sub _daemon_peer_tburst {
+    my $self        = shift;
+    my $peer_id     = shift || return;
+    my $prefix      = shift || return;
+    my $ref         = [ ];
+    my $args        = [ @_ ];
+    my $count       = @$args;
+
+    # :8H8 TBURST 1525787545 #dummynet 1526409011 llestr!bingos@staff.gumbynet.org.uk :this is dummynet, foo
+    SWITCH: {
+      if ( !$self->state_chan_exists( $args->[1] ) ) {
+        last SWITCH;
+      }
+      my ($chants,$chan,$topicts,$who,$what) = @$args;
+      my $accept;
+      my $uchan = uc_irc $chan;
+      my $chanrec = $self->{state}{chans}{$uchan};
+      if ( $chants < $chanrec->{ts} ) {
+        $accept = 1;
+      }
+      elsif ( $chants == $chanrec->{ts} ) {
+        if ( !$chanrec->{topic} ) {
+          $accept = 1;
+        }
+        elsif ( $topicts > $chanrec->{topic}[2] ) {
+          $accept = 1;
+        }
+      }
+      if ( !$accept ) {
+        last SWITCH;
+      }
+      $self->send_output(
+        {
+            prefix  => $prefix,
+            command => 'TBURST',
+            params  => $args,
+        },
+        grep { $self->_state_peer_capab($_,'TBURST') }
+          grep { $_ ne $peer_id } $self->_state_connected_peers(),
+      );
+      my $differing = ( !$chanrec->{topic} || $chanrec->{topic}[0] ne $what );
+      $chanrec->{topic} = [ $what, $who, $topicts ];
+      if ( !$differing ) {
+        last SWITCH;
+      }
+      my $whom = $self->_state_peer_name( $prefix ) || $self->state_user_full( $prefix ) || $self->server_name();
+      $self->_send_output_channel_local(
+        $chan,
+        {
+          prefix  => $whom,
+          command => 'TOPIC',
+          params  => [ $chan, $what ],
+        },
+      );
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
 sub _daemon_peer_umode {
     my $self        = shift;
     my $peer_id     = shift || return;
