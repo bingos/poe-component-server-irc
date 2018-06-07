@@ -31,7 +31,7 @@ sub spawn {
             {
                 map { +"daemon_cmd_$_" => '_spoofed_command' }
                     qw(join part mode kick topic nick privmsg notice gline
-                       kline unkline sjoin locops wallops globops)
+                       kline unkline sjoin locops wallops globops dline undline)
             },
         ],
     );
@@ -2199,6 +2199,217 @@ sub _daemon_cmd_unkline {
     return $ref;
 }
 
+sub _daemon_cmd_dline {
+    my $self   = shift;
+    my $nick   = shift || return;
+    my $server = $self->server_name();
+    my $sid    = $self->server_sid();
+    my $ref    = [ ];
+    my $args   = [ @_ ];
+    my $count  = @$args;
+
+    SWITCH: {
+        if (!$self->state_user_is_operator($nick)) {
+            push @$ref, ['481'];
+            last SWITCH;
+        }
+        if (!$count || $count < 2) {
+            push @$ref, ['461', 'DLINE'];
+            last SWITCH;
+        }
+        my $duration = 0;
+        if ($args->[0] =~ /^\d+$/) {
+            $duration = shift @$args;
+            $duration = 14400 if $duration > 14400;
+        }
+        my $mask = shift @$args;
+        if (!$mask) {
+            push @$ref, ['461', 'KLINE'];
+            last SWITCH;
+        }
+        my $netmask;
+        if ( $mask !~ m![:.]! && $self->state_nick_exists($mask) ) {
+            my $uid = $self->state_user_uid($mask);
+            if ( $uid !~ m!^$sid! ) {
+              push @$ref, { prefix => $server, command => 'NOTICE', params => [ 'Cannot DLINE nick on another server' ] };
+              last SWITCH;
+            }
+            if ( $self->{state}{uids}{$uid}{umode} =~ m!o! || $self->{state}{uids}{$uid}{route_id} eq 'spoofed' ) {
+              my $nick = $self->{state}{uids}{$uid}{nick};
+              push @$ref, { prefix => $server, command => 'NOTICE', params => [ "$nick is E-lined" ] };
+              last SWITCH;
+            }
+            my $addr = $self->{state}{uids}{$uid}{socket}[0];
+            $netmask = Net::CIDR::cidrvalidate($addr);
+        }
+        elsif ( $mask !~ m![:.]! && !$self->state_nick_exists($mask) ) {
+            push @$ref, ['401', $mask];
+            last SWITCH;
+        }
+        if ( !$netmask ) {
+          $netmask = Net::CIDR::cidrvalidate($mask);
+          if ( !$netmask ) {
+              push @$ref, { prefix => $server, command => 'NOTICE', params => [ 'Unable to parse provided IP mask' ] };
+              last SWITCH;
+          }
+        }
+        if ($args->[0] && uc $args->[0] eq 'ON'
+                && scalar @$args < 2) {
+            push @$ref, ['461', 'DLINE'];
+            last SWITCH;
+        }
+        my ($peermask,$reason,$on);
+        my $us = 0;
+        if ($args->[0] && uc $args->[0] eq 'ON') {
+          $on = shift @$args;
+          $peermask = shift @$args;
+          $reason  = shift @$args || '<No reason supplied>';
+          my %targpeers; my $ucserver = uc $server;
+          foreach my $peer ( keys %{ $self->{state}{peers} } ) {
+             if (matches_mask($peermask, $peer)) {
+                if ($ucserver eq $peer) {
+                   $us = 1;
+                }
+                else {
+                   $targpeers{ $self->_state_peer_route($peer) }++;
+                }
+             }
+          }
+          $self->send_output(
+                {
+                    prefix  => $self->state_user_uid($nick),
+                    command => 'DLINE',
+                    params  => [
+                        $peermask,
+                        ( $duration * 60 ),
+                        $netmask,
+                        $reason,
+                    ],
+                },
+                grep { $self->_state_peer_capab($_, 'DLN') } keys %targpeers,
+            );
+        }
+        else {
+          $us = 1;
+        }
+
+        last SWITCH if !$us;
+
+        if ( !$reason ) {
+          $reason = shift @$args || '<No reason supplied>';
+        }
+
+        my $full = $self->state_user_full($nick);
+        $self->send_event(
+            "daemon_dline",
+            $full,
+            $netmask,
+            $duration,
+            $reason,
+        );
+
+        push @{ $self->{state}{dlines} }, {
+                setby    => $full,
+                setat    => time,
+                netmask  => $netmask,
+                duration => $duration,
+                reason   => $reason,
+        };
+
+        $self->add_denial( $netmask, 'You have been D-lined.' );
+        $self->_state_do_local_users_match_dline($netmask,$reason);
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _daemon_cmd_undline {
+    my $self   = shift;
+    my $nick   = shift || return;
+    my $server = $self->server_name();
+    my $sid    = $self->server_sid();
+    my $ref    = [ ];
+    my $args   = [ @_ ];
+    my $count  = @$args;
+
+    SWITCH: {
+        if (!$self->state_user_is_operator($nick)) {
+            push @$ref, ['481'];
+            last SWITCH;
+        }
+        if (!$count ) {
+            push @$ref, ['461', 'UNDLINE'];
+            last SWITCH;
+        }
+        my $unmask = shift @$args;
+        if ($args->[0] && uc $args->[0] eq 'ON'
+                && scalar @$args < 2) {
+            push @$ref, ['461', 'UNDLINE'];
+            last SWITCH;
+        }
+        my $us = 0;
+        if ($args->[0] && uc $args->[0] eq 'ON') {
+          my $on = shift @$args;
+          my $peermask = shift @$args;
+          my %targpeers; my $ucserver = uc $server;
+          foreach my $peer ( keys %{ $self->{state}{peers} } ) {
+             if (matches_mask($peermask, $peer)) {
+                if ($ucserver eq $peer) {
+                   $us = 1;
+                }
+                else {
+                   $targpeers{ $self->_state_peer_route($peer) }++;
+                }
+             }
+          }
+          $self->send_output(
+                {
+                    prefix  => $self->state_user_uid($nick),
+                    command => 'UNDLINE',
+                    params  => [
+                        $peermask,
+                        $unmask,
+                    ],
+                },
+                grep { $self->_state_peer_capab($_, 'UNDLN') } keys %targpeers,
+            );
+        }
+        else {
+          $us = 1;
+        }
+
+        last SWITCH if !$us;
+
+        my $result; my $i = 0;
+        DLINES: for (@{ $self->{state}{dlines} }) {
+           if ( $_->{netmask} eq $unmask ) {
+                $result = splice @{ $self->{state}{dlines} }, $i, 1;
+                last DLINES;
+           }
+           ++$i;
+        }
+
+        if ( !$result ) {
+           push @$ref, { prefix => $server, command => 'NOTICE', params => [ "No D-Line for [$unmask] found" ] };
+           last SWITCH;
+        }
+
+        my $full = $self->state_user_full($nick);
+        $self->send_event(
+            "daemon_undline",
+            $full,
+            $unmask,
+        );
+
+        $self->del_denial( $unmask );
+
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
 sub _daemon_cmd_gline {
     my $self   = shift;
     my $nick   = shift || return;
@@ -2630,7 +2841,7 @@ sub _daemon_do_version {
              $uid,
              $self->server_version(),
              $self->server_name(),
-             'eGHIMZ TS6ow',
+             'eGHIMZ6 TS6ow',
         ],
     };
 
@@ -7318,6 +7529,35 @@ sub _state_find_user_host {
     return @conns;
 }
 
+sub _state_do_local_users_match_dline {
+    my $self    = shift;
+    my $netmask = shift || return;
+    my $reason  = shift || '<No reason supplied>';
+    my $sid     = $self->server_sid();
+    my $server  = $self->server_name();
+
+    foreach my $luser ( keys %{ $self->{state}{sids}{$sid}{uids} } ) {
+       my $urec = $self->{state}{uids}{$luser};
+       next if $urec->{route_id} eq 'spoofed';
+       next if $urec->{umode} =~ m!o!;
+       if ( Net::CIDR::cidrlookup($urec->{socket}[0],$netmask) ) {
+          $self->send_output(
+             {
+                prefix  => $server,
+                command => '465',
+                params  => [
+                   $urec->{nick},
+                   "You are banned from this server- $reason",
+                ],
+             },
+             $urec->{route_id},
+          );
+          $self->_terminate_conn_error( $urec->{route_id}, $reason );
+       }
+    }
+    return 1;
+}
+
 sub _state_local_users_match_rkline {
     my $self  = shift;
     my $luser = shift || return;
@@ -8707,7 +8947,7 @@ EOF
             NETWORK MODES AWAYLEN),
     };
 
-    $self->{config}{capab} = [qw(QS EX CHW IE HOPS UNKLN KLN GLN EOB)];
+    $self->{config}{capab} = [qw(QS DLN UNDLN EX IE HOPS UNKLN KLN GLN EOB)];
 
     return 1;
 }
@@ -9377,10 +9617,8 @@ sub add_spoofed_nick {
     return if !$ref->{nick};
     return if $self->state_nick_exists($ref->{nick});
     my $record = $ref;
-    if ( my $ts6 = $self->{config}{SID} ) {
-        $record->{uid} = $self->_state_gen_uid();
-        $record->{sid} = substr $record->{uid}, 0, 3;
-    }
+    $record->{uid} = $self->_state_gen_uid();
+    $record->{sid} = substr $record->{uid}, 0, 3;
     $record->{ts} = time if !$record->{ts};
     $record->{type} = 's';
     $record->{server} = $self->server_name();

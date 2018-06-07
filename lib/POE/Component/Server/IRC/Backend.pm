@@ -204,8 +204,6 @@ sub _accept_connection {
         die "Failed to SSLify server socket: $@" if $@;
     }
 
-    return if $self->denied($peeraddr);
-
     my $wheel = POE::Wheel::ReadWrite->new(
         Handle       => $socket,
         Filter       => $self->{filter},
@@ -245,6 +243,12 @@ sub _accept_connection {
             $wheel_id,
         );
         $self->{wheels}{$wheel_id} = $ref;
+
+        if ( my $reason = $self->denied( $peeraddr ) ) {
+          $ref->{disconnecting} = $reason;
+          my $out = { command => 'ERROR', params => [ $reason ] };
+          $self->send_output( $out, $wheel_id );
+        }
     }
     return;
 }
@@ -549,6 +553,9 @@ sub _conn_flushed {
 sub _conn_input {
     my ($kernel, $self, $input, $wheel_id) = @_[KERNEL, OBJECT, ARG0, ARG1];
     my $conn = $self->{wheels}{$wheel_id};
+
+    # We aren't interested if they are disconnecting
+    return if $conn->{disconnecting};
 
     if ($self->{raw_events}) {
         $self->send_event(
