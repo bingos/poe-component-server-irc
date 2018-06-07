@@ -30,7 +30,7 @@ sub spawn {
             [qw(add_spoofed_nick del_spoofed_nick)],
             {
                 map { +"daemon_cmd_$_" => '_spoofed_command' }
-                    qw(join part mode kick topic nick privmsg notice gline
+                    qw(join part mode kick topic nick privmsg notice
                        kline unkline sjoin locops wallops globops dline undline)
             },
         ],
@@ -253,10 +253,6 @@ sub _client_register {
             $conn_id,
             'You are not authorized to use this server',
         );
-        return;
-    }
-    if ($self->_state_user_matches_gline($conn_id)) {
-        $self->_terminate_conn_error($conn_id, 'G-Lined');
         return;
     }
     if ($self->_state_user_matches_kline($conn_id)) {
@@ -2060,7 +2056,7 @@ sub _daemon_cmd_kline {
 
             $self->send_output(
                 {
-                    prefix  => $nick,
+                    prefix  => $self->state_user_uid($nick),
                     command => 'KLINE',
                     params  => [
                         $target,
@@ -2103,7 +2099,7 @@ sub _daemon_cmd_kline {
                 reason   => $reason,
             };
 
-            for ($self->_state_local_users_match_gline($user, $host)) {
+            for ($self->_state_local_users_match_kline($user, $host)) {
                 $self->_terminate_conn_error($_, 'K-Lined');
             }
         }
@@ -2404,76 +2400,6 @@ sub _daemon_cmd_undline {
 
         $self->del_denial( $unmask );
 
-    }
-
-    return @$ref if wantarray;
-    return $ref;
-}
-
-sub _daemon_cmd_gline {
-    my $self   = shift;
-    my $nick   = shift || return;
-    my $server = $self->server_name();
-    my $ref    = [ ];
-    my $args   = [ @_ ];
-    my $count  = @$args;
-    # :klanker GLINE * meep.com :Fuckers
-
-    SWITCH: {
-        if (!$self->state_user_is_operator($nick)) {
-            push @$ref, ['481'];
-            last SWITCH;
-        }
-        if (!$count || $count < 2) {
-            push @$ref, ['461', 'GLINE'];
-            last SWITCH;
-        }
-        if ($args->[0] !~ /\@/ && !$self->state_nick_exists($args->[0])) {
-            push @$ref, ['401', $args->[0]];
-            last SWITCH;
-        }
-        my ($user_part, $host_part);
-        if ($args->[0] =~ /\@/) {
-            ($user_part, $host_part)
-            = (split /[!@]/, $self->state_user_full($args->[0]))[1..2];
-        }
-        else {
-            ($user_part, $host_part) = split /\@/, $args->[0];
-        }
-        my $time = time;
-        my $reason = join ' ', $args->[1], strftime('(%c)', localtime $time);
-        my $full = $self->state_user_full($nick);
-
-        push @{ $self->{state}{glines} }, {
-            setby  => $full,
-            setat  => time,
-            user   => $user_part,
-            host   => $host_part,
-            reason => $reason,
-        };
-
-        $self->send_output(
-            {
-                prefix   => $nick,
-                command  => 'GLINE',
-                params   => [$user_part, $host_part, $reason],
-                colonify => 0,
-            },
-            grep { $self->_state_peer_capab($_, 'GLN') }
-                $self->_state_connected_peers()
-        );
-
-        $self->send_event(
-            "daemon_gline",
-            $full,
-            $user_part,
-            $host_part,
-            $reason,
-        );
-
-        for ($self->_state_local_users_match_gline($user_part, $host_part)) {
-            $self->_terminate_conn_error($_, 'G-Lined');
-        }
     }
 
     return @$ref if wantarray;
@@ -5020,7 +4946,7 @@ sub _daemon_peer_kline {
                 reason   => $args->[4],
             };
             $self->_terminate_conn_error($_, 'K-Lined')
-                for $self->_state_local_users_match_gline($args->[2], $args->[3]);
+                for $self->_state_local_users_match_kline($args->[2], $args->[3]);
         }
     }
 
@@ -5080,47 +5006,6 @@ sub _daemon_peer_unkline {
                 ++$i;
             }
         }
-    }
-
-    return @$ref if wantarray;
-    return $ref;
-}
-
-sub _daemon_peer_gline {
-    my $self    = shift;
-    my $peer_id = shift || return;
-    my $nick    = shift || return;
-    my $server  = $self->server_name();
-    my $ref     = [ ];
-    my $args    = [ @_ ];
-    my $count   = @$args;
-
-    # :klanker GLINE * meep.com :Fuckers
-    SWITCH: {
-        if (!$count || $count < 3) {
-            last SWITCH;
-        }
-        my $full = $self->state_user_full($nick);
-        push @{ $self->{state}{glines} }, {
-            setby  => $full,
-            setat  => time,
-            user   => $args->[0],
-            host   => $args->[1],
-            reason => $args->[2],
-        };
-        $self->send_output(
-            {
-                prefix  => $nick,
-                command => 'GLINE',
-                params  => $args,
-                colonify => 0,
-            },
-            grep { $_ ne $peer_id && $self->_state_peer_capab($_, 'GLN') }
-                $self->_state_connected_peers(),
-        );
-        $self->send_event("daemon_gline", $full, @$args);
-        $self->_terminate_conn_error($_, 'G-Lined')
-            for $self->_state_local_users_match_gline($args->[0], $args->[1]);
     }
 
     return @$ref if wantarray;
@@ -10211,11 +10096,6 @@ channel topic will be unset.
 
 Takes two arguments, a spoofed nick and a new nickname to change to.
 
-=head3 C<daemon_cmd_gline>
-
-Takes three arguments, a spoofed nick, a user@host mask to gline and a
-reason for the gline.
-
 =head3 C<daemon_cmd_kline>
 
 Takes a number of arguments depending on where the KLINE is to be applied
@@ -10728,11 +10608,11 @@ the channel)
 
 B<Note:> the component will shutdown, this is a feature;
 
-=head2 C<ircd_daemon_gline>
+=head2 C<ircd_daemon_dline>
 
 =over
 
-=item Emitted: when an oper issues a GLINE command;
+=item Emitted: when an oper issues a DLINE command;
 
 =item Target: all plugins and registered sessions;
 
@@ -10742,9 +10622,9 @@ B<Note:> the component will shutdown, this is a feature;
 
 =item * C<ARG0>, the full nick!user@host;
 
-=item * C<ARG1>, the user mask;
+=item * C<ARG1>, the duration;
 
-=item * C<ARG2>, the host mask;
+=item * C<ARG2>, the network mask;
 
 =item * C<ARG3>, the reason;
 
