@@ -1916,51 +1916,16 @@ sub _daemon_cmd_rkline {
         my $full = $self->state_user_full($nick);
         my $us = 0;
         my $ucserver = uc $server;
+        my $reason;
 
-        if ($args->[0] && uc $args->[0] eq 'ON' && @$args < 2) {
-            push @$ref, ['461', 'RKLINE'];
-            last SWITCH;
-        }
-        my ($target, $reason);
-        if ($args->[0] && uc $args->[0] eq 'ON') {
-            $target = shift @$args;
-            $reason = shift @{ $args } || 'No Reason';
-            my %targets;
-
-            for my $peer (keys %{ $self->{state}{peers} }) {
-                if (matches_mask($target, $peer)) {
-                    if ($ucserver eq $peer) {
-                        $us = 1;
-                    }
-                    else {
-                        $targets{ $self->_state_peer_route($peer) }++;
-                    }
-                }
-            }
-
-            $self->send_output(
-                {
-                    prefix  => $nick,
-                    command => 'RKLINE',
-                    params  => [$target, $duration, $user, $host, $reason],
-                    colonify => 0,
-                },
-                grep { $self->_state_peer_capab($_, 'KLN') } keys %targets,
-            );
-        }
-        else {
-            $us = 1;
-        }
-
-        if ($us) {
-            $target = $server if !$target;
-                if (!$reason) {
-                $reason = pop @$args || 'No Reason';
+        {
+            if (!$reason) {
+                $reason = pop @$args || '<No reason supplied>';
             }
             $self->send_event(
                 "daemon_rkline",
                 $full,
-                $target,
+                $server,
                 $duration,
                 $user,
                 $host,
@@ -1970,7 +1935,7 @@ sub _daemon_cmd_rkline {
             push @{ $self->{state}{rklines} }, {
                 setby    => $full,
                 setat    => time(),
-                target   => $target,
+                target   => $server,
                 duration => $duration,
                 user     => $user,
                 host     => $host,
@@ -4827,67 +4792,6 @@ sub _daemon_peer_squit {
                 }
             }
             last SWITCH;
-        }
-    }
-
-    return @$ref if wantarray;
-    return $ref;
-}
-
-sub _daemon_peer_rkline {
-    my $self    = shift;
-    my $peer_id = shift || return;
-    my $nick    = shift || return;
-    my $server  = $self->server_name();
-    my $ref     = [ ];
-    my $args    = [ @_ ];
-    my $count   = @$args;
-    # :klanker RKLINE logserv.gumbynet.org.uk 600 ^m.*\ foo\.(com|uk|net)$ :Foo
-
-    SWITCH: {
-        if (!$count || $count < 5) {
-            last SWITCH;
-        }
-        my $full = $self->state_user_full($nick);
-        my $target = $args->[0];
-        my $us = 0;
-        my $ucserver = uc $server;
-        my %targets;
-        for my $peer (keys %{ $self->{state}{peers} }) {
-            if (matches_mask( $target, $peer)) {
-                if ($ucserver eq $peer) {
-                    $us = 1;
-                }
-                else {
-                    $targets{$self->_state_peer_route($peer)}++;
-                }
-            }
-        }
-
-        delete $targets{$peer_id};
-        $self->send_output(
-            {
-                prefix   => $nick,
-                command  => 'RKLINE',
-                params   => $args,
-                colonify => 0,
-            },
-            grep { $self->_state_peer_capab($_, 'KLN') } keys %targets,
-        );
-
-        if ($us) {
-            $self->send_event("daemon_rkline", $full, @$args);
-            push @{ $self->{state}{rklines} }, {
-                setby    => $full,
-                setat    => time,
-                target   => $args->[0],
-                duration => $args->[1],
-                user     => $args->[2],
-                host     => $args->[3],
-                reason   => $args->[4],
-            };
-            $self->_terminate_conn_error($_, 'K-Lined')
-                for $self->_state_local_users_match_rkline($args->[2], $args->[3]);
         }
     }
 
@@ -10175,18 +10079,6 @@ To set a temporary 10 minute RKLINE:
      $spoofed_nick,
      10,
      '^.*$@^(yahoo|google|microsoft)\.com$',
-     $reason,
- );
-
-To set a temporary 10 minute RKLINE on all servers:
-
- $ircd->yield(
-     'daemon_cmd_kline',
-     $spoofed_nick,
-     10,
-     '^.*$@^(yahoo|google|microsoft)\.com$',
-     'on',
-     '*',
      $reason,
  );
 
