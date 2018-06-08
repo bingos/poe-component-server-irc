@@ -2,6 +2,19 @@ Revision history for POE-Component-Server-IRC
 
 {{$NEXT}}
     - Deprecated Net::Netmask usage and add Net::CIDR support
+    - Full IPv6 support for all connections/listeners
+    - Only supports TS6 protocol for server connections
+      - major internal refactoring to accomodate this
+    - Added TBURST for bursting channel topics
+    - Removed GLINE and added DLINE/UNDLINE, XLINE/UNXLINE
+    - RKLINE is now local only and not propagated
+    - Added IRCv3.x capability negotiations CAP cmd
+      - added 'away-notify', 'invite-notify' and 'multi-prefix'
+    - Added bcrypt passwd support for OPER passwords
+    - Updated the included x509 cert and key
+    - OPERWALL has been removed, replaced with GLOBOPS
+    - Refined LOCOPS for consistency with GLOBOPS
+    - Implemented WHOWAS command
 
 1.54  Fri Nov 25 15:36:51 UTC 2011
     - Resolve problem with remote (versus localhost) clients
