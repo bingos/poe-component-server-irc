@@ -30,7 +30,7 @@ sub spawn {
             [qw(add_spoofed_nick del_spoofed_nick)],
             {
                 map { +"daemon_cmd_$_" => '_spoofed_command' }
-                    qw(join part mode kick topic nick privmsg notice
+                    qw(join part mode kick topic nick privmsg notice xline unxline
                        kline unkline sjoin locops wallops globops dline undline)
             },
         ],
@@ -255,12 +255,19 @@ sub _client_register {
         );
         return;
     }
-    if ($self->_state_user_matches_kline($conn_id)) {
-        $self->_terminate_conn_error($conn_id, 'K-Lined');
+    if (my $reason = $self->_state_user_matches_xline($conn_id)) {
+        $self->_send_output_to_client( $conn_id, '465' );
+        $self->_terminate_conn_error($conn_id, "X-Lined: [$reason]");
         return;
     }
-    if ($self->_state_user_matches_rkline($conn_id)) {
-        $self->_terminate_conn_error($conn_id, 'K-Lined');
+    if (my $reason = $self->_state_user_matches_kline($conn_id)) {
+        $self->_send_output_to_client( $conn_id, '465' );
+        $self->_terminate_conn_error($conn_id, "K-Lined: [$reason]");
+        return;
+    }
+    if (my $reason = $self->_state_user_matches_rkline($conn_id)) {
+        $self->_send_output_to_client( $conn_id, '465' );
+        $self->_terminate_conn_error($conn_id, "K-Lined: [$reason]");
         return;
     }
 
@@ -2160,6 +2167,236 @@ sub _daemon_cmd_unkline {
     return $ref;
 }
 
+sub _daemon_cmd_xline {
+    my $self   = shift;
+    my $nick   = shift || return;
+    my $server = $self->server_name();
+    my $sid    = $self->server_sid();
+    my $ref    = [ ];
+    my $args   = [ @_ ];
+    my $count  = @$args;
+
+    SWITCH: {
+        if (!$self->state_user_is_operator($nick)) {
+            push @$ref, ['481'];
+            last SWITCH;
+        }
+        if (!$count || $count < 2) {
+            push @$ref, ['461', 'XLINE'];
+            last SWITCH;
+        }
+        my $duration = 0;
+        if ($args->[0] =~ /^\d+$/) {
+            $duration = shift @$args;
+            $duration = 14400 if $duration > 14400;
+        }
+        my $mask = shift @$args;
+        if (!$mask) {
+            push @$ref, ['461', 'XLINE'];
+            last SWITCH;
+        }
+        if ($args->[0] && uc $args->[0] eq 'ON'
+                && scalar @$args < 2) {
+            push @$ref, ['461', 'XLINE'];
+            last SWITCH;
+        }
+        my ($peermask,$reason);
+        my $us = 0;
+        if ($args->[0] && uc $args->[0] eq 'ON') {
+          my $on = shift @$args;
+          $peermask = shift @$args;
+          $reason  = shift @$args || '<No reason supplied>';
+          my %targpeers; my $ucserver = uc $server;
+          foreach my $peer ( keys %{ $self->{state}{peers} } ) {
+             if (matches_mask($peermask, $peer)) {
+                if ($ucserver eq $peer) {
+                   $us = 1;
+                }
+                else {
+                   $targpeers{ $self->_state_peer_route($peer) }++;
+                }
+             }
+          }
+          $self->send_output(
+                {
+                    prefix  => $self->state_user_uid($nick),
+                    command => 'XLINE',
+                    params  => [
+                        $peermask,
+                        ( $duration * 60 ),
+                        $mask,
+                        $reason,
+                    ],
+                },
+                grep { $self->_state_peer_capab($_, 'CLUSTER') } keys %targpeers,
+            );
+        }
+        else {
+          $us = 1;
+        }
+
+        last SWITCH if !$us;
+
+        if ( !$reason ) {
+          $reason = shift @$args || '<No reason supplied>';
+        }
+
+        my $full = $self->state_user_full($nick);
+        $self->send_event(
+            "daemon_xline",
+            $full,
+            $mask,
+            $duration,
+            $reason,
+        );
+
+        push @{ $self->{state}{xlines} }, {
+                setby    => $full,
+                setat    => time,
+                mask  => $mask,
+                duration => $duration * 60,
+                reason   => $reason,
+        };
+
+        my $reply_notice;
+        my $locop_notice;
+
+        if ( $duration ) {
+           $reply_notice = "Added temporary $duration min. X-Line [$mask]";
+           $locop_notice = "*** Notice -- $full added temporary $duration min. X-Line for [$mask] [$reason]";
+        }
+        else {
+           $reply_notice = "Added X-Line [$mask]";
+           $locop_notice = "*** Notice -- $full added X-Line for [$mask] [$reason]";
+        }
+
+        push @$ref, {
+            prefix  => $server,
+            command => 'NOTICE',
+            params  => [ $nick, $reply_notice ],
+        };
+
+        $self->send_output(
+            {
+                prefix  => $server,
+                command => 'NOTICE',
+                params  => [
+                    '*',
+                    $locop_notice,
+                ],
+            },
+            keys %{ $self->{state}{locops} },
+        );
+
+        $self->_state_do_local_users_match_xline($mask,$reason);
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _daemon_cmd_unxline {
+    my $self   = shift;
+    my $nick   = shift || return;
+    my $server = $self->server_name();
+    my $sid    = $self->server_sid();
+    my $ref    = [ ];
+    my $args   = [ @_ ];
+    my $count  = @$args;
+
+    SWITCH: {
+        if (!$self->state_user_is_operator($nick)) {
+            push @$ref, ['481'];
+            last SWITCH;
+        }
+        if (!$count ) {
+            push @$ref, ['461', 'UNXLINE'];
+            last SWITCH;
+        }
+        my $unmask = shift @$args;
+        if ($args->[0] && uc $args->[0] eq 'ON'
+                && scalar @$args < 2) {
+            push @$ref, ['461', 'UNXLINE'];
+            last SWITCH;
+        }
+        my $us = 0;
+        if ($args->[0] && uc $args->[0] eq 'ON') {
+          my $on = shift @$args;
+          my $peermask = shift @$args;
+          my %targpeers; my $ucserver = uc $server;
+          foreach my $peer ( keys %{ $self->{state}{peers} } ) {
+             if (matches_mask($peermask, $peer)) {
+                if ($ucserver eq $peer) {
+                   $us = 1;
+                }
+                else {
+                   $targpeers{ $self->_state_peer_route($peer) }++;
+                }
+             }
+          }
+          $self->send_output(
+                {
+                    prefix  => $self->state_user_uid($nick),
+                    command => 'UNXLINE',
+                    params  => [
+                        $peermask,
+                        $unmask,
+                    ],
+                },
+                grep { $self->_state_peer_capab($_, 'CLUSTER') } keys %targpeers,
+            );
+        }
+        else {
+          $us = 1;
+        }
+
+        last SWITCH if !$us;
+
+        my $result; my $i = 0;
+        XLINES: for (@{ $self->{state}{xlines} }) {
+           if ( $_->{mask} eq $unmask ) {
+                $result = splice @{ $self->{state}{xlines} }, $i, 1;
+                last XLINES;
+           }
+           ++$i;
+        }
+
+        if ( !$result ) {
+           push @$ref, { prefix => $server, command => 'NOTICE', params => [ $nick, "No X-Line for [$unmask] found" ] };
+           last SWITCH;
+        }
+
+        my $full = $self->state_user_full($nick);
+        $self->send_event(
+            "daemon_unxline",
+            $full,
+            $unmask,
+        );
+
+        push @$ref, {
+            prefix  => $server,
+            command => 'NOTICE',
+            params  => [ $nick, "X-Line for [$unmask] is removed" ],
+        };
+
+        $self->send_output(
+            {
+                prefix  => $server,
+                command => 'NOTICE',
+                params  => [
+                    '*',
+                    "*** Notice -- $full has removed the X-Line for: [$unmask]",
+                ],
+            },
+            keys %{ $self->{state}{locops} },
+        );
+
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
 sub _daemon_cmd_dline {
     my $self   = shift;
     my $nick   = shift || return;
@@ -2617,7 +2854,7 @@ sub _daemon_cmd_away {
         $record->{away} = $msg;
         $self->send_output(
             {
-                prefix   => $record->{nick},
+                prefix   => $record->{uid},
                 command  => 'AWAY',
                 params   => [$msg],
                 colonify => 0,
@@ -7425,6 +7662,35 @@ sub _state_find_user_host {
     return @conns;
 }
 
+sub _state_do_local_users_match_xline {
+    my $self    = shift;
+    my $mask    = shift || return;
+    my $reason  = shift || '<No reason supplied>';
+    my $sid     = $self->server_sid();
+    my $server  = $self->server_name();
+
+    foreach my $luser ( keys %{ $self->{state}{sids}{$sid}{uids} } ) {
+       my $urec = $self->{state}{uids}{$luser};
+       next if $urec->{route_id} eq 'spoofed';
+       next if $urec->{umode} =~ m!o!;
+       if ( $urec->{ircname} && matches_mask( $mask, $urec->{ircname} ) ) {
+          $self->send_output(
+             {
+                prefix  => $server,
+                command => '465',
+                params  => [
+                   $urec->{nick},
+                   "You are banned from this server- $reason",
+                ],
+             },
+             $urec->{route_id},
+          );
+          $self->_terminate_conn_error( $urec->{route_id}, $reason );
+       }
+    }
+    return 1;
+}
+
 sub _state_do_local_users_match_dline {
     my $self    = shift;
     my $netmask = shift || return;
@@ -7514,10 +7780,10 @@ sub _state_user_matches_rkline {
     my $user    = $record->{auth}{ident} || "~" . $record->{user};
     my $ip      = $record->{socket}[0];
 
-    for my $gline (@{ $self->{state}{rklines} }) {
-        if (($host =~ /$gline->{host}/ || $ip =~ /$gline->{host}/)
-                && $user =~ /$gline->{user}/) {
-            return 1;
+    for my $kline (@{ $self->{state}{rklines} }) {
+        if (($host =~ /$kline->{host}/ || $ip =~ /$kline->{host}/)
+                && $user =~ /$kline->{user}/) {
+            return $kline->{reason};
         }
   }
   return 0;
@@ -7531,43 +7797,33 @@ sub _state_user_matches_kline {
     my $user    = $record->{auth}{ident} || "~" . $record->{user};
     my $ip      = $record->{socket}[0];
 
-    for my $gline (@{ $self->{state}{klines} }) {
-        if (my $netmask = Net::CIDR::cidrvalidate($gline->{host})) {
+    for my $kline (@{ $self->{state}{klines} }) {
+        if (my $netmask = Net::CIDR::cidrvalidate($kline->{host})) {
             if (Net::CIDR::cidrlookup($ip,$netmask)
-                && matches_mask($gline->{user}, $user)) {
-                return 1;
+                && matches_mask($kline->{user}, $user)) {
+                return $kline->{reason};
             }
         }
-        elsif ((matches_mask($gline->{host}, $host)
-               || matches_mask($gline->{host}, $ip))
-               && matches_mask($gline->{user}, $user)) {
-            return 1;
+        elsif ((matches_mask($kline->{host}, $host)
+               || matches_mask($kline->{host}, $ip))
+               && matches_mask($kline->{user}, $user)) {
+            return $kline->{reason};
         }
     }
 
     return 0;
 }
 
-sub _state_user_matches_gline {
+sub _state_user_matches_xline {
     my $self    = shift;
     my $conn_id = shift || return;
     my $record  = $self->{state}{conns}{$conn_id};
-    my $host    = $record->{auth}{hostname} || $record->{socket}[0];
-    my $user    = $record->{auth}{ident} || "~" . $record->{user};
-    my $ip      = $record->{socket}[0];
+    my $ircname = $record->{ircname} || return;
 
-    for my $gline (@{ $self->{state}{glines} }) {
-        if (my $netmask = Net::CIDR::cidrvalidate($gline->{host})) {
-            if (Net::CIDR::cidrlookup($ip,$netmask)
-                && matches_mask($gline->{user}, $user)) {
-                return 1;
-            }
-            elsif ((matches_mask($gline->{host}, $host)
-                || matches_mask($gline->{host}, $ip))
-                && matches_mask($gline->{user}, $user)) {
-                return 1;
-            }
-        }
+    for my $xline (@{ $self->{state}{xlines} }) {
+      if ( matches_mask( $xline->{mask}, $ircname ) ) {
+        return $xline->{reason};
+      }
     }
 
     return 0;
@@ -8843,7 +9099,7 @@ EOF
             NETWORK MODES AWAYLEN),
     };
 
-    $self->{config}{capab} = [qw(QS DLN UNDLN EX IE HOPS UNKLN KLN GLN EOB)];
+    $self->{config}{capab} = [qw(CLUSTER QS DLN UNDLN EX IE HOPS UNKLN KLN GLN EOB)];
 
     return 1;
 }
