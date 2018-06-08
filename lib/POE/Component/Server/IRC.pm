@@ -2847,6 +2847,7 @@ sub _daemon_cmd_away {
                 command => '305',
                 params  => [ $rec->{nick}, 'You are no longer marked as being away' ],
             };
+            $self->_state_do_away_notify($rec->{uid},'*',$msg);
             last SWITCH;
         }
 
@@ -2865,6 +2866,7 @@ sub _daemon_cmd_away {
             command => '306',
             params  => [ $rec->{nick}, 'You have been marked as being away' ],
         };
+        $self->_state_do_away_notify($rec->{uid},'*',$msg);
     }
 
     return @$ref if wantarray;
@@ -4457,6 +4459,10 @@ sub _daemon_cmd_join {
                 $route_id,
                 (ref $_ eq 'ARRAY' ? @$_ : $_),
             ) for $self->_daemon_cmd_topic($nick, $channel);
+
+            if ( $self->{state}{uids}{$uid}{away} ) {
+                $self->_state_do_away_notify($uid,$channel,$self->{state}{uids}{$uid}{away});
+            }
         }
     }
 
@@ -6477,12 +6483,13 @@ sub _daemon_do_joins {
         # Joins and modes for new arrivals
         my $uchan = uc_irc($chanrec->{name});
         my $modes;
+        my @aways;
         my @mode_parms;
         for my $uid (split /\s+/, $uids) {
             my $umode = '';
             my @op_list;
             $umode .= 'o' if $uid =~ s/\@//g;
-            $umode = 'h'  if $uid =~ s/\%//g;
+            $umode .= 'h' if $uid =~ s/\%//g;
             $umode .= 'v' if $uid =~ s/\+//g;
             $chanrec->{users}{$uid} = $umode;
             $self->{state}{uids}{$uid}{chans}{$uchan} = $umode;
@@ -6501,6 +6508,9 @@ sub _daemon_do_joins {
             if ($umode) {
                 $modes .= $umode;
                 push @mode_parms, @op_list;
+            }
+            if ( $self->{state}{uids}{$uid}{away} ) {
+               push @aways, { uid => $uid, msg => $self->{state}{uids}{$uid}{away} };
             }
         }
         if ($modes) {
@@ -6553,6 +6563,10 @@ sub _daemon_do_joins {
             };
             $self->send_output($_, @local_users)
                 for @output_modes;
+        }
+        if ( @aways ) {
+           $self->_state_do_away_notify($_->{uid},$chanrec->{name},$_->{msg})
+             for @aways;
         }
     }
 
@@ -7482,6 +7496,7 @@ sub _daemon_peer_away {
                 },
                 grep { $_ ne $peer_id } $self->_state_connected_peers(),
             );
+            $self->_state_do_away_notify($uid,'*',$msg);
             last SWITCH;
         }
         $rec->{away} = $msg;
@@ -7494,6 +7509,7 @@ sub _daemon_peer_away {
             },
             grep { $_ ne $peer_id } $self->_state_connected_peers(),
         );
+        $self->_state_do_away_notify($uid,'*',$msg);
     }
 
     return @$ref if wantarray;
@@ -7542,6 +7558,7 @@ sub _state_create {
     $self->{state}{caps} = {
       'invite-notify' => 1,
       'multi-prefix'  => 1,
+      'away-notify'   => 1,
     };
 
     return 1;
@@ -7658,6 +7675,38 @@ sub _state_find_user_host {
     }
 
     return @conns;
+}
+
+sub _state_do_away_notify {
+    my $self = shift;
+    my $uid  = shift || return;
+    my $chan = shift || return;
+    my $msg  = shift;
+    return if !$self->state_uid_exists($uid);
+    my $sid  = $self->server_sid();
+    my $rec = $self->{state}{uids}{$uid};
+    my $common = { };
+    my @chans;
+    if ( $chan eq '*' ) {
+      @chans = keys %{ $rec->{chans} };
+    }
+    else {
+      push @chans, uc_irc $chan;
+    }
+    for my $uchan (@chans) {
+        for my $user ( keys %{ $self->{state}{chans}{$uchan}{users} } ) {
+            next if $user !~ m!^$sid!;
+            next if !$self->{state}{uids}{$user}{caps}{'away-notify'};
+            $common->{$user} = $self->_state_uid_route($user);
+        }
+    }
+    my $ref = {
+      prefix  => $self->state_user_full($uid),
+      command => 'AWAY',
+    };
+    $ref->{params} = [ $msg ] if $msg;
+    $self->send_output( $ref, $common->{$_} ) for keys %$common;
+    return 1;
 }
 
 sub _state_do_local_users_match_xline {
