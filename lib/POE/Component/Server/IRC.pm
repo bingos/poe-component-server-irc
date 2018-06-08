@@ -1649,7 +1649,7 @@ sub _daemon_cmd_locops {
             {
                 prefix  => $server,
                 command => 'NOTICE',
-                params  => [ "*** LocOps -- from $nick: " . $args->[0] ],
+                params  => [ '*', "*** LocOps -- from $nick: " . $args->[0] ],
             },
             keys %{ $self->{state}{locops} },
         );
@@ -2192,12 +2192,12 @@ sub _daemon_cmd_dline {
         if ( $mask !~ m![:.]! && $self->state_nick_exists($mask) ) {
             my $uid = $self->state_user_uid($mask);
             if ( $uid !~ m!^$sid! ) {
-              push @$ref, { prefix => $server, command => 'NOTICE', params => [ 'Cannot DLINE nick on another server' ] };
+              push @$ref, { prefix => $server, command => 'NOTICE', params => [ $nick, 'Cannot DLINE nick on another server' ] };
               last SWITCH;
             }
             if ( $self->{state}{uids}{$uid}{umode} =~ m!o! || $self->{state}{uids}{$uid}{route_id} eq 'spoofed' ) {
-              my $nick = $self->{state}{uids}{$uid}{nick};
-              push @$ref, { prefix => $server, command => 'NOTICE', params => [ "$nick is E-lined" ] };
+              my $tnick = $self->{state}{uids}{$uid}{nick};
+              push @$ref, { prefix => $server, command => 'NOTICE', params => [ $nick, "$tnick is E-lined" ] };
               last SWITCH;
             }
             my $addr = $self->{state}{uids}{$uid}{socket}[0];
@@ -2210,7 +2210,7 @@ sub _daemon_cmd_dline {
         if ( !$netmask ) {
           $netmask = Net::CIDR::cidrvalidate($mask);
           if ( !$netmask ) {
-              push @$ref, { prefix => $server, command => 'NOTICE', params => [ 'Unable to parse provided IP mask' ] };
+              push @$ref, { prefix => $server, command => 'NOTICE', params => [ $nick, 'Unable to parse provided IP mask' ] };
               last SWITCH;
           }
         }
@@ -2273,11 +2273,42 @@ sub _daemon_cmd_dline {
                 setby    => $full,
                 setat    => time,
                 netmask  => $netmask,
-                duration => $duration,
+                duration => $duration * 60,
                 reason   => $reason,
         };
 
         $self->add_denial( $netmask, 'You have been D-lined.' );
+
+        my $reply_notice;
+        my $locop_notice;
+
+        if ( $duration ) {
+           $reply_notice = "Added temporary $duration min. D-Line [$netmask]";
+           $locop_notice = "*** Notice -- $full added temporary $duration min. D-Line for [$netmask] [$reason]";
+        }
+        else {
+           $reply_notice = "Added D-Line [$netmask]";
+           $locop_notice = "*** Notice -- $full added D-Line for [$netmask] [$reason]";
+        }
+
+        push @$ref, {
+            prefix  => $server,
+            command => 'NOTICE',
+            params  => [ $nick, $reply_notice ],
+        };
+
+        $self->send_output(
+            {
+                prefix  => $server,
+                command => 'NOTICE',
+                params  => [
+                    '*',
+                    $locop_notice,
+                ],
+            },
+            keys %{ $self->{state}{locops} },
+        );
+
         $self->_state_do_local_users_match_dline($netmask,$reason);
     }
 
@@ -2352,7 +2383,7 @@ sub _daemon_cmd_undline {
         }
 
         if ( !$result ) {
-           push @$ref, { prefix => $server, command => 'NOTICE', params => [ "No D-Line for [$unmask] found" ] };
+           push @$ref, { prefix => $server, command => 'NOTICE', params => [ $nick, "No D-Line for [$unmask] found" ] };
            last SWITCH;
         }
 
@@ -2364,6 +2395,24 @@ sub _daemon_cmd_undline {
         );
 
         $self->del_denial( $unmask );
+
+        push @$ref, {
+            prefix  => $server,
+            command => 'NOTICE',
+            params  => [ $nick, "D-Line for [$unmask] is removed" ],
+        };
+
+        $self->send_output(
+            {
+                prefix  => $server,
+                command => 'NOTICE',
+                params  => [
+                    '*',
+                    "*** Notice -- $full has removed the D-Line for: [$unmask]",
+                ],
+            },
+            keys %{ $self->{state}{locops} },
+        );
 
     }
 
@@ -4798,6 +4847,64 @@ sub _daemon_peer_squit {
     return @$ref if wantarray;
     return $ref;
 }
+
+sub _daemon_peer_dline {
+    my $self    = shift;
+    my $peer_id = shift || return;
+    my $uid     = shift || return;
+    my $server  = $self->server_name();
+    my $sid     = $self->server_sid();
+    my $ref     = [ ];
+    my $args    = [ @_ ];
+    my $count   = @$args;
+
+    # :7UPAAAAAX DLINE logserv.dummy.net 600 10.6.0.0/24 :reasons
+    # :7UPAAAAAX DLINE * 600 10.6.0.0/24 :reasons
+
+    SWITCH: {
+        if (!$count || $count < 3) {
+            last SWITCH;
+        }
+        my ($peermask,$duration,$netmask,$reason) = @$args;
+        $reason = '<No reason supplied>' if !$reason;
+        my $us = 0;
+        {
+          my %targpeers;
+          my $sids = $self->{state}{sids};
+          foreach my $psid ( keys %{ $sids } ) {
+             if (matches_mask($peermask, $sids->{$psid}{name})) {
+                if ($sid eq $psid) {
+                   $us = 1;
+                }
+                else {
+                   $targpeers{ $sids->{$psid}{route_id} }++;
+                }
+             }
+          }
+          delete $targpeers{$peer_id};
+          $self->send_output(
+                {
+                    prefix  => $uid,
+                    command => 'DLINE',
+                    params  => [
+                        $peermask,
+                        ( $duration * 60 ),
+                        $netmask,
+                        $reason,
+                    ],
+                },
+                grep { $self->_state_peer_capab($_, 'DLN') } keys %targpeers,
+            );
+        }
+        last SWITCH if !$us;
+
+        # FUCKITY
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
 
 sub _daemon_peer_kline {
     my $self    = shift;
