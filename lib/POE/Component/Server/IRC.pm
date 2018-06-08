@@ -2832,39 +2832,38 @@ sub _daemon_cmd_away {
     my $ref    = [ ];
 
     SWITCH: {
-        my $record = $self->{state}{users}{uc_irc($nick)};
+        my $rec = $self->{state}{users}{uc_irc($nick)};
         if (!$msg) {
-            delete $record->{away};
+            delete $rec->{away};
             $self->send_output(
                 {
-                    prefix => $nick,
+                    prefix => $rec->{uid},
                     command => 'AWAY',
-                    colonify => 0,
                 },
                 $self->_state_connected_peers(),
             );
             push @$ref, {
                 prefix  => $server,
                 command => '305',
-                params  => ['You are no longer marked as being away'],
+                params  => [ $rec->{nick}, 'You are no longer marked as being away' ],
             };
             last SWITCH;
         }
 
-        $record->{away} = $msg;
+        $rec->{away} = $msg;
+
         $self->send_output(
             {
-                prefix   => $record->{uid},
+                prefix   => $rec->{uid},
                 command  => 'AWAY',
                 params   => [$msg],
-                colonify => 0,
             },
             $self->_state_connected_peers(),
         );
         push @$ref, {
             prefix  => $server,
             command => '306',
-            params  => ['You have been marked as being away'],
+            params  => [ $rec->{nick}, 'You have been marked as being away' ],
         };
     }
 
@@ -7467,32 +7466,31 @@ sub _daemon_peer_invite {
 sub _daemon_peer_away {
     my $self    = shift;
     my $peer_id = shift || return;
-    my $nick    = shift || return;
+    my $uid     = shift || return;
     my $msg     = shift;
     my $server  = $self->server_name();
     my $ref     = [ ];
 
     SWITCH: {
-        my $record = $self->{state}{users}{uc_irc($nick)};
+        my $rec = $self->{state}{uids}{$uid};
         if (!$msg) {
-            delete $record->{away};
+            delete $rec->{away};
             $self->send_output(
                 {
-                    prefix   => $nick,
+                    prefix   => $uid,
                     command  => 'AWAY',
-                    colonify => 0,
                 },
                 grep { $_ ne $peer_id } $self->_state_connected_peers(),
             );
             last SWITCH;
         }
-        $record->{away} = $msg;
+        $rec->{away} = $msg;
+
         $self->send_output(
             {
-                prefix   => $nick,
+                prefix   => $uid,
                 command  => 'AWAY',
                 params   => [$msg],
-                colonify => 0,
             },
             grep { $_ ne $peer_id } $self->_state_connected_peers(),
         );
