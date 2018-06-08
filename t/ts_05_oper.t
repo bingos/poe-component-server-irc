@@ -41,7 +41,7 @@ sub _start {
     $heap->{ircd}->add_operator(
         {
             username => 'moo',
-            password => 'fishdont'
+            password => '$2a$06$Z.NhM/6/Upqfn2WcECk0Y./rpDmNLD2nUeETfKUPWSGNoNtQq9BVO',
         }
     );
     $kernel->delay('_shutdown', 20);
