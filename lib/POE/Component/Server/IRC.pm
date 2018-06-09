@@ -642,6 +642,12 @@ sub _cmd_from_peer {
             $method = '_daemon_peer_umode';
         }
 
+        if ($cmd =~ m!^(UN)?[DKX]LINE$!i ) {
+            $self->send_output( $_, $conn_id ) for
+              $self->$method($conn_id, $prefix, @$params);
+            last SWITCH;
+        }
+
         if ($self->can($method)) {
             $self->$method($conn_id, $prefix, @$params);
             last SWITCH;
@@ -2342,6 +2348,7 @@ sub _daemon_cmd_unxline {
                         $peermask,
                         $unmask,
                     ],
+                    colonify => 0,
                 },
                 grep { $self->_state_peer_capab($_, 'CLUSTER') } keys %targpeers,
             );
@@ -2600,6 +2607,7 @@ sub _daemon_cmd_undline {
                         $peermask,
                         $unmask,
                     ],
+                    colonify => 0,
                 },
                 grep { $self->_state_peer_capab($_, 'UNDLN') } keys %targpeers,
             );
@@ -5090,7 +5098,7 @@ sub _daemon_peer_squit {
     return $ref;
 }
 
-sub _daemon_peer_dline {
+sub _daemon_peer_xline {
     my $self    = shift;
     my $peer_id = shift || return;
     my $uid     = shift || return;
@@ -5100,8 +5108,209 @@ sub _daemon_peer_dline {
     my $args    = [ @_ ];
     my $count   = @$args;
 
-    # :7UPAAAAAX DLINE logserv.dummy.net 600 10.6.0.0/24 :reasons
-    # :7UPAAAAAX DLINE * 600 10.6.0.0/24 :reasons
+    SWITCH: {
+        if (!$count || $count < 3) {
+            last SWITCH;
+        }
+        my ($peermask,$duration,$mask,$reason) = @$args;
+        $reason = '<No reason supplied>' if !$reason;
+        my $us = 0;
+        {
+          my %targpeers;
+          my $sids = $self->{state}{sids};
+          foreach my $psid ( keys %{ $sids } ) {
+             if (matches_mask($peermask, $sids->{$psid}{name})) {
+                if ($sid eq $psid) {
+                   $us = 1;
+                }
+                else {
+                   $targpeers{ $sids->{$psid}{route_id} }++;
+                }
+             }
+          }
+          delete $targpeers{$peer_id};
+          $self->send_output(
+                {
+                    prefix  => $uid,
+                    command => 'XLINE',
+                    params  => [
+                        $peermask,
+                        $duration,
+                        $mask,
+                        $reason,
+                    ],
+                },
+                grep { $self->_state_peer_capab($_, 'CLUSTER') } keys %targpeers,
+            );
+        }
+
+        last SWITCH if !$us;
+
+        if ( !$reason ) {
+          $reason = shift @$args || '<No reason supplied>';
+        }
+
+        my $full = $self->state_user_full($uid);
+        my $nick = (split /!/, $full)[0];
+
+        my $minutes = $duration / 60;
+
+        $self->send_event(
+            "daemon_xline",
+            $full,
+            $mask,
+            $minutes,
+            $reason,
+        );
+
+        push @{ $self->{state}{xlines} }, {
+                setby    => $full,
+                setat    => time,
+                mask     => $mask,
+                duration => $duration,
+                reason   => $reason,
+        };
+
+        my $reply_notice;
+        my $locop_notice;
+
+        if ( $duration ) {
+           $reply_notice = "Added temporary $minutes min. X-Line [$mask]";
+           $locop_notice = "*** Notice -- $full added temporary $minutes min. X-Line for [$mask] [$reason]";
+        }
+        else {
+           $reply_notice = "Added X-Line [$mask]";
+           $locop_notice = "*** Notice -- $full added X-Line for [$mask] [$reason]";
+        }
+
+        push @$ref, {
+            prefix  => $sid,
+            command => 'NOTICE',
+            params  => [ $nick, $reply_notice ],
+        };
+
+        $self->send_output(
+            {
+                prefix  => $server,
+                command => 'NOTICE',
+                params  => [
+                    '*',
+                    $locop_notice,
+                ],
+            },
+            keys %{ $self->{state}{locops} },
+        );
+
+        $self->_state_do_local_users_match_xline($mask,$reason);
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _daemon_peer_unxline {
+    my $self    = shift;
+    my $peer_id = shift || return;
+    my $uid     = shift || return;
+    my $server  = $self->server_name();
+    my $sid     = $self->server_sid();
+    my $ref     = [ ];
+    my $args    = [ @_ ];
+    my $count   = @$args;
+
+
+    SWITCH: {
+        if (!$count || $count < 2) {
+            last SWITCH;
+        }
+        my ($peermask,$unmask) = @$args;
+        my $us = 0;
+        {
+          my %targpeers;
+          my $sids = $self->{state}{sids};
+          foreach my $psid ( keys %{ $sids } ) {
+             if (matches_mask($peermask, $sids->{$psid}{name})) {
+                if ($sid eq $psid) {
+                   $us = 1;
+                }
+                else {
+                   $targpeers{ $sids->{$psid}{route_id} }++;
+                }
+             }
+          }
+          delete $targpeers{$peer_id};
+          $self->send_output(
+                {
+                    prefix  => $uid,
+                    command => 'UNXLINE',
+                    params  => [
+                        $peermask,
+                        $unmask,
+                    ],
+                    colonify => 0,
+                },
+                grep { $self->_state_peer_capab($_, 'CLUSTER') } keys %targpeers,
+            );
+        }
+
+        last SWITCH if !$us;
+
+        my $result; my $i = 0;
+        XLINES: for (@{ $self->{state}{xlines} }) {
+           if ( $_->{mask} eq $unmask ) {
+                $result = splice @{ $self->{state}{xlines} }, $i, 1;
+                last XLINES;
+           }
+           ++$i;
+        }
+
+        my $full = $self->state_user_full($uid);
+        my $nick = (split /!/, $full)[0];
+
+        if ( !$result ) {
+           push @$ref, { prefix => $server, command => 'NOTICE', params => [ $nick, "No X-Line for [$unmask] found" ] };
+           last SWITCH;
+        }
+
+        $self->send_event(
+            "daemon_unxline",
+            $full,
+            $unmask,
+        );
+
+        push @$ref, {
+            prefix  => $sid,
+            command => 'NOTICE',
+            params  => [ $nick, "X-Line for [$unmask] is removed" ],
+        };
+
+        $self->send_output(
+            {
+                prefix  => $server,
+                command => 'NOTICE',
+                params  => [
+                    '*',
+                    "*** Notice -- $full has removed the X-Line for: [$unmask]",
+                ],
+            },
+            keys %{ $self->{state}{locops} },
+        );
+
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _daemon_peer_dline {
+    my $self    = shift;
+    my $peer_id = shift || return;
+    my $uid     = shift || return;
+    my $server  = $self->server_name();
+    my $sid     = $self->server_sid();
+    my $ref     = [ ];
+    my $args    = [ @_ ];
+    my $count   = @$args;
 
     SWITCH: {
         if (!$count || $count < 3) {
@@ -5130,7 +5339,7 @@ sub _daemon_peer_dline {
                     command => 'DLINE',
                     params  => [
                         $peermask,
-                        ( $duration * 60 ),
+                        $duration,
                         $netmask,
                         $reason,
                     ],
@@ -5138,15 +5347,167 @@ sub _daemon_peer_dline {
                 grep { $self->_state_peer_capab($_, 'DLN') } keys %targpeers,
             );
         }
+
         last SWITCH if !$us;
 
-        # FUCKITY
+        $netmask = Net::CIDR::cidrvalidate($netmask);
+
+        last SWITCH if !$netmask;
+
+        my $full = $self->state_user_full($uid);
+
+        my $minutes = $duration / 60;
+
+        $self->send_event(
+            "daemon_dline",
+            $full,
+            $netmask,
+            $minutes,
+            $reason,
+        );
+
+        push @{ $self->{state}{dlines} }, {
+                setby    => $full,
+                setat    => time,
+                netmask  => $netmask,
+                duration => $duration,
+                reason   => $reason,
+        };
+
+        $self->add_denial( $netmask, 'You have been D-lined.' );
+
+        my $reply_notice;
+        my $locop_notice;
+
+        if ( $duration ) {
+           $reply_notice = "Added temporary $minutes min. D-Line [$netmask]";
+           $locop_notice = "*** Notice -- $full added temporary $minutes min. D-Line for [$netmask] [$reason]";
+        }
+        else {
+           $reply_notice = "Added D-Line [$netmask]";
+           $locop_notice = "*** Notice -- $full added D-Line for [$netmask] [$reason]";
+        }
+
+        push @$ref, {
+            prefix  => $sid,
+            command => 'NOTICE',
+            params  => [ $self->state_user_nick($uid), $reply_notice ],
+        };
+
+        $self->send_output(
+            {
+                prefix  => $server,
+                command => 'NOTICE',
+                params  => [
+                    '*',
+                    $locop_notice,
+                ],
+            },
+            keys %{ $self->{state}{locops} },
+        );
+
+        $self->_state_do_local_users_match_dline($netmask,$reason);
     }
 
     return @$ref if wantarray;
     return $ref;
 }
 
+sub _daemon_peer_undline {
+    my $self    = shift;
+    my $peer_id = shift || return;
+    my $uid     = shift || return;
+    my $server  = $self->server_name();
+    my $sid     = $self->server_sid();
+    my $ref     = [ ];
+    my $args    = [ @_ ];
+    my $count   = @$args;
+
+
+    SWITCH: {
+        if (!$count || $count < 2) {
+            last SWITCH;
+        }
+        my ($peermask,$unmask) = @$args;
+        my $us = 0;
+        {
+          my %targpeers;
+          my $sids = $self->{state}{sids};
+          foreach my $psid ( keys %{ $sids } ) {
+             if (matches_mask($peermask, $sids->{$psid}{name})) {
+                if ($sid eq $psid) {
+                   $us = 1;
+                }
+                else {
+                   $targpeers{ $sids->{$psid}{route_id} }++;
+                }
+             }
+          }
+          delete $targpeers{$peer_id};
+          $self->send_output(
+                {
+                    prefix  => $uid,
+                    command => 'UNDLINE',
+                    params  => [
+                        $peermask,
+                        $unmask,
+                    ],
+                    colonify => 0,
+                },
+                grep { $self->_state_peer_capab($_, 'UNDLN') } keys %targpeers,
+            );
+        }
+
+        last SWITCH if !$us;
+
+        my $result; my $i = 0;
+        DLINES: for (@{ $self->{state}{dlines} }) {
+           if ( $_->{netmask} eq $unmask ) {
+                $result = splice @{ $self->{state}{dlines} }, $i, 1;
+                last DLINES;
+           }
+           ++$i;
+        }
+
+        my $full = $self->state_user_full($uid);
+        my $nick = (split /!/, $full)[0];
+
+        if ( !$result ) {
+           push @$ref, { prefix => $sid, command => 'NOTICE', params => [ $nick, "No D-Line for [$unmask] found" ] };
+           last SWITCH;
+        }
+
+        $self->send_event(
+            "daemon_undline",
+            $full,
+            $unmask,
+        );
+
+        $self->del_denial( $unmask );
+
+        push @$ref, {
+            prefix  => $sid,
+            command => 'NOTICE',
+            params  => [ $nick, "D-Line for [$unmask] is removed" ],
+        };
+
+        $self->send_output(
+            {
+                prefix  => $server,
+                command => 'NOTICE',
+                params  => [
+                    '*',
+                    "*** Notice -- $full has removed the D-Line for: [$unmask]",
+                ],
+            },
+            keys %{ $self->{state}{locops} },
+        );
+
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
 
 sub _daemon_peer_kline {
     my $self    = shift;
