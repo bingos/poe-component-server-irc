@@ -1955,9 +1955,7 @@ sub _daemon_cmd_rkline {
                 reason   => $reason,
             };
 
-            for ($self->_state_local_users_match_rkline($user, $host)) {
-                $self->_terminate_conn_error($_, 'K-Lined');
-            }
+            $self->_state_do_local_users_match_rkline($user, $host, $reason);
         }
     }
 
@@ -2017,6 +2015,7 @@ sub _daemon_cmd_kline {
         }
         my ($target, $reason);
         if ($args->[0] && uc $args->[0] eq 'ON') {
+            my $on  = shift @$args;
             $target = shift @$args;
             $reason = shift @$args || 'No Reason';
             my %targets;
@@ -2038,12 +2037,11 @@ sub _daemon_cmd_kline {
                     command => 'KLINE',
                     params  => [
                         $target,
-                        $duration,
+                        $duration * 60,
                         $user,
                         $host,
                         $reason,
                     ],
-                    colonify => 0,
                 },
                 grep { $self->_state_peer_capab($_, 'KLN') } keys %targets,
             );
@@ -2071,15 +2069,43 @@ sub _daemon_cmd_kline {
                 setby    => $full,
                 setat    => time,
                 target   => $target,
-                duration => $duration,
+                duration => $duration * 60,
                 user     => $user,
                 host     => $host,
                 reason   => $reason,
             };
 
-            for ($self->_state_local_users_match_kline($user, $host)) {
-                $self->_terminate_conn_error($_, 'K-Lined');
+            my $reply_notice;
+            my $locop_notice;
+
+            if ( $duration ) {
+                $reply_notice = "Added temporary $duration min. K-Line [$user\@host]";
+                $locop_notice = "*** Notice -- $full added temporary $duration min. K-Line for [$user\@$host] [$reason]";
             }
+            else {
+                $reply_notice = "Added X-Line [$user\@$host]";
+                $locop_notice = "*** Notice -- $full added X-Line for [$user\@$host] [$reason]";
+            }
+
+            push @$ref, {
+                prefix  => $server,
+                command => 'NOTICE',
+                params  => [ $nick, $reply_notice ],
+            };
+
+            $self->send_output(
+                {
+                    prefix  => $server,
+                    command => 'NOTICE',
+                    params  => [
+                        '*',
+                        $locop_notice,
+                    ],
+                },
+                keys %{ $self->{state}{locops} },
+            );
+
+            $self->_state_do_local_users_match_kline($user, $host, $reason);
         }
     }
 
@@ -2127,7 +2153,7 @@ sub _daemon_cmd_unkline {
             last SWITCH;
         }
         if ($count > 1 && $args->[2] && uc $args->[2] eq 'ON') {
-            my $target = $args->[2];
+            my $target = $args->[3];
             my %targets;
             for my $peer (keys %{ $self->{state}{peers} }) {
                 if (matches_mask($target, $peer)) {
@@ -2142,7 +2168,7 @@ sub _daemon_cmd_unkline {
 
             $self->send_output(
                 {
-                    prefix   => $nick,
+                    prefix   => $self->state_user_uid($nick),
                     command  => 'UNKLINE',
                     params   => [$target, $user, $host],
                     colonify => 0,
@@ -2153,20 +2179,46 @@ sub _daemon_cmd_unkline {
         else {
             $us = 1;
         }
-        if ($us) {
-            my $target = $args->[3] || $server;
-            $self->send_event(
-                "daemon_unkline", $full, $target, $user, $host,
-            );
-            my $i = 0;
-            for (@{ $self->{state}{klines} }) {
-                if ($_->{user} eq $user && $_->{host} eq $host) {
-                    splice @{ $self->{state}{klines} }, $i, 1;
-                    last;
-                }
-                ++$i;
+
+        last SWITCH if !$us;
+
+        my $target = $args->[3] || $server;
+        my $result; my $i = 0;
+        KLINES: for (@{ $self->{state}{klines} }) {
+            if ($_->{user} eq $user && $_->{host} eq $host) {
+                $result = splice @{ $self->{state}{klines} }, $i, 1;
+                last KLINES;
             }
+            ++$i;
         }
+
+        if ( !$result ) {
+           push @$ref, { prefix => $server, command => 'NOTICE', params => [ $nick, "No K-Line for [$user\@$host] found" ] };
+           last SWITCH;
+        }
+
+        $self->send_event(
+            "daemon_unkline", $full, $target, $user, $host,
+        );
+
+        push @$ref, {
+            prefix  => $server,
+            command => 'NOTICE',
+            params  => [ $nick, "K-Line for [$user\@$host] is removed" ],
+        };
+
+        $self->send_output(
+            {
+                prefix  => $server,
+                command => 'NOTICE',
+                params  => [
+                    '*',
+                    "*** Notice -- $full has removed the K-Line for: [$user\@$host]",
+                ],
+            },
+            keys %{ $self->{state}{locops} },
+        );
+
     }
 
     return @$ref if wantarray;
@@ -5512,7 +5564,7 @@ sub _daemon_peer_undline {
 sub _daemon_peer_kline {
     my $self    = shift;
     my $peer_id = shift || return;
-    my $nick    = shift || return;
+    my $uid     = shift || return;
     my $server  = $self->server_name();
     my $ref     = [ ];
     my $args    = [ @_ ];
@@ -5522,7 +5574,7 @@ sub _daemon_peer_kline {
         if (!$count || $count < 5) {
             last SWITCH;
         }
-        my $full = $self->state_user_full($nick);
+        my $full = $self->state_user_full($uid);
         my $target = $args->[0];
         my $us = 0;
         my $ucserver = uc $server;
@@ -5541,16 +5593,17 @@ sub _daemon_peer_kline {
         delete $targets{$peer_id};
         $self->send_output(
             {
-                prefix   => $nick,
+                prefix   => $uid,
                 command  => 'KLINE',
                 params   => $args,
                 colonify => 0,
             },
             grep { $self->_state_peer_capab($_, 'KLN') } keys %targets,
         );
-        if ($us) {
-            $self->send_event("daemon_kline", $full, @$args);
-            push @{ $self->{state}{klines} }, {
+
+        last SWITCH if !$us;
+
+        push @{ $self->{state}{klines} }, {
                 setby    => $full,
                 setat    => time(),
                 target   => $args->[0],
@@ -5558,10 +5611,42 @@ sub _daemon_peer_kline {
                 user     => $args->[2],
                 host     => $args->[3],
                 reason   => $args->[4],
-            };
-            $self->_terminate_conn_error($_, 'K-Lined')
-                for $self->_state_local_users_match_kline($args->[2], $args->[3]);
-        }
+        };
+
+        my $reply_notice;
+        my $locop_notice;
+
+        my $minutes = $args->[1] / 60;
+        $args->[1] = $minutes;
+
+        $self->send_event("daemon_kline", $full, @$args);
+
+
+        my $temp = $minutes ? "temporary $minutes min. " : '';
+
+        $reply_notice = sprintf('Added %sK-Line [%s@%s]', $temp, $args->[2], $args->[3]);
+        $locop_notice = sprintf('*** Notice -- %s added %sK-Line for [%s@%s] [%s]',
+                                   $full, $temp, $args->[2], $args->[3], $args->[4] );
+
+        push @$ref, {
+            prefix  => $self->server_sid(),
+            command => 'NOTICE',
+            params  => [ (split /!/, $full)[0], $reply_notice ],
+        };
+
+        $self->send_output(
+            {
+                prefix  => $server,
+                command => 'NOTICE',
+                params  => [
+                    '*',
+                    $locop_notice,
+                ],
+            },
+            keys %{ $self->{state}{locops} },
+        );
+
+        $self->_state_do_local_users_match_kline($args->[2], $args->[3], $args->[4]);
     }
 
     return @$ref if wantarray;
@@ -5571,7 +5656,7 @@ sub _daemon_peer_kline {
 sub _daemon_peer_unkline {
     my $self    = shift;
     my $peer_id = shift || return;
-    my $nick    = shift || return;
+    my $uid     = shift || return;
     my $server  = $self->server_name();
     my $ref     = [ ];
     my $args    = [ @_ ];
@@ -5582,7 +5667,7 @@ sub _daemon_peer_unkline {
         if (!$count || $count < 3) {
             last SWITCH;
         }
-        my $full = $self->state_user_full($nick);
+        my $full = $self->state_user_full($uid);
         my $target = $args->[0];
         my $us = 0;
         my $ucserver = uc $server;
@@ -5601,7 +5686,7 @@ sub _daemon_peer_unkline {
         delete $targets{$peer_id};
         $self->send_output(
             {
-                prefix   => $nick,
+                prefix   => $uid,
                 command  => 'UNKLINE',
                 params   => $args,
                 colonify => 0,
@@ -5609,17 +5694,46 @@ sub _daemon_peer_unkline {
             grep { $self->_state_peer_capab($_, 'UNKLN') } keys %targets,
         );
 
-        if ($us) {
-            $self->send_event("daemon_unkline", $full, @$args);
-            my $i = 0;
-            for (@{ $self->{state}{klines} }) {
-                if ($_->{user} eq $args->[1] && $_->{host} eq $args->[2]) {
-                    splice (@{ $self->{state}{klines} }, $i, 1);
-                    last;
-                }
-                ++$i;
+        last SWITCH if !$us;
+
+        my $result; my $i = 0;
+        KLINES: for (@{ $self->{state}{klines} }) {
+            if ($_->{user} eq $args->[1] && $_->{host} eq $args->[2]) {
+                $result = splice (@{ $self->{state}{klines} }, $i, 1);
+                last KLINES;
             }
+            ++$i;
         }
+
+        my $sid  = $self->server_sid();
+        my $nick = (split /!/, $full)[0];
+
+        my $unmask = join '@', $args->[1], $args->[2];
+
+        if ( !$result ) {
+           push @$ref, { prefix => $sid, command => 'NOTICE', params => [ $nick, "No K-Line for [$unmask] found" ] };
+           last SWITCH;
+        }
+
+        $self->send_event("daemon_unkline", $full, @$args);
+
+        push @$ref, {
+            prefix  => $sid,
+            command => 'NOTICE',
+            params  => [ $nick, "K-Line for [$unmask] is removed" ],
+        };
+
+        $self->send_output(
+            {
+                prefix  => $server,
+                command => 'NOTICE',
+                params  => [
+                    '*',
+                    "*** Notice -- $full has removed the K-Line for: [$unmask]",
+                ],
+            },
+            keys %{ $self->{state}{locops} },
+        );
     }
 
     return @$ref if wantarray;
@@ -8128,31 +8242,45 @@ sub _state_do_local_users_match_dline {
     return 1;
 }
 
-sub _state_local_users_match_rkline {
-    my $self  = shift;
-    my $luser = shift || return;
-    my $host  = shift || return;
-    my $local = $self->{state}{peers}{uc $self->server_name()}{users};
-    my @conns;
+sub _state_do_local_users_match_rkline {
+    my $self    = shift;
+    my $luser   = shift || return;
+    my $host    = shift || return;
+    my $reason  = shift || '<No reason supplied>';
+    my $sid     = $self->server_sid();
+    my $server  = $self->server_name();
+    my $local   = $self->{state}{sids}{$sid}{uids};
 
-    for my $user (values %$local) {
-        next if $user->{route_id} eq 'spoofed';
-        next if $user->{umode} && $user->{umode} =~ /o/;
-        if (($user->{socket}[0] =~ /$host/
-                || $user->{auth}{hostname} =~ /$host/)
-                && $user->{auth}{ident} =~ /$luser/) {
-            push @conns, $user->{route_id};
+    for my $urec (values %$local) {
+        next if $urec->{route_id} eq 'spoofed';
+        next if $urec->{umode} && $urec->{umode} =~ /o/;
+        if (($urec->{socket}[0] =~ /$host/
+                || $urec->{auth}{hostname} =~ /$host/)
+                && $urec->{auth}{ident} =~ /$luser/) {
+          $self->send_output(
+             {
+                prefix  => $server,
+                command => '465',
+                params  => [
+                   $urec->{nick},
+                   "You are banned from this server- $reason",
+                ],
+             },
+             $urec->{route_id},
+          );
+          $self->_terminate_conn_error( $urec->{route_id}, $reason );
         }
     }
-    return @conns;
+    return 1;
 }
 
-sub _state_local_users_match_gline {
-    my $self  = shift;
-    my $luser = shift || return;
-    my $host  = shift || return;
-    my $local = $self->{state}{peers}{uc $self->server_name()}{users};
-    my @conns;
+sub _state_do_local_users_match_kline {
+    my $self   = shift;
+    my $luser  = shift || return;
+    my $host   = shift || return;
+    my $reason = shift || '<No reason supplied>';
+    my $local  = $self->{state}{peers}{uc $self->server_name()}{users};
+    my $server = $self->server_name();
 
     if (my $netmask = Net::CIDR::cidrvalidate($host)) {
         for my $user (values %$local) {
@@ -8160,7 +8288,18 @@ sub _state_local_users_match_gline {
             next if $user->{umode} && $user->{umode} =~ /o/;
             if (Net::CIDR::cidrlookup($user->{socket}[0],$netmask)
                     && matches_mask($luser, $user->{auth}{ident})) {
-                push @conns, $user->{route_id};
+                $self->send_output(
+                    {
+                        prefix  => $server,
+                        command => '465',
+                        params  => [
+                          $user->{nick},
+                          "You are banned from this server- $reason",
+                        ],
+                    },
+                    $user->{route_id},
+                );
+                $self->_terminate_conn_error( $user->{route_id}, $reason );
             }
         }
     }
@@ -8172,12 +8311,23 @@ sub _state_local_users_match_gline {
             if ((matches_mask($host, $user->{socket}[0])
                    || matches_mask($host, $user->{auth}{hostname}))
                    && matches_mask($luser, $user->{auth}{ident})) {
-                push @conns, $user->{route_id};
+                $self->send_output(
+                    {
+                        prefix  => $server,
+                        command => '465',
+                        params  => [
+                          $user->{nick},
+                          "You are banned from this server- $reason",
+                        ],
+                    },
+                    $user->{route_id},
+                );
+                $self->_terminate_conn_error( $user->{route_id}, $reason );
             }
         }
     }
 
-    return @conns;
+    return 1;
 }
 
 sub _state_user_matches_rkline {
