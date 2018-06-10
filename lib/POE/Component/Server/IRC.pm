@@ -1544,6 +1544,7 @@ sub _daemon_cmd_oper {
         $self->{stats}{ops}++;
         my $record = $self->{state}{users}{uc_irc($nick)};
         $record->{umode} .= 'o';
+        $record->{opuser} = $opuser;
         $self->{state}{stats}{ops_online}++;
         push @$ref, {
             prefix  => $server,
@@ -1556,23 +1557,18 @@ sub _daemon_cmd_oper {
         my $full = $record->{nick} . '!' . $record->{auth}{ident}
                     . '@' . $record->{auth}{hostname};
 
-        $self->send_output(
-          {
-            prefix  => $sid,
-            command => 'GLOBOPS',
-            params  => [ sprintf("%s{%s} is now an operator",$full,$opuser) ],
-          },
-          @peers,
-        );
+        my $notice = sprintf("%s{%s} is now an operator",$full,$opuser);
 
         $self->send_output(
           {
             prefix  => $sid,
-            command => 'NOTICE',
-            params  => [ sprintf("%s{%s} is now an operator",$full,$opuser) ],
+            command => 'GLOBOPS',
+            params  => [ $notice ],
           },
-          keys %{ $self->{state}{localops} },
+          @peers,
         );
+
+        $self->_send_to_realops( $notice );
 
         my $reply = {
             prefix  => $uid,
@@ -1657,15 +1653,8 @@ sub _daemon_cmd_locops {
             push @$ref, ['461', 'LOCOPS'];
             last SWITCH;
         }
-        my $full = $self->state_user_full($nick);
-        $self->send_output(
-            {
-                prefix  => $server,
-                command => 'NOTICE',
-                params  => [ '*', "*** LocOps -- from $nick: " . $args->[0] ],
-            },
-            keys %{ $self->{state}{locops} },
-        );
+        my $full = $self->state_user_full($nick,1);
+        $self->_send_to_realops( "from $full: " . $args->[0], 'locops' );
         $self->send_event("daemon_locops", $full, $args->[0]);
     }
 
@@ -1738,7 +1727,8 @@ sub _daemon_cmd_globops {
             last SWITCH;
         }
 
-        my $msg = "*** Global -- from $nick: " . $args->[0];
+        my $full = $self->state_user_full($nick,1);
+        my $msg  = "*** Global -- from $full: " . $args->[0];
 
         $self->send_output(
             {
@@ -1758,7 +1748,7 @@ sub _daemon_cmd_globops {
             keys %{ $self->{state}{wallops} },
         );
 
-        $self->send_event("daemon_globops", $self->state_user_full($nick), $args->[0]);
+        $self->send_event("daemon_globops", $full, $args->[0]);
     }
     return @$ref if wantarray;
     return $ref;
@@ -2075,17 +2065,10 @@ sub _daemon_cmd_kline {
                 reason   => $reason,
             };
 
-            my $reply_notice;
-            my $locop_notice;
+            my $temp = $duration ? "temporary $duration min. " : '';
 
-            if ( $duration ) {
-                $reply_notice = "Added temporary $duration min. K-Line [$user\@host]";
-                $locop_notice = "*** Notice -- $full added temporary $duration min. K-Line for [$user\@$host] [$reason]";
-            }
-            else {
-                $reply_notice = "Added X-Line [$user\@$host]";
-                $locop_notice = "*** Notice -- $full added X-Line for [$user\@$host] [$reason]";
-            }
+            my $reply_notice = "Added ${temp}K-Line [$user\@host]";
+            my $locop_notice = "$full added ${temp}K-Line for [$user\@$host] [$reason]";
 
             push @$ref, {
                 prefix  => $server,
@@ -2093,17 +2076,7 @@ sub _daemon_cmd_kline {
                 params  => [ $nick, $reply_notice ],
             };
 
-            $self->send_output(
-                {
-                    prefix  => $server,
-                    command => 'NOTICE',
-                    params  => [
-                        '*',
-                        $locop_notice,
-                    ],
-                },
-                keys %{ $self->{state}{locops} },
-            );
+            $self->_send_to_realops( $locop_notice );
 
             $self->_state_do_local_users_match_kline($user, $host, $reason);
         }
@@ -2207,18 +2180,7 @@ sub _daemon_cmd_unkline {
             params  => [ $nick, "K-Line for [$user\@$host] is removed" ],
         };
 
-        $self->send_output(
-            {
-                prefix  => $server,
-                command => 'NOTICE',
-                params  => [
-                    '*',
-                    "*** Notice -- $full has removed the K-Line for: [$user\@$host]",
-                ],
-            },
-            keys %{ $self->{state}{locops} },
-        );
-
+        $self->_send_to_realops( "$full has removed the K-Line for: [$user\@$host]" );
     }
 
     return @$ref if wantarray;
@@ -2316,17 +2278,10 @@ sub _daemon_cmd_xline {
                 reason   => $reason,
         };
 
-        my $reply_notice;
-        my $locop_notice;
+        my $temp = $duration ? "temporary $duration min. " : '';
 
-        if ( $duration ) {
-           $reply_notice = "Added temporary $duration min. X-Line [$mask]";
-           $locop_notice = "*** Notice -- $full added temporary $duration min. X-Line for [$mask] [$reason]";
-        }
-        else {
-           $reply_notice = "Added X-Line [$mask]";
-           $locop_notice = "*** Notice -- $full added X-Line for [$mask] [$reason]";
-        }
+        my $reply_notice = "Added ${temp}X-Line [$mask]";
+        my $locop_notice = "$full added ${temp}X-Line for [$mask] [$reason]";
 
         push @$ref, {
             prefix  => $server,
@@ -2334,17 +2289,7 @@ sub _daemon_cmd_xline {
             params  => [ $nick, $reply_notice ],
         };
 
-        $self->send_output(
-            {
-                prefix  => $server,
-                command => 'NOTICE',
-                params  => [
-                    '*',
-                    $locop_notice,
-                ],
-            },
-            keys %{ $self->{state}{locops} },
-        );
+        $self->_send_to_realops( $locop_notice );
 
         $self->_state_do_local_users_match_xline($mask,$reason);
     }
@@ -2438,18 +2383,7 @@ sub _daemon_cmd_unxline {
             params  => [ $nick, "X-Line for [$unmask] is removed" ],
         };
 
-        $self->send_output(
-            {
-                prefix  => $server,
-                command => 'NOTICE',
-                params  => [
-                    '*',
-                    "*** Notice -- $full has removed the X-Line for: [$unmask]",
-                ],
-            },
-            keys %{ $self->{state}{locops} },
-        );
-
+        $self->_send_to_realops( "$full has removed the X-Line for: [$unmask]" );
     }
 
     return @$ref if wantarray;
@@ -2575,17 +2509,10 @@ sub _daemon_cmd_dline {
 
         $self->add_denial( $netmask, 'You have been D-lined.' );
 
-        my $reply_notice;
-        my $locop_notice;
+        my $temp = $duration ? "temporary $duration min. " : '';
 
-        if ( $duration ) {
-           $reply_notice = "Added temporary $duration min. D-Line [$netmask]";
-           $locop_notice = "*** Notice -- $full added temporary $duration min. D-Line for [$netmask] [$reason]";
-        }
-        else {
-           $reply_notice = "Added D-Line [$netmask]";
-           $locop_notice = "*** Notice -- $full added D-Line for [$netmask] [$reason]";
-        }
+        my $reply_notice = "Added ${temp}D-Line [$netmask]";
+        my $locop_notice = "$full added ${temp}D-Line for [$netmask] [$reason]";
 
         push @$ref, {
             prefix  => $server,
@@ -2593,17 +2520,7 @@ sub _daemon_cmd_dline {
             params  => [ $nick, $reply_notice ],
         };
 
-        $self->send_output(
-            {
-                prefix  => $server,
-                command => 'NOTICE',
-                params  => [
-                    '*',
-                    $locop_notice,
-                ],
-            },
-            keys %{ $self->{state}{locops} },
-        );
+        $self->_send_to_realops( $locop_notice );
 
         $self->_state_do_local_users_match_dline($netmask,$reason);
     }
@@ -5223,17 +5140,10 @@ sub _daemon_peer_xline {
                 reason   => $reason,
         };
 
-        my $reply_notice;
-        my $locop_notice;
+        my $temp = $duration ? "temporary $minutes min. " : '';
 
-        if ( $duration ) {
-           $reply_notice = "Added temporary $minutes min. X-Line [$mask]";
-           $locop_notice = "*** Notice -- $full added temporary $minutes min. X-Line for [$mask] [$reason]";
-        }
-        else {
-           $reply_notice = "Added X-Line [$mask]";
-           $locop_notice = "*** Notice -- $full added X-Line for [$mask] [$reason]";
-        }
+        my $reply_notice = "Added ${temp}X-Line [$mask]";
+        my $locop_notice = "$full added ${temp}X-Line for [$mask] [$reason]";
 
         push @$ref, {
             prefix  => $sid,
@@ -5241,17 +5151,7 @@ sub _daemon_peer_xline {
             params  => [ $nick, $reply_notice ],
         };
 
-        $self->send_output(
-            {
-                prefix  => $server,
-                command => 'NOTICE',
-                params  => [
-                    '*',
-                    $locop_notice,
-                ],
-            },
-            keys %{ $self->{state}{locops} },
-        );
+        $self->_send_to_realops( $locop_notice );
 
         $self->_state_do_local_users_match_xline($mask,$reason);
     }
@@ -5336,17 +5236,7 @@ sub _daemon_peer_unxline {
             params  => [ $nick, "X-Line for [$unmask] is removed" ],
         };
 
-        $self->send_output(
-            {
-                prefix  => $server,
-                command => 'NOTICE',
-                params  => [
-                    '*',
-                    "*** Notice -- $full has removed the X-Line for: [$unmask]",
-                ],
-            },
-            keys %{ $self->{state}{locops} },
-        );
+        $self->_send_to_realops( "$full has removed the X-Line for: [$unmask]" );
 
     }
 
@@ -5428,17 +5318,10 @@ sub _daemon_peer_dline {
 
         $self->add_denial( $netmask, 'You have been D-lined.' );
 
-        my $reply_notice;
-        my $locop_notice;
+        my $temp = $duration ? "temporary $minutes min. " : '';
 
-        if ( $duration ) {
-           $reply_notice = "Added temporary $minutes min. D-Line [$netmask]";
-           $locop_notice = "*** Notice -- $full added temporary $minutes min. D-Line for [$netmask] [$reason]";
-        }
-        else {
-           $reply_notice = "Added D-Line [$netmask]";
-           $locop_notice = "*** Notice -- $full added D-Line for [$netmask] [$reason]";
-        }
+        my $reply_notice = "Added ${temp}D-Line [$netmask]";
+        my $locop_notice = "$full added ${temp}D-Line for [$netmask] [$reason]";
 
         push @$ref, {
             prefix  => $sid,
@@ -5446,17 +5329,7 @@ sub _daemon_peer_dline {
             params  => [ $self->state_user_nick($uid), $reply_notice ],
         };
 
-        $self->send_output(
-            {
-                prefix  => $server,
-                command => 'NOTICE',
-                params  => [
-                    '*',
-                    $locop_notice,
-                ],
-            },
-            keys %{ $self->{state}{locops} },
-        );
+        $self->_send_to_realops( $locop_notice );
 
         $self->_state_do_local_users_match_dline($netmask,$reason);
     }
@@ -5543,17 +5416,7 @@ sub _daemon_peer_undline {
             params  => [ $nick, "D-Line for [$unmask] is removed" ],
         };
 
-        $self->send_output(
-            {
-                prefix  => $server,
-                command => 'NOTICE',
-                params  => [
-                    '*',
-                    "*** Notice -- $full has removed the D-Line for: [$unmask]",
-                ],
-            },
-            keys %{ $self->{state}{locops} },
-        );
+        $self->_send_to_realops( "$full has removed the D-Line for: [$unmask]" );
 
     }
 
@@ -5613,9 +5476,6 @@ sub _daemon_peer_kline {
                 reason   => $args->[4],
         };
 
-        my $reply_notice;
-        my $locop_notice;
-
         my $minutes = $args->[1] / 60;
         $args->[1] = $minutes;
 
@@ -5624,8 +5484,8 @@ sub _daemon_peer_kline {
 
         my $temp = $minutes ? "temporary $minutes min. " : '';
 
-        $reply_notice = sprintf('Added %sK-Line [%s@%s]', $temp, $args->[2], $args->[3]);
-        $locop_notice = sprintf('*** Notice -- %s added %sK-Line for [%s@%s] [%s]',
+        my $reply_notice = sprintf('Added %sK-Line [%s@%s]', $temp, $args->[2], $args->[3]);
+        my $locop_notice = sprintf('%s added %sK-Line for [%s@%s] [%s]',
                                    $full, $temp, $args->[2], $args->[3], $args->[4] );
 
         push @$ref, {
@@ -5634,17 +5494,7 @@ sub _daemon_peer_kline {
             params  => [ (split /!/, $full)[0], $reply_notice ],
         };
 
-        $self->send_output(
-            {
-                prefix  => $server,
-                command => 'NOTICE',
-                params  => [
-                    '*',
-                    $locop_notice,
-                ],
-            },
-            keys %{ $self->{state}{locops} },
-        );
+        $self->_send_to_realops( $locop_notice );
 
         $self->_state_do_local_users_match_kline($args->[2], $args->[3], $args->[4]);
     }
@@ -5723,17 +5573,7 @@ sub _daemon_peer_unkline {
             params  => [ $nick, "K-Line for [$unmask] is removed" ],
         };
 
-        $self->send_output(
-            {
-                prefix  => $server,
-                command => 'NOTICE',
-                params  => [
-                    '*',
-                    "*** Notice -- $full has removed the K-Line for: [$unmask]",
-                ],
-            },
-            keys %{ $self->{state}{locops} },
-        );
+        $self->_send_to_realops( "$full has removed the K-Line for: [$unmask]" );
     }
 
     return @$ref if wantarray;
@@ -8992,6 +8832,8 @@ sub _state_peer_capab {
 sub state_user_full {
     my $self = shift;
     my $nick = shift || return;
+    my $oper = shift;
+    my $opuser = '';
     my $record;
     if ( $nick =~ m!^\d! ) {
       return if !$self->state_uid_exists($nick);
@@ -9001,8 +8843,11 @@ sub state_user_full {
       return if !$self->state_nick_exists($nick);
       $record = $self->{state}{users}{uc_irc($nick)};
     }
+    if ( $oper && defined $record->{opuser} ) {
+      $opuser = '{' . $record->{opuser} . '}';
+    }
     return $record->{nick} . '!' . $record->{auth}{ident}
-        . '@' . $record->{auth}{hostname};
+        . '@' . $record->{auth}{hostname} . $opuser;
 }
 
 sub state_user_nick {
@@ -9659,6 +9504,36 @@ EOF
 
     $self->{config}{capab} = [qw(CLUSTER QS DLN UNDLN EX IE HOPS UNKLN KLN GLN EOB)];
 
+    return 1;
+}
+
+sub _send_to_realops {
+    my $self     = shift;
+    my $msg      = shift || return;
+    my $type     = shift || 'Notice';
+    my $flags    = shift; # Future use
+    my $server   = $self->server_name();
+
+    my %types = (
+      NOTICE => 'Notice',
+      LOCOPS  => 'LocOps',
+      GLOBOPS => 'Globops',
+    );
+
+    my $notice =
+      sprintf('*** %s -- %s', ( $types{uc $type} || 'Notice' ), $msg );
+
+    $self->send_output(
+         {
+            prefix  => $server,
+            command => 'NOTICE',
+            params  => [
+                '*',
+                $notice,
+            ],
+         },
+         keys %{ $self->{state}{locops} },
+    );
     return 1;
 }
 
@@ -10757,6 +10632,9 @@ on whether the given peer exists or not.
 
 Takes one argument, a nickname, returns that users full nick!user@host
 if they exist, undef if they don't.
+
+If a second argument is provided and the nickname provided is an oper,
+then the returned value will be nick!user@host{opuser}
 
 =head3 C<state_user_nick>
 
