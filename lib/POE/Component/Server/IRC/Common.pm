@@ -46,7 +46,8 @@ sub chkpasswd {
         return 1 if _bcrypt( $pass, $chk ) eq $chk;
     }
 
-    return 1 if crypt( $pass, $chk ) eq $chk;
+    my $crypt = crypt( $pass, $chk );
+    return 1 if $crypt && $crypt eq $chk;
     return 1 if $pass eq $chk;
     return;
 }

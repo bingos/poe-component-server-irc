@@ -200,6 +200,7 @@ sub _default {
     my ($conn_id, $input) = map { $$_ } @_;
 
     return PCSI_EAT_CLIENT if !$self->_connection_exists($conn_id);
+    return PCSI_EAT_CLIENT if $self->_connection_terminated($conn_id);
     $self->{state}{conns}{$conn_id}{seen} = time;
 
     if (!$self->_connection_registered($conn_id)) {
@@ -8244,7 +8245,7 @@ sub _state_auth_client_conn {
         if (matches_mask($auth->{mask}, $uh)
                 || matches_mask($auth->{mask}, $ui)) {
             if ($auth->{password} && (!$record->{pass}
-                    || $auth->{password} ne $record->{pass})) {
+                    || !chkpasswd($record->{pass}, $auth->{password}) )) {
                 return 0;
             }
             $record->{auth}{hostname} = $auth->{spoof} if $auth->{spoof};
@@ -8269,7 +8270,7 @@ sub _state_auth_peer_conn {
 
     return if !$name || !$pass;
     my $peers = $self->{config}{peers};
-    if (!$peers->{uc $name} || $peers->{uc $name}{pass} ne $pass) {
+    if (!$peers->{uc $name} || !chkpasswd($pass, $peers->{uc $name}{pass})) {
         return 0;
     }
 

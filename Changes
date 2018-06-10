@@ -11,6 +11,8 @@ Revision history for POE-Component-Server-IRC
     - Added IRCv3.x capability negotiations CAP cmd
       - added 'away-notify', 'invite-notify' and 'multi-prefix'
     - Added bcrypt passwd support for OPER passwords
+    - Added bcrypt passwd support for auth passwords
+    - Fixed problem with pmkpasswd utility
     - Updated the included x509 cert and key
     - OPERWALL has been removed, replaced with GLOBOPS
     - Refined LOCOPS for consistency with GLOBOPS

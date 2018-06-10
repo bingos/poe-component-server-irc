@@ -2,7 +2,7 @@ use strict;
 use warnings;
 use Crypt::PasswdMD5;
 use Crypt::Eksblowfish::Bcrypt qw[bcrypt];
-use Test::More tests => 10;
+use Test::More qw[no_plan];
 use POE::Component::Server::IRC::Common qw(:ALL);
 
 my $bc = '$2a$06$qqA1/Y1dmjBZP4JslFnV7eSIDN4I8skwNuu0OHCy.JAzAkaQX6ise';
@@ -38,3 +38,31 @@ ok(chkpasswd($plain, $apr), 'Apache MD5 chkpasswd');
 ok(chkpasswd($plain, $bcrypt), 'Bcrypt chkpasswd');
 
 ok(chkpasswd($plain, $bc), 'Bcrypt chkpasswd');
+
+my $passgen = sub {
+  my @ab = ('A'..'Z', 'a'..'z');
+  return join '', map { $ab[int(rand @ab)] } (0..19);
+};
+
+# Bcrypt extended
+foreach my $pass ( qw[fubar barfu foo moo meep squigglebox] ) {
+   my $bcrypt = mkpasswd( $pass, 'bcrypt', 1 );
+   my $badpass = $passgen->();
+   ok(chkpasswd($pass,$bcrypt), "Pass: $pass");
+   ok(!chkpasswd($badpass,$bcrypt), "Pass not: $badpass" );
+}
+
+my $count = 0;
+while ( $count <= 49 ) {
+  my $pass = $passgen->();
+  my %passes;
+  $passes{plain}  = $pass;
+  $passes{crypt}  = mkpasswd($pass);
+  $passes{md5}    = mkpasswd($pass, md5 => 1);
+  $passes{apache} = mkpasswd($pass, apache => 1);
+  $passes{bcrypt} = mkpasswd($pass, bcrypt => 1);
+  foreach my $type ( qw[plain crypt md5 apache bcrypt] ) {
+    ok(chkpasswd($pass,$passes{$type}), "Chkpasswd $type: $passes{$type}");
+  }
+  $count++;
+}
