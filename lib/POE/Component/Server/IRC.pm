@@ -31,7 +31,7 @@ sub spawn {
             {
                 map { +"daemon_cmd_$_" => '_spoofed_command' }
                     qw(join part mode kick topic nick privmsg notice xline unxline
-                       kline unkline sjoin locops wallops globops dline undline)
+                       rkline unrkline kline unkline sjoin locops wallops globops dline undline)
             },
         ],
     );
@@ -1892,7 +1892,6 @@ sub _daemon_cmd_rkline {
     my $ref    = [ ];
     my $args   = [@_];
     my $count  = @$args;
-    # RKLINE [time] <mask> [ON <server>] :[reason]
 
     SWITCH: {
         if (!$self->state_user_is_operator($nick)) {
@@ -1918,8 +1917,6 @@ sub _daemon_cmd_rkline {
             last SWITCH;
         }
         my $full = $self->state_user_full($nick);
-        my $us = 0;
-        my $ucserver = uc $server;
         my $reason;
 
         {
@@ -1930,7 +1927,7 @@ sub _daemon_cmd_rkline {
                 "daemon_rkline",
                 $full,
                 $server,
-                $duration,
+                $duration * 60,
                 $user,
                 $host,
                 $reason,
@@ -1946,8 +1943,75 @@ sub _daemon_cmd_rkline {
                 reason   => $reason,
             };
 
+            my $temp = $duration ? "temporary $duration min. " : '';
+
+            my $reply_notice = "Added ${temp}RK-Line [$user\@host]";
+            my $locop_notice = "$full added ${temp}RK-Line for [$user\@$host] [$reason]";
+
+            push @$ref, {
+                prefix  => $server,
+                command => 'NOTICE',
+                params  => [ $nick, $reply_notice ],
+            };
+
+            $self->_send_to_realops( $locop_notice );
+
             $self->_state_do_local_users_match_rkline($user, $host, $reason);
         }
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _daemon_cmd_unrkline {
+    my $self   = shift;
+    my $nick   = shift || return;
+    my $server = $self->server_name();
+    my $ref    = [ ];
+    my $args   = [@_];
+    my $count  = @$args;
+
+    SWITCH: {
+        if (!$self->state_user_is_operator($nick)) {
+            push @$ref, ['481'];
+            last SWITCH;
+        }
+        if (!$count || $count < 1) {
+            push @$ref, ['461', 'UNRKLINE'];
+            last SWITCH;
+        }
+        my ($user, $host) = split /\@/, $args->[0];
+        if (!$user || !$host) {
+            last SWITCH;
+        }
+        my $full = $self->state_user_full($nick);
+
+        my $result; my $i = 0;
+        RKLINES: for (@{ $self->{state}{rklines} }) {
+            if ($_->{user} eq $user && $_->{host} eq $host) {
+                $result = splice @{ $self->{state}{rklines} }, $i, 1;
+                last RKLINES;
+            }
+            ++$i;
+        }
+
+        if ( !$result ) {
+           push @$ref, { prefix => $server, command => 'NOTICE', params => [ $nick, "No RK-Line for [$user\@$host] found" ] };
+           last SWITCH;
+        }
+
+        $self->send_event(
+            "daemon_unrkline", $full, $server, $user, $host,
+        );
+
+        push @$ref, {
+            prefix  => $server,
+            command => 'NOTICE',
+            params  => [ $nick, "RK-Line for [$user\@$host] is removed" ],
+        };
+
+        $self->_send_to_realops( "$full has removed the RK-Line for: [$user\@$host]" );
     }
 
     return @$ref if wantarray;
@@ -10880,6 +10944,18 @@ To set a temporary 10 minute RKLINE:
      10,
      '^.*$@^(yahoo|google|microsoft)\.com$',
      $reason,
+ );
+
+=head3 C<daemon_cmd_unrkline>
+
+Removes an RKLINE as indicated by the user@host mask supplied. 
+
+To remove a RKLINE:
+
+ $ircd->yield(
+     'daemon_cmd_unrkline',
+     $spoofed_nick,
+     $user_host_mask,
  );
 
 =head3 C<daemon_cmd_sjoin>
