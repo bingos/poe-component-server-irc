@@ -27,7 +27,7 @@ $md5 = 0 if $md5 and $apache;
 $apache = $md5 = 0 if $bcrypt;
 
 my $crypt = mkpasswd( $password, md5 => $md5, apache => $apache, bcrypt => $bcrypt );
-print "$password:$crypt\n" if $crypt;
+print "$crypt\n" if $crypt;
 exit 0;
 
 __END__
