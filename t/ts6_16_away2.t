@@ -30,6 +30,7 @@ POE::Session->create(
             _start
             _shutdown
             _launch_client
+            _launch_client2
             ircd_listener_add
             ircd_daemon_eob
             groucho_connected
@@ -41,11 +42,15 @@ POE::Session->create(
             client_connected
             client_input
             client_disconnected
+            client2_connected
+            client2_input
+            client2_disconnected
         )],
         'main' => {
             groucho_registered => 'testc_registered',
             harpo_registered   => 'testc_registered',
             client_registered  => 'testc_registered',
+            client2_registered  => 'testc_registered',
         },
     ],
     heap => {
@@ -110,6 +115,16 @@ sub _launch_client {
   return;
 }
 
+sub _launch_client2 {
+  my ($kernel,$heap) = @_[KERNEL,HEAP];
+  my $filter = POE::Filter::Stackable->new();
+  $filter->push( POE::Filter::Line->new( InputRegexp => '\015?\012', OutputLiteral => "\015\012" ),
+             POE::Filter::IRCD->new( debug => 0 ), );
+  my $tag = 'client2';
+  $heap->{client2} = Test::POE::Client::TCP->spawn( alias => $tag, filter => $filter, address => '127.0.0.1', port => $heap->{port}, prefix => $tag );
+  return;
+}
+
 sub testc_registered {
   my ($kernel,$sender) = @_[KERNEL,SENDER];
   pass($_[STATE]);
@@ -120,8 +135,18 @@ sub testc_registered {
 sub client_connected {
   my ($kernel,$heap,$sender) = @_[KERNEL,HEAP,SENDER];
   pass($_[STATE]);
+  $kernel->post( $sender, 'send_to_server', { command => 'CAP', params => [ 'REQ', 'away-notify' ], colonify => 0 } );
+  $kernel->post( $sender, 'send_to_server', { command => 'CAP', params => [ 'END' ], colonify => 0 } );
   $kernel->post( $sender, 'send_to_server', { command => 'NICK', params => [ 'bobbins' ], colonify => 0 } );
   $kernel->post( $sender, 'send_to_server', { command => 'USER', params => [ 'bobbins', '*', '*', 'bobbins along' ], colonify => 1 } );
+  return;
+}
+
+sub client2_connected {
+  my ($kernel,$heap,$sender) = @_[KERNEL,HEAP,SENDER];
+  pass($_[STATE]);
+  $kernel->post( $sender, 'send_to_server', { command => 'NICK', params => [ 'teapot' ], colonify => 0 } );
+  $kernel->post( $sender, 'send_to_server', { command => 'USER', params => [ 'teapot', '*', '*', 'small and stout' ], colonify => 1 } );
   return;
 }
 
@@ -169,32 +194,42 @@ sub client_input {
   if ( $cmd eq 'ERROR' ) {
     pass($cmd);
     my $state = $heap->{ircd}{state};
-    is( scalar keys %{ $state->{chans} }, 0, 'No channels' );
-    is( scalar keys %{ $state->{conns} }, 2, 'Should only be 2 connections' );
-    is( scalar keys %{ $state->{uids} }, 2, 'Two UIDs' );
-    is( scalar keys %{ $state->{users} }, 2, 'Two users' );
-    is( scalar keys %{ $state->{peers}{'LISTEN.SERVER.IRC'}{users} }, 0, 'No local users' );
-    is( scalar keys %{ $state->{sids}{'1FU'}{uids} }, 0, 'No local UIDs' );
     $poe_kernel->post( $sender, 'shutdown' );
     $poe_kernel->post( 'harpo', 'terminate' );
     return;
   }
   if ( $cmd eq '366' ) {
     pass("IRC_$cmd");
+    $poe_kernel->yield( '_launch_client2' );
+  }
+  if ( $cmd eq 'CAP' ) {
+    pass($cmd);
+    return;
+  }
+  if ( $cmd eq 'AWAY' ) {
+    pass($cmd);
+    is( $prefix, 'teapot!~teapot@listen.server.irc', 'Has correct prefix' );
+    is( $params->[0], 'Do not bother me!', 'Do not bother me!' );
+    $poe_kernel->post($sender, 'send_to_server', { command => 'QUIT', params => [ 'Connection reset by fear' ] } );
+  }
+  return;
+}
+
+sub client2_input {
+  my ($heap,$sender,$in) = @_[HEAP,SENDER,ARG0];
+  #diag($in->{raw_line}, "\n");
+  my $prefix = $in->{prefix};
+  my $cmd    = $in->{command};
+  my $params = $in->{params};
+  if ( $cmd eq 'MODE' && $prefix =~ m'^teapot' && $params->[1] eq '+i' ) {
     $poe_kernel->post( $sender, 'send_to_server', { command => 'AWAY', params => [ 'Do not bother me!' ] } );
+    return;
   }
   if ( $cmd eq '306' ) {
     pass("IRC_$cmd");
-    is( $params->[0], 'bobbins', 'Correct NICK in response' );
+    is( $params->[0], 'teapot', 'Correct NICK in response' );
     is( $params->[1], 'You have been marked as being away', 'We are well away' );
-    $poe_kernel->post($sender, 'send_to_server', { command => 'AWAY' } );
-    return;
-  }
-  if ( $cmd eq '305' ) {
-    pass("IRC_$cmd");
-    is( $params->[0], 'bobbins', 'Correct NICK in response' );
-    is( $params->[1], 'You are no longer marked as being away', 'We are back' );
-    $poe_kernel->post($sender, 'send_to_server', { command => 'QUIT', params => [ 'Connection reset by fear' ] } );
+    $poe_kernel->post( $sender, 'send_to_server', { command => 'JOIN', params => [ '#potato' ] } );
     return;
   }
   return;
@@ -256,6 +291,13 @@ sub harpo_input {
 sub client_disconnected {
   my ($heap,$state,$sender) = @_[HEAP,STATE,SENDER];
   pass($state);
+  return;
+}
+
+sub client2_disconnected {
+  my ($heap,$state,$sender) = @_[HEAP,STATE,SENDER];
+  pass($state);
+  $poe_kernel->post( $sender, 'shutdown' );
   return;
 }
 
