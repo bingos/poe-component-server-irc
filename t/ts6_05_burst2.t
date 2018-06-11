@@ -155,6 +155,7 @@ sub groucho_connected {
   $uidts = time() - 20;
   $kernel->post( $sender, 'send_to_server', { prefix => '7UP', command => 'SID', params => [ 'fake.server.irc', 2, '4AK', 'This is a fake server' ] } );
   $kernel->post( $sender, 'send_to_server', { prefix => '7UP', command => 'UID', params => [ 'groucho', '1', $uidts, '+aiow', 'groucho', 'groucho.marx', '0', '7UPAAAAAA', '0', 'Groucho Marx' ], colonify => 1 } );
+  $kernel->post( $sender, 'send_to_server', { prefix => '7UPAAAAAA', command => 'AWAY', params => [ 'A minute and a huff' ], colonify => 1 } );
   $kernel->post( $sender, 'send_to_server', { prefix => '7UP', command => 'SJOIN', params => [ ( $chants + 2 ), '#marxbros', '+nt', '@7UPAAAAAA' ], colonify => 1 } );
   $kernel->post( $sender, 'send_to_server', { command => 'EOB', prefix => '7UP' } );
   $kernel->post( $sender, 'send_to_server', { command => 'EOB', prefix => '4AK' } );
@@ -230,6 +231,7 @@ sub client_input {
     is( scalar keys %{ $state->{peers}{'LISTEN.SERVER.IRC'}{users} }, 1, 'One local user' );
     is( scalar keys %{ $state->{sids}{'1FU'}{uids} }, 1, 'One local UID' );
     unlike( $state->{chans}{'#MARXBROS'}{'7UPAAAAAA'}, qr/o/, 'Should not be chanop' );
+    is( $state->{uids}{'7UPAAAAAA'}{away}, 'A minute and a huff', 'Groucho is away' );
     $poe_kernel->yield( '_launch_harpo' );
     return;
   }

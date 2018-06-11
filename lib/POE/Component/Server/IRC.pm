@@ -8459,14 +8459,21 @@ sub _state_send_burst {
             ( $record->{ipaddress} || 0 ),
             $record->{uid}, '*', $record->{ircname},
         ];
-        $self->send_output(
+        my @uid_burst = (
             {
                 prefix  => $prefix,
                 command => 'UID',
                 params  => $arrayref,
             },
-            $conn_id,
         );
+        if ( $record->{away} ) {
+            push @uid_burst, {
+                prefix  => $record->{uid},
+                command => 'AWAY',
+                params  => $record->{away},
+            };
+        }
+        $self->send_output( $_, $conn_id ) for @uid_burst;
     }
 
     # Send SJOIN+MODE burst
