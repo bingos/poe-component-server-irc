@@ -552,7 +552,7 @@ sub _cmd_from_unknown {
 sub _cmd_from_peer {
     my ($self, $conn_id, $input) = @_;
 
-    my $cmd     = $input->{command};
+    my $cmd     = uc $input->{command};
     my $params  = $input->{params};
     my $prefix  = $input->{prefix};
     my $sid = $self->server_sid();
@@ -613,6 +613,7 @@ sub _cmd_from_peer {
         # TODO: SQUIT needs its own handler
         if ($cmd =~ /^(VERSION|TIME|LINKS|ADMIN|INFO|MOTD)$/i ) {
             my $client_method = '_daemon_peer_miscell';
+            $client_method = '_daemon_peer_links' if $cmd eq 'LINKS';
             $self->_send_output_to_client(
                 $conn_id,
                 $prefix,
@@ -5013,46 +5014,74 @@ sub _daemon_cmd_topic {
 sub _daemon_cmd_links {
     my $self   = shift;
     my $nick   = shift || return;
-    my $target = shift;
     my $server = $self->server_name();
+    my $sid    = $self->server_sid();
+    my $args   = [ @_ ];
+    my $count  = @$args;
     my $ref    = [ ];
 
     SWITCH:{
-        if ($target && !$self->state_peer_exists($target)) {
-            push @$ref, ['402', $target];
+        # TODO: load throttling
+        my $target;
+        if ($count > 1 && !$self->state_peer_exists( $args->[0] )) {
+            push @$ref, ['402', $args->[0]];
             last SWITCH;
+        }
+        if ( $count > 1 ) {
+          $target = shift @$args;
         }
         if ($target && uc $server ne uc $target) {
             $self->send_output(
                 {
-                    prefix  => $nick,
+                    prefix  => $self->state_user_uid($nick),
                     command => 'LINKS',
-                    params  => [$self->_state_peer_name($target)],
+                    params  => [
+                        $self->_state_peer_sid($target),
+                        $args->[0],
+                    ],
                 },
                 $self->_state_peer_route($target)
             );
             last SWITCH;
         }
 
-        for ($self->_state_server_links($server, $server, $nick)) {
-            push @$ref, $_;
-        }
-        push @$ref, {
-            prefix  => $server,
-            command => '364',
-            params  => [
-                $nick,
-                $server,
-                $server,
-                join( ' ', '0', $self->server_config('serverdesc'))
-            ],
-        };
-        push @$ref, {
-            prefix  => $server,
-            command => '365',
-            params  => [$nick, '*', 'End of /LINKS list.'],
-        };
+        my $mask = shift @$args || '*';
+
+        push @$ref, $_ for
+                 @{ $self->_daemon_do_links($nick,$server,$mask) };
     }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _daemon_do_links {
+    my $self   = shift;
+    my $client = shift || return;
+    my $prefix = shift || return;
+    my $mask   = shift || return;
+    my $sid    = $self->server_sid();
+    my $server = $self->server_name();
+    my $ref    = [ ];
+
+    for ($self->_state_sid_links($sid, $prefix, $client, $mask)) {
+         push @$ref, $_;
+    }
+    push @$ref, {
+        prefix  => $prefix,
+        command => '364',
+        params  => [
+            $client,
+            $server,
+            $server,
+            join( ' ', '0', $self->server_config('serverdesc'))
+        ],
+    } if matches_mask($mask, $server);
+    push @$ref, {
+        prefix  => $prefix,
+        command => '365',
+        params  => [$client, $mask, 'End of /LINKS list.'],
+    };
 
     return @$ref if wantarray;
     return $ref;
@@ -7896,6 +7925,40 @@ sub _daemon_peer_away {
     return $ref;
 }
 
+sub _daemon_peer_links {
+    my $self    = shift;
+    my $peer_id = shift || return;
+    my $uid     = shift || return;
+    my $server  = $self->server_name();
+    my $sid     = $self->server_sid();
+    my $ref     = [ ];
+    my $args    = [ @_ ];
+    my $count   = @$args;
+
+    SWITCH: {
+        if (!$count || $count < 2) {
+            last SWITCH;
+        }
+        my ($target,$mask) = @$args;
+        if ( $sid ne $target ) {
+           $self->send_output(
+               {
+                  prefix  => $uid,
+                  command => 'LINKS',
+                  params  => $args,
+               },
+               $self->_state_sid_route($target),
+           );
+           last SWITCH;
+        }
+        push @$ref, $_ for
+             @{ $self->_daemon_do_links($uid,$sid,$mask ) };
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
 sub _state_create {
     my $self = shift;
 
@@ -8621,20 +8684,21 @@ sub _state_server_burst {
     return $ref;
 }
 
-sub _state_server_links {
+sub _state_sid_links {
     my $self = shift;
-    my $peer = shift || return;
+    my $psid = shift || return;
     my $orig = shift || return;
     my $nick = shift || return;
-    return if !$self->state_peer_exists($peer);
+    my $mask = shift || '*';
+    return if !$self->state_sid_exists($psid);
 
     my $ref = [ ];
-    $peer = $self->_state_peer_name($peer);
-    my $upeer = uc $peer;
+    my $peer = $self->_state_sid_name($psid);
 
-    for my $server (keys %{ $self->{state}{peers}{$upeer}{peers} }) {
-        my $rec = $self->{state}{peers}{$server};
-        for ($self->_state_server_links($rec->{name}, $orig, $nick)) {
+    my $sids = $self->{state}{sids}{$psid}{sids};
+    for my $server (sort { keys %{ $sids->{$b}{sids} } <=> keys %{ $sids->{$a}{sids} } } keys %$sids) {
+        my $rec = $self->{state}{sids}{$server};
+        for ($self->_state_sid_links($server, $orig, $nick)) {
             push @$ref, $_;
         }
         push @$ref, {
@@ -8646,7 +8710,7 @@ sub _state_server_links {
                 $peer,
                 join( ' ', $rec->{hops}, $rec->{desc}),
             ],
-        };
+        } if matches_mask($mask, $rec->{name});
     }
 
     return @$ref if wantarray;
