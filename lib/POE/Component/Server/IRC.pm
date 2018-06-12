@@ -5011,6 +5011,29 @@ sub _daemon_cmd_topic {
     return $ref;
 }
 
+sub _daemon_cmd_map {
+    my $self   = shift;
+    my $nick   = shift || return;
+    my $server = $self->server_name();
+    my $sid    = $self->server_sid();
+    my $ref    = [ ];
+
+    push @$ref, $_ for
+      $self->_state_do_map( $nick, $sid, 0 );
+
+    push @$ref, {
+        prefix  => $server,
+        command => '017',
+        params => [
+          $nick,
+          'End of /MAP',
+        ],
+    };
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
 sub _daemon_cmd_links {
     my $self   = shift;
     my $nick   = shift || return;
@@ -8678,6 +8701,59 @@ sub _state_server_burst {
             params  => [$rec->{name}, $rec->{hops} + 1, $server, $rec->{desc}],
         };
         push @$ref, $_ for $self->_state_server_burst($rec->{sid}, $targ);
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _state_do_map {
+    my $self   = shift;
+    my $nick   = shift || return;
+    my $psid   = shift || return;
+    my $plen   = shift;
+    my $ctn    = shift;
+    my $ref    = [ ];
+    return if !$self->state_sid_exists($psid);
+    my $rec = $self->{state}{sids}{$psid};
+
+    SWITCH: {
+        my $global = scalar keys %{ $self->{state}{uids} };
+        my $local  = scalar keys %{ $rec->{uids} };
+        my $suffix = sprintf(" | Users: %5d (%1.2f%%)", $local, ( 100 * $local / $global ) );
+
+        my $prompt = ' ' x $plen;
+        substr $prompt, -2, 2, '|-' if $plen;
+        substr $prompt, -2, 2, '`-' if !$ctn && $plen;
+        my $buffer = $rec->{name} . ' ';
+        $buffer .= '-' x ( 64 - length($buffer) - length($prompt) );
+        $buffer .= $suffix;
+
+        if ( $plen && $plen > 60 ) {
+            push @$ref, {
+                prefix  => $self->server_name(),
+                command => '016',
+                params  => [
+                    $nick,
+                    join '', $prompt, $rec->{name}
+                ],
+            };
+            last SWITCH;
+        }
+
+        push @$ref, {
+            prefix  => $self->server_name(),
+            command => '015',
+            params  => [
+                $nick,
+                join '', $prompt, $buffer
+            ],
+        };
+        my $sids = $self->{state}{sids}{$psid}{sids};
+        my $cnt = keys %$sids;
+        foreach my $server (sort { keys %{ $sids->{$a}{sids} } <=> keys %{ $sids->{$b}{sids} } } keys %$sids) {
+          push @$ref, $_ for $self->_state_do_map( $nick, $server, $plen + 2, --$cnt );
+        }
     }
 
     return @$ref if wantarray;
