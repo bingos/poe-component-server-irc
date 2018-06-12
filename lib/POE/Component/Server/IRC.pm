@@ -10076,15 +10076,13 @@ sub daemon_server_kill {
         if (!$count) {
             last SWITCH;
         }
-        if ($self->state_peer_exists($args->[0])) {
-            last SWITCH;
-        }
         if ( $args->[0] =~ m!^\d! && !$self->state_uid_exists($args->[0]) ) {
             last SWITCH;
         }
-        elsif (!$self->state_nick_exists($args->[0])) {
+        elsif ( $args->[0] !~ m!^\d! && !$self->state_nick_exists($args->[0])) {
             last SWITCH;
         }
+
 
         my $target = $self->state_user_nick($args->[0]);
         my $comment = $args->[1] || '<No reason given>';
@@ -10093,47 +10091,55 @@ sub daemon_server_kill {
             : '');
 
         if ($self->_state_is_local_user($target)) {
-        my $route_id = $self->_state_user_route($target);
-        $self->send_output(
-            {
-                prefix  => $server,
-                command => 'KILL',
-                params  => [$target, $comment],
-            },
-            $route_id,
-        );
-        $self->_terminate_conn_error(
-            $route_id,
-            "Killed ($server ($comment))",
-        );
-        if ($route_id eq 'spoofed') {
-            $self->call(
-                'del_spoofed_nick',
-                $target,
-                "Killed ($server ($comment))",
+            my $route_id = $self->_state_user_route($target);
+            $self->send_output(
+                {
+                    prefix  => $server,
+                    command => 'KILL',
+                    params  => [$target, $comment],
+                },
+                $route_id,
             );
+            $self->send_output(
+                {
+                    prefix  => $mysid,
+                    command => 'KILL',
+                    params  => [
+                        $self->state_user_uid($target),
+                        join('!', $server, $target )." ($comment)",
+                    ],
+                },
+                grep { !$conn_id || $_ ne $conn_id }
+                    $self->_state_connected_peers(),
+            );
+            if ($route_id eq 'spoofed') {
+                $self->call(
+                    'del_spoofed_nick',
+                    $target,
+                    "Killed ($server ($comment))",
+                );
+            }
+            else {
+                $self->{state}{conns}{$route_id}{killed} = 1;
+                $self->_terminate_conn_error(
+                    $route_id,
+                    "Killed ($server ($comment))",
+                );
+            }
         }
         else {
-            $self->{state}{conns}{$route_id}{killed} = 1;
-            $self->_terminate_conn_error(
-                $route_id,
-                "Killed ($server ($comment))",
+            $self->{state}{users}{uc_irc($target)}{killed} = 1;
+            my $tuid = $self->state_user_uid( $target );
+            $self->send_output(
+                {
+                    prefix  => $mysid,
+                    command => 'KILL',
+                    params  => [$tuid, "$server ($comment)"],
+                },
+                grep { !$conn_id || $_ ne $conn_id }
+                    $self->_state_connected_peers(),
             );
-        }
-    }
-    else {
-        $self->{state}{users}{uc_irc($target)}{killed} = 1;
-        my $tuid = $self->state_user_uid( $target );
-        $self->send_output(
-            {
-                prefix  => $mysid,
-                command => 'KILL',
-                params  => [$tuid, "$server ($comment)"],
-            },
-            grep { !$conn_id || $_ ne $conn_id }
-                $self->_state_connected_peers(),
-        );
-        $self->send_output(
+            $self->send_output(
             @{ $self->_daemon_peer_quit(
                 $tuid,
                 "Killed ($server ($comment))"
