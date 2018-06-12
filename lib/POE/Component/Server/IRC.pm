@@ -27,7 +27,7 @@ sub spawn {
         ($debug ? (raw_events => 1) : ()),
         %args,
         states => [
-            [qw(add_spoofed_nick del_spoofed_nick)],
+            [qw(add_spoofed_nick del_spoofed_nick _state_drkx_line_alarm)],
             {
                 map { +"daemon_cmd_$_" => '_spoofed_command' }
                     qw(join part mode kick topic nick privmsg notice xline unxline
@@ -1928,21 +1928,15 @@ sub _daemon_cmd_rkline {
                 "daemon_rkline",
                 $full,
                 $server,
-                $duration * 60,
+                $duration,
                 $user,
                 $host,
                 $reason,
             );
 
-            push @{ $self->{state}{rklines} }, {
-                setby    => $full,
-                setat    => time(),
-                target   => $server,
-                duration => $duration,
-                user     => $user,
-                host     => $host,
-                reason   => $reason,
-            };
+            last SWITCH if !$self->_state_add_drkx_line( 'rkline', $full, time(),
+                                                         $server, $duration * 60,
+                                                         $user, $host, $reason );
 
             my $temp = $duration ? "temporary $duration min. " : '';
 
@@ -1986,21 +1980,15 @@ sub _daemon_cmd_unrkline {
         if (!$user || !$host) {
             last SWITCH;
         }
-        my $full = $self->state_user_full($nick);
 
-        my $result; my $i = 0;
-        RKLINES: for (@{ $self->{state}{rklines} }) {
-            if ($_->{user} eq $user && $_->{host} eq $host) {
-                $result = splice @{ $self->{state}{rklines} }, $i, 1;
-                last RKLINES;
-            }
-            ++$i;
-        }
+        my $result = $self->_state_del_drkx_line( 'rkline', $user, $host );
 
         if ( !$result ) {
            push @$ref, { prefix => $server, command => 'NOTICE', params => [ $nick, "No RK-Line for [$user\@$host] found" ] };
            last SWITCH;
         }
+
+        my $full = $self->state_user_full($nick);
 
         $self->send_event(
             "daemon_unrkline", $full, $server, $user, $host,
@@ -2111,6 +2099,9 @@ sub _daemon_cmd_kline {
             if (!$reason) {
                 $reason = pop @$args || 'No Reason';
             }
+
+            last SWITCH if !$self->_state_add_drkx_line( 'kline', $full, time(), $server,
+                                                         $duration * 60, $user, $host, $reason );
             $self->send_event(
                 "daemon_kline",
                 $full,
@@ -2120,16 +2111,6 @@ sub _daemon_cmd_kline {
                 $host,
                 $reason,
             );
-
-            push @{ $self->{state}{klines} }, {
-                setby    => $full,
-                setat    => time,
-                target   => $target,
-                duration => $duration * 60,
-                user     => $user,
-                host     => $host,
-                reason   => $reason,
-            };
 
             my $temp = $duration ? "temporary $duration min. " : '';
 
@@ -2222,14 +2203,8 @@ sub _daemon_cmd_unkline {
         last SWITCH if !$us;
 
         my $target = $args->[3] || $server;
-        my $result; my $i = 0;
-        KLINES: for (@{ $self->{state}{klines} }) {
-            if ($_->{user} eq $user && $_->{host} eq $host) {
-                $result = splice @{ $self->{state}{klines} }, $i, 1;
-                last KLINES;
-            }
-            ++$i;
-        }
+
+        my $result = $self->_state_del_drkx_line( 'kline', $user, $host );
 
         if ( !$result ) {
            push @$ref, { prefix => $server, command => 'NOTICE', params => [ $nick, "No K-Line for [$user\@$host] found" ] };
@@ -2328,6 +2303,9 @@ sub _daemon_cmd_xline {
         }
 
         my $full = $self->state_user_full($nick);
+
+        last SWITCH if !$self->_state_add_drkx_line( 'xline', $full, time(), $server,
+                                                     $duration * 60, $mask, $reason );
         $self->send_event(
             "daemon_xline",
             $full,
@@ -2335,14 +2313,6 @@ sub _daemon_cmd_xline {
             $duration,
             $reason,
         );
-
-        push @{ $self->{state}{xlines} }, {
-                setby    => $full,
-                setat    => time,
-                mask  => $mask,
-                duration => $duration * 60,
-                reason   => $reason,
-        };
 
         my $temp = $duration ? "temporary $duration min. " : '';
 
@@ -2422,14 +2392,7 @@ sub _daemon_cmd_unxline {
 
         last SWITCH if !$us;
 
-        my $result; my $i = 0;
-        XLINES: for (@{ $self->{state}{xlines} }) {
-           if ( $_->{mask} eq $unmask ) {
-                $result = splice @{ $self->{state}{xlines} }, $i, 1;
-                last XLINES;
-           }
-           ++$i;
-        }
+        my $result = $self->_state_del_drkx_line( 'xline', $unmask );
 
         if ( !$result ) {
            push @$ref, { prefix => $server, command => 'NOTICE', params => [ $nick, "No X-Line for [$unmask] found" ] };
@@ -2557,6 +2520,11 @@ sub _daemon_cmd_dline {
         }
 
         my $full = $self->state_user_full($nick);
+
+        last SWITCH if !$self->_state_add_drkx_line( 'dline',
+                                 $full, time, $server, $duration * 60,
+                                    $netmask, $reason );
+
         $self->send_event(
             "daemon_dline",
             $full,
@@ -2564,14 +2532,6 @@ sub _daemon_cmd_dline {
             $duration,
             $reason,
         );
-
-        push @{ $self->{state}{dlines} }, {
-                setby    => $full,
-                setat    => time,
-                netmask  => $netmask,
-                duration => $duration * 60,
-                reason   => $reason,
-        };
 
         $self->add_denial( $netmask, 'You have been D-lined.' );
 
@@ -2653,14 +2613,7 @@ sub _daemon_cmd_undline {
 
         last SWITCH if !$us;
 
-        my $result; my $i = 0;
-        DLINES: for (@{ $self->{state}{dlines} }) {
-           if ( $_->{netmask} eq $unmask ) {
-                $result = splice @{ $self->{state}{dlines} }, $i, 1;
-                last DLINES;
-           }
-           ++$i;
-        }
+        my $result = $self->_state_del_drkx_line( 'dline', $unmask );
 
         if ( !$result ) {
            push @$ref, { prefix => $server, command => 'NOTICE', params => [ $nick, "No D-Line for [$unmask] found" ] };
@@ -5237,8 +5190,9 @@ sub _daemon_peer_xline {
         }
 
         my $full = $self->state_user_full($uid);
-        my $nick = (split /!/, $full)[0];
 
+        last SWITCH if !$self->_state_add_drkx_line( 'xline', $full, time(), $server,
+                                                     $duration, $mask, $reason );
         my $minutes = $duration / 60;
 
         $self->send_event(
@@ -5249,18 +5203,12 @@ sub _daemon_peer_xline {
             $reason,
         );
 
-        push @{ $self->{state}{xlines} }, {
-                setby    => $full,
-                setat    => time,
-                mask     => $mask,
-                duration => $duration,
-                reason   => $reason,
-        };
-
         my $temp = $duration ? "temporary $minutes min. " : '';
 
         my $reply_notice = "Added ${temp}X-Line [$mask]";
         my $locop_notice = "$full added ${temp}X-Line for [$mask] [$reason]";
+
+        my $nick = (split /!/, $full)[0];
 
         push @$ref, {
             prefix  => $sid,
@@ -5324,14 +5272,7 @@ sub _daemon_peer_unxline {
 
         last SWITCH if !$us;
 
-        my $result; my $i = 0;
-        XLINES: for (@{ $self->{state}{xlines} }) {
-           if ( $_->{mask} eq $unmask ) {
-                $result = splice @{ $self->{state}{xlines} }, $i, 1;
-                last XLINES;
-           }
-           ++$i;
-        }
+        my $result = $self->_state_del_drkx_line( 'xline', $unmask );
 
         my $full = $self->state_user_full($uid);
         my $nick = (split /!/, $full)[0];
@@ -5417,6 +5358,10 @@ sub _daemon_peer_dline {
 
         my $minutes = $duration / 60;
 
+        last SWITCH if !$self->_state_add_drkx_line( 'dline',
+                                 $full, time, $server, $duration,
+                                    $netmask, $reason );
+
         $self->send_event(
             "daemon_dline",
             $full,
@@ -5424,14 +5369,6 @@ sub _daemon_peer_dline {
             $minutes,
             $reason,
         );
-
-        push @{ $self->{state}{dlines} }, {
-                setby    => $full,
-                setat    => time,
-                netmask  => $netmask,
-                duration => $duration,
-                reason   => $reason,
-        };
 
         $self->add_denial( $netmask, 'You have been D-lined.' );
 
@@ -5502,14 +5439,7 @@ sub _daemon_peer_undline {
 
         last SWITCH if !$us;
 
-        my $result; my $i = 0;
-        DLINES: for (@{ $self->{state}{dlines} }) {
-           if ( $_->{netmask} eq $unmask ) {
-                $result = splice @{ $self->{state}{dlines} }, $i, 1;
-                last DLINES;
-           }
-           ++$i;
-        }
+        my $result = $self->_state_del_drkx_line( 'dline', $unmask );
 
         my $full = $self->state_user_full($uid);
         my $nick = (split /!/, $full)[0];
@@ -5583,21 +5513,12 @@ sub _daemon_peer_kline {
 
         last SWITCH if !$us;
 
-        push @{ $self->{state}{klines} }, {
-                setby    => $full,
-                setat    => time(),
-                target   => $args->[0],
-                duration => $args->[1],
-                user     => $args->[2],
-                host     => $args->[3],
-                reason   => $args->[4],
-        };
+        last SWITCH if !$self->_state_add_drkx_line( 'kline', $full, time(), @$args );
 
         my $minutes = $args->[1] / 60;
         $args->[1] = $minutes;
 
         $self->send_event("daemon_kline", $full, @$args);
-
 
         my $temp = $minutes ? "temporary $minutes min. " : '';
 
@@ -5663,14 +5584,7 @@ sub _daemon_peer_unkline {
 
         last SWITCH if !$us;
 
-        my $result; my $i = 0;
-        KLINES: for (@{ $self->{state}{klines} }) {
-            if ($_->{user} eq $args->[1] && $_->{host} eq $args->[2]) {
-                $result = splice (@{ $self->{state}{klines} }, $i, 1);
-                last KLINES;
-            }
-            ++$i;
-        }
+        my $result = $self->_state_del_drkx_line( 'kline', $args->[1], $args->[2] );
 
         my $sid  = $self->server_sid();
         my $nick = (split /!/, $full)[0];
@@ -8141,6 +8055,109 @@ sub _state_find_user_host {
     }
 
     return @conns;
+}
+
+sub _state_add_drkx_line {
+    my $self = shift;
+    my $type = shift || return;
+    my @args = @_;
+    return if !@args;
+    return if $type !~ m!^(RK|[DKX])LINE$!i;
+    $type = lc($type) . 's';
+    my $ref = { };
+    foreach my $field ( qw[setby setat target duration] ) {
+      $ref->{$field} = shift @args;
+      return if !defined $ref->{$field};
+    }
+    $ref->{reason} = pop @args;
+    if ( $type =~ m!^[xd]lines$! ) {
+      $ref->{mask} = shift @args;
+      return if !$ref->{mask};
+    }
+    else {
+      $ref->{user} = shift @args;
+      $ref->{host} = shift @args;
+      return if !$ref->{user} || !$ref->{host};
+    }
+    if ( $ref->{duration} ) {
+      $ref->{alarm} =
+        $poe_kernel->delay_set(
+          '_state_drkx_line_alarm',
+          $ref->{duration},
+          $type,
+          $ref,
+        );
+    }
+    push @{ $self->{state}{$type} }, $ref;
+    return 1;
+}
+
+sub _state_del_drkx_line {
+    my $self = shift;
+    my $type = shift || return;
+    my @args = @_;
+    return if !@args;
+    return if $type !~ m!^(RK|[DKX])LINE$!i;
+    $type = lc($type) . 's';
+    my ($mask,$user,$host);
+    if ( $type =~ m!^[xd]lines$! ) {
+      $mask = shift @args;
+      return if !$mask;
+    }
+    else {
+      $user = shift @args;
+      $host = shift @args;
+      return if !$user || !$host;
+    }
+    my $result; my $i = 0;
+    LINES: for (@{ $self->{state}{$type} }) {
+         if ($mask && $_->{mask} eq $mask) {
+             $result = splice @{ $self->{state}{$type} }, $i, 1;
+             last LINES;
+         }
+         if ($user && ($_->{user} eq $user && $_->{host} eq $host)) {
+             $result = splice @{ $self->{state}{$type} }, $i, 1;
+             last LINES;
+         }
+         ++$i;
+    }
+    return if !$result;
+    if ( my $alarm = delete $result->{alarm} ) {
+      $poe_kernel->alarm_remove( $alarm );
+    }
+    return $result;
+}
+
+{
+
+  my %drkxlines = (
+    'rklines' => 'RK-Line',
+    'klines'  => 'K-Line',
+    'dlines'  => 'D-Line',
+    'xlines'  => 'X-Line',
+  );
+
+  sub _state_drkx_line_alarm {
+      my ($kernel,$self,$type,$ref) = @_[KERNEL,OBJECT,ARG0,ARG1];
+      my $fancy = $drkxlines{$type};
+      delete $ref->{alarm};
+      my $res; my $i = 0;
+      LINES: foreach my $drkxline ( @{ $self->{state}{$type} } ) {
+         if ( $drkxline eq $ref ) {
+             $res = splice @{ $self->{state}{$type} }, $i, 1;
+             last LINES;
+         }
+         ++$i;
+      }
+      return if !$res;
+      my $mask = $res->{mask} || join '@', $res->{user}, $res->{host};
+      my $locops = sprintf 'Temporary %s for [%s] expired', $fancy, $mask;
+      $self->del_denial( $res->{mask} ) if $type eq 'dlines';
+      $self->send_event( "daemon_expired", lc($fancy), $mask );
+      $self->_send_to_realops( $locops );
+      return;
+  }
+
 }
 
 sub _state_do_away_notify {
@@ -11622,6 +11639,26 @@ B<Note:> the component will shutdown, this is a feature;
 =item * C<ARG2>, the user mask;
 
 =item * C<ARG3>, the host mask;
+
+=back
+
+=back
+
+=head2 C<ircd_daemon_expired>
+
+=over
+
+=item Emitted: when a temporary D-Line, X-Line, K-Line or RK-Line expires
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>, What expired, can be C<d-line>, C<x-line>, C<k-line> or C<rk-line>;
+
+=item * C<ARG1>, the mask (D-Line and X-Line) or user@host (K-Line and RK-Line);
 
 =back
 
