@@ -256,7 +256,7 @@ sub groucho_input {
   if ( $cmd eq 'NOTICE' ) {
     pass($cmd);
     is( $prefix, '1FU', 'Remote SID is correct' );
-    is( $params->[0], 'groucho', 'Nickname is correct' );
+    is( $params->[0], '7UPAAAAAA', 'Nickname is correct' );
     if ( $heap->{unxline} ) {
       is( $params->[1], 'X-Line for [*NastyBot*] is removed', 'X-Line for [*NastyBot*] is removed' );
     }

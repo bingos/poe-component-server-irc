@@ -19,6 +19,7 @@ Revision history for POE-Component-Server-IRC
     - OPERWALL has been removed, replaced with GLOBOPS
     - Refined LOCOPS for consistency with GLOBOPS
     - Implemented WHOWAS command
+    - Added RESV/UNRESV for reserving nicknames/channels
 
 1.54  Fri Nov 25 15:36:51 UTC 2011
     - Resolve problem with remote (versus localhost) clients

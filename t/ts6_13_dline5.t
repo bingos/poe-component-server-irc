@@ -289,7 +289,7 @@ sub groucho_input {
   if ( $cmd eq 'NOTICE' ) {
     pass($cmd);
     is( $prefix, '1FU', 'Remote SID is correct' );
-    is( $params->[0], 'groucho', 'Nickname is correct' );
+    is( $params->[0], '7UPAAAAAA', 'Nickname is correct' );
     is( $params->[1], 'Added temporary 1 min. D-Line [127.0.0.1/32]', 'Added temporary 1 min. D-Line [127.0.0.1/32]' );
   }
   return;

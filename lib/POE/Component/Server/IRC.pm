@@ -30,7 +30,7 @@ sub spawn {
             [qw(add_spoofed_nick del_spoofed_nick _state_drkx_line_alarm)],
             {
                 map { +"daemon_cmd_$_" => '_spoofed_command' }
-                    qw(join part mode kick topic nick privmsg notice xline unxline
+                    qw(join part mode kick topic nick privmsg notice xline unxline resv unresv
                        rkline unrkline kline unkline sjoin locops wallops globops dline undline)
             },
         ],
@@ -501,6 +501,11 @@ sub _cmd_from_unknown {
         }
 
         if ($cmd eq 'NICK' && $pcount) {
+            my $nicklen = $self->server_config('NICKLEN');
+            if (length($params->[0]) > $nicklen) {
+                $params->[0] = substr($params->[0], 0, $nicklen);
+            }
+
             if (!is_valid_nick_name($params->[0])) {
                 $self->_send_output_to_client(
                     $wheel_id,
@@ -509,6 +514,7 @@ sub _cmd_from_unknown {
                 );
                 last SWITCH;
             }
+
             if ($self->state_nick_exists($params->[0])) {
                 $self->_send_output_to_client(
                     $wheel_id,
@@ -518,9 +524,19 @@ sub _cmd_from_unknown {
                 last SWITCH;
             }
 
-            my $nicklen = $self->server_config('NICKLEN');
-            if (length($params->[0]) > $nicklen) {
-                $params->[0] = substr($params->[0], 0, $nicklen);
+            if ( my $reason = $self->_state_is_resv( $params->[0] ) ) {
+                $self->_send_output_to_client(
+                    $wheel_id, {
+                        prefix  => $self->server_name(),
+                        command => '432',
+                        params  => [
+                            '*',
+                            $params->[0],
+                            $reason,
+                        ],
+                    }
+                );
+                last SWITCH;
             }
 
             $self->{state}{conns}{$wheel_id}{lc $cmd} = $params->[0];
@@ -644,7 +660,7 @@ sub _cmd_from_peer {
             $method = '_daemon_peer_umode';
         }
 
-        if ($cmd =~ m!^(UN)?[DKX]LINE$!i ) {
+        if ($cmd =~ m!^(UN)?([DKX]LINE|RESV)$!i ) {
             $self->send_output( $_, $conn_id ) for
               $self->$method($conn_id, $prefix, @$params);
             last SWITCH;
@@ -2228,6 +2244,205 @@ sub _daemon_cmd_unkline {
     return $ref;
 }
 
+sub _daemon_cmd_resv {
+    my $self   = shift;
+    my $nick   = shift || return;
+    my $server = $self->server_name();
+    my $sid    = $self->server_sid();
+    my $ref    = [ ];
+    my $args   = [ @_ ];
+    my $count  = @$args;
+
+    SWITCH: {
+        if (!$self->state_user_is_operator($nick)) {
+            push @$ref, ['481'];
+            last SWITCH;
+        }
+        if (!$count || $count < 2) {
+            push @$ref, ['461', 'RESV'];
+            last SWITCH;
+        }
+        my $duration = 0;
+        if ($args->[0] =~ /^\d+$/) {
+            $duration = shift @$args;
+            $duration = 14400 if $duration > 14400;
+        }
+        my $mask = shift @$args;
+        if (!$mask) {
+            push @$ref, ['461', 'RESV'];
+            last SWITCH;
+        }
+        if ($args->[0] && uc $args->[0] eq 'ON'
+                && scalar @$args < 2) {
+            push @$ref, ['461', 'RESV'];
+            last SWITCH;
+        }
+        my ($peermask,$reason);
+        my $us = 0;
+        if ($args->[0] && uc $args->[0] eq 'ON') {
+          my $on = shift @$args;
+          $peermask = shift @$args;
+          $reason  = shift @$args || '<No reason supplied>';
+          my %targpeers; my $ucserver = uc $server;
+          foreach my $peer ( keys %{ $self->{state}{peers} } ) {
+             if (matches_mask($peermask, $peer)) {
+                if ($ucserver eq $peer) {
+                   $us = 1;
+                }
+                else {
+                   $targpeers{ $self->_state_peer_route($peer) }++;
+                }
+             }
+          }
+          $self->send_output(
+                {
+                    prefix  => $self->state_user_uid($nick),
+                    command => 'RESV',
+                    params  => [
+                        $peermask,
+                        ( $duration * 60 ),
+                        $mask,
+                        $reason,
+                    ],
+                },
+                grep { $self->_state_peer_capab($_, 'CLUSTER') } keys %targpeers,
+            );
+        }
+        else {
+          $us = 1;
+        }
+
+        last SWITCH if !$us;
+
+        if ( $self->_state_have_resv($mask) ) {
+           push @$ref, {
+              prefix  => $server,
+              command => 'NOTICE',
+              params  => [ $nick, "A RESV has already been placed on: $mask" ],
+          };
+          last SWITCH;
+        }
+
+        if ( !$reason ) {
+          $reason = shift @$args || '<No reason supplied>';
+        }
+
+        my $full = $self->state_user_full($nick);
+
+        last SWITCH if !$self->_state_add_drkx_line( 'resv', $full, time(), $server,
+                                                     $duration * 60, $mask, $reason );
+        $self->send_event(
+            "daemon_resv",
+            $full,
+            $mask,
+            $duration,
+            $reason,
+        );
+
+        my $temp = $duration ? "temporary $duration min. " : '';
+
+        my $reply_notice = "Added ${temp}RESV [$mask]";
+        my $locop_notice = "$full added ${temp}RESV for [$mask] [$reason]";
+
+        push @$ref, {
+            prefix  => $server,
+            command => 'NOTICE',
+            params  => [ $nick, $reply_notice ],
+        };
+
+        $self->_send_to_realops( $locop_notice );
+
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _daemon_cmd_unresv {
+    my $self   = shift;
+    my $nick   = shift || return;
+    my $server = $self->server_name();
+    my $sid    = $self->server_sid();
+    my $ref    = [ ];
+    my $args   = [ @_ ];
+    my $count  = @$args;
+
+    SWITCH: {
+        if (!$self->state_user_is_operator($nick)) {
+            push @$ref, ['481'];
+            last SWITCH;
+        }
+        if (!$count ) {
+            push @$ref, ['461', 'UNRESV'];
+            last SWITCH;
+        }
+        my $unmask = shift @$args;
+        if ($args->[0] && uc $args->[0] eq 'ON'
+                && scalar @$args < 2) {
+            push @$ref, ['461', 'UNRESV'];
+            last SWITCH;
+        }
+        my $us = 0;
+        if ($args->[0] && uc $args->[0] eq 'ON') {
+          my $on = shift @$args;
+          my $peermask = shift @$args;
+          my %targpeers; my $ucserver = uc $server;
+          foreach my $peer ( keys %{ $self->{state}{peers} } ) {
+             if (matches_mask($peermask, $peer)) {
+                if ($ucserver eq $peer) {
+                   $us = 1;
+                }
+                else {
+                   $targpeers{ $self->_state_peer_route($peer) }++;
+                }
+             }
+          }
+          $self->send_output(
+                {
+                    prefix  => $self->state_user_uid($nick),
+                    command => 'UNRESV',
+                    params  => [
+                        $peermask,
+                        $unmask,
+                    ],
+                    colonify => 0,
+                },
+                grep { $self->_state_peer_capab($_, 'CLUSTER') } keys %targpeers,
+            );
+        }
+        else {
+          $us = 1;
+        }
+
+        last SWITCH if !$us;
+
+        my $result = $self->_state_del_drkx_line( 'resv', $unmask );
+
+        if ( !$result ) {
+           push @$ref, { prefix => $server, command => 'NOTICE', params => [ $nick, "No RESV for [$unmask] found" ] };
+           last SWITCH;
+        }
+
+        my $full = $self->state_user_full($nick);
+        $self->send_event(
+            "daemon_unresv",
+            $full,
+            $unmask,
+        );
+
+        push @$ref, {
+            prefix  => $server,
+            command => 'NOTICE',
+            params  => [ $nick, "RESV for [$unmask] is removed" ],
+        };
+
+        $self->_send_to_realops( "$full has removed the RESV for: [$unmask]" );
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
 sub _daemon_cmd_xline {
     my $self   = shift;
     my $nick   = shift || return;
@@ -2758,6 +2973,18 @@ sub _daemon_cmd_nick {
         }
         if (!is_valid_nick_name($new)) {
             push @$ref, ['432', $new];
+            last SWITCH;
+        }
+        if ( my $reason = $self->_state_is_resv( $new ) ) {
+            push @$ref, {
+               prefix  => $self->server_name(),
+               command => '432',
+               params  => [
+                      $nick,
+                      $new,
+                      $reason,
+               ],
+            };
             last SWITCH;
         }
         my $unick = uc_irc($nick);
@@ -4338,6 +4565,18 @@ sub _daemon_cmd_join {
                 );
                 next LOOP;
             }
+            # Channel is RESV
+            if (my $reason = $self->_state_is_resv($channel)) {
+                if ( !$self->state_user_is_operator($nick) ) {
+                    $self->_send_output_to_client(
+                        $route_id,
+                        '485',
+                        $channel,
+                        $reason,
+                    );
+                    next LOOP;
+                }
+            }
             # Channel doesn't exist
             if (!$self->state_chan_exists($channel)) {
                 my $record = {
@@ -5137,6 +5376,175 @@ sub _daemon_peer_squit {
     return $ref;
 }
 
+sub _daemon_peer_resv {
+    my $self    = shift;
+    my $peer_id = shift || return;
+    my $uid     = shift || return;
+    my $server  = $self->server_name();
+    my $sid     = $self->server_sid();
+    my $ref     = [ ];
+    my $args    = [ @_ ];
+    my $count   = @$args;
+
+    SWITCH: {
+        if (!$count || $count < 3) {
+            last SWITCH;
+        }
+        my ($peermask,$duration,$mask,$reason) = @$args;
+        $reason = '<No reason supplied>' if !$reason;
+        my $us = 0;
+        {
+          my %targpeers;
+          my $sids = $self->{state}{sids};
+          foreach my $psid ( keys %{ $sids } ) {
+             if (matches_mask($peermask, $sids->{$psid}{name})) {
+                if ($sid eq $psid) {
+                   $us = 1;
+                }
+                else {
+                   $targpeers{ $sids->{$psid}{route_id} }++;
+                }
+             }
+          }
+          delete $targpeers{$peer_id};
+          $self->send_output(
+                {
+                    prefix  => $uid,
+                    command => 'RESV',
+                    params  => [
+                        $peermask,
+                        $duration,
+                        $mask,
+                        $reason,
+                    ],
+                },
+                grep { $self->_state_peer_capab($_, 'CLUSTER') } keys %targpeers,
+            );
+        }
+
+        last SWITCH if !$us;
+
+        if ( !$reason ) {
+          $reason = shift @$args || '<No reason supplied>';
+        }
+
+        if ( $self->_state_have_resv($mask) ) {
+           push @$ref, {
+              prefix  => $sid,
+              command => 'NOTICE',
+              params  => [ $uid, "A RESV has already been placed on: $mask" ],
+          };
+          last SWITCH;
+        }
+
+        my $full = $self->state_user_full($uid);
+
+        last SWITCH if !$self->_state_add_drkx_line( 'resv', $full, time(), $server,
+                                                     $duration, $mask, $reason );
+        my $minutes = $duration / 60;
+
+        $self->send_event(
+            "daemon_resv",
+            $full,
+            $mask,
+            $minutes,
+            $reason,
+        );
+
+        my $temp = $duration ? "temporary $minutes min. " : '';
+
+        my $reply_notice = "Added ${temp}RESV [$mask]";
+        my $locop_notice = "$full added ${temp}RESV for [$mask] [$reason]";
+
+        push @$ref, {
+            prefix  => $sid,
+            command => 'NOTICE',
+            params  => [ $uid, $reply_notice ],
+        };
+
+        $self->_send_to_realops( $locop_notice );
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _daemon_peer_unresv {
+    my $self    = shift;
+    my $peer_id = shift || return;
+    my $uid     = shift || return;
+    my $server  = $self->server_name();
+    my $sid     = $self->server_sid();
+    my $ref     = [ ];
+    my $args    = [ @_ ];
+    my $count   = @$args;
+
+
+    SWITCH: {
+        if (!$count || $count < 2) {
+            last SWITCH;
+        }
+        my ($peermask,$unmask) = @$args;
+        my $us = 0;
+        {
+          my %targpeers;
+          my $sids = $self->{state}{sids};
+          foreach my $psid ( keys %{ $sids } ) {
+             if (matches_mask($peermask, $sids->{$psid}{name})) {
+                if ($sid eq $psid) {
+                   $us = 1;
+                }
+                else {
+                   $targpeers{ $sids->{$psid}{route_id} }++;
+                }
+             }
+          }
+          delete $targpeers{$peer_id};
+          $self->send_output(
+                {
+                    prefix  => $uid,
+                    command => 'UNRESV',
+                    params  => [
+                        $peermask,
+                        $unmask,
+                    ],
+                    colonify => 0,
+                },
+                grep { $self->_state_peer_capab($_, 'CLUSTER') } keys %targpeers,
+            );
+        }
+
+        last SWITCH if !$us;
+
+        my $result = $self->_state_del_drkx_line( 'resv', $unmask );
+
+        my $full = $self->state_user_full($uid);
+
+        if ( !$result ) {
+           push @$ref, { prefix => $server, command => 'NOTICE', params => [ $uid, "No RESV for [$unmask] found" ] };
+           last SWITCH;
+        }
+
+        $self->send_event(
+            "daemon_unresv",
+            $full,
+            $unmask,
+        );
+
+        push @$ref, {
+            prefix  => $sid,
+            command => 'NOTICE',
+            params  => [ $uid, "RESV for [$unmask] is removed" ],
+        };
+
+        $self->_send_to_realops( "$full has removed the RESV for: [$unmask]" );
+
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
 sub _daemon_peer_xline {
     my $self    = shift;
     my $peer_id = shift || return;
@@ -5208,12 +5616,10 @@ sub _daemon_peer_xline {
         my $reply_notice = "Added ${temp}X-Line [$mask]";
         my $locop_notice = "$full added ${temp}X-Line for [$mask] [$reason]";
 
-        my $nick = (split /!/, $full)[0];
-
         push @$ref, {
             prefix  => $sid,
             command => 'NOTICE',
-            params  => [ $nick, $reply_notice ],
+            params  => [ $uid, $reply_notice ],
         };
 
         $self->_send_to_realops( $locop_notice );
@@ -5275,10 +5681,9 @@ sub _daemon_peer_unxline {
         my $result = $self->_state_del_drkx_line( 'xline', $unmask );
 
         my $full = $self->state_user_full($uid);
-        my $nick = (split /!/, $full)[0];
 
         if ( !$result ) {
-           push @$ref, { prefix => $server, command => 'NOTICE', params => [ $nick, "No X-Line for [$unmask] found" ] };
+           push @$ref, { prefix => $server, command => 'NOTICE', params => [ $uid, "No X-Line for [$unmask] found" ] };
            last SWITCH;
         }
 
@@ -5291,7 +5696,7 @@ sub _daemon_peer_unxline {
         push @$ref, {
             prefix  => $sid,
             command => 'NOTICE',
-            params  => [ $nick, "X-Line for [$unmask] is removed" ],
+            params  => [ $uid, "X-Line for [$unmask] is removed" ],
         };
 
         $self->_send_to_realops( "$full has removed the X-Line for: [$unmask]" );
@@ -5380,7 +5785,7 @@ sub _daemon_peer_dline {
         push @$ref, {
             prefix  => $sid,
             command => 'NOTICE',
-            params  => [ $self->state_user_nick($uid), $reply_notice ],
+            params  => [ $uid, $reply_notice ],
         };
 
         $self->_send_to_realops( $locop_notice );
@@ -5442,10 +5847,9 @@ sub _daemon_peer_undline {
         my $result = $self->_state_del_drkx_line( 'dline', $unmask );
 
         my $full = $self->state_user_full($uid);
-        my $nick = (split /!/, $full)[0];
 
         if ( !$result ) {
-           push @$ref, { prefix => $sid, command => 'NOTICE', params => [ $nick, "No D-Line for [$unmask] found" ] };
+           push @$ref, { prefix => $sid, command => 'NOTICE', params => [ $uid, "No D-Line for [$unmask] found" ] };
            last SWITCH;
         }
 
@@ -5460,7 +5864,7 @@ sub _daemon_peer_undline {
         push @$ref, {
             prefix  => $sid,
             command => 'NOTICE',
-            params  => [ $nick, "D-Line for [$unmask] is removed" ],
+            params  => [ $uid, "D-Line for [$unmask] is removed" ],
         };
 
         $self->_send_to_realops( "$full has removed the D-Line for: [$unmask]" );
@@ -5529,7 +5933,7 @@ sub _daemon_peer_kline {
         push @$ref, {
             prefix  => $self->server_sid(),
             command => 'NOTICE',
-            params  => [ (split /!/, $full)[0], $reply_notice ],
+            params  => [ $uid, $reply_notice ],
         };
 
         $self->_send_to_realops( $locop_notice );
@@ -5587,12 +5991,11 @@ sub _daemon_peer_unkline {
         my $result = $self->_state_del_drkx_line( 'kline', $args->[1], $args->[2] );
 
         my $sid  = $self->server_sid();
-        my $nick = (split /!/, $full)[0];
 
         my $unmask = join '@', $args->[1], $args->[2];
 
         if ( !$result ) {
-           push @$ref, { prefix => $sid, command => 'NOTICE', params => [ $nick, "No K-Line for [$unmask] found" ] };
+           push @$ref, { prefix => $sid, command => 'NOTICE', params => [ $uid, "No K-Line for [$unmask] found" ] };
            last SWITCH;
         }
 
@@ -5601,7 +6004,7 @@ sub _daemon_peer_unkline {
         push @$ref, {
             prefix  => $sid,
             command => 'NOTICE',
-            params  => [ $nick, "K-Line for [$unmask] is removed" ],
+            params  => [ $uid, "K-Line for [$unmask] is removed" ],
         };
 
         $self->_send_to_realops( "$full has removed the K-Line for: [$unmask]" );
@@ -8062,7 +8465,7 @@ sub _state_add_drkx_line {
     my $type = shift || return;
     my @args = @_;
     return if !@args;
-    return if $type !~ m!^(RK|[DKX])LINE$!i;
+    return if $type !~ m!^((RK|[DKX])LINE|RESV)$!i;
     $type = lc($type) . 's';
     my $ref = { };
     foreach my $field ( qw[setby setat target duration] ) {
@@ -8070,7 +8473,7 @@ sub _state_add_drkx_line {
       return if !defined $ref->{$field};
     }
     $ref->{reason} = pop @args;
-    if ( $type =~ m!^[xd]lines$! ) {
+    if ( $type =~ m!^([xd]lines|resvs)$! ) {
       $ref->{mask} = shift @args;
       return if !$ref->{mask};
     }
@@ -8088,7 +8491,12 @@ sub _state_add_drkx_line {
           $ref,
         );
     }
-    push @{ $self->{state}{$type} }, $ref;
+    if ( $type eq 'resvs' ) {
+      $self->{state}{$type}{ uc_irc $ref->{mask} } = $ref;
+    }
+    else {
+      push @{ $self->{state}{$type} }, $ref;
+    }
     return 1;
 }
 
@@ -8097,10 +8505,10 @@ sub _state_del_drkx_line {
     my $type = shift || return;
     my @args = @_;
     return if !@args;
-    return if $type !~ m!^(RK|[DKX])LINE$!i;
+    return if $type !~ m!^((RK|[DKX])LINE|RESV)$!i;
     $type = lc($type) . 's';
     my ($mask,$user,$host);
-    if ( $type =~ m!^[xd]lines$! ) {
+    if ( $type =~ m!^([xd]lines|resvs)$! ) {
       $mask = shift @args;
       return if !$mask;
     }
@@ -8110,7 +8518,11 @@ sub _state_del_drkx_line {
       return if !$user || !$host;
     }
     my $result; my $i = 0;
-    LINES: for (@{ $self->{state}{$type} }) {
+    if ( $type eq 'resvs' ) {
+       $result = delete $self->{state}{resvs}{ uc_irc $mask };
+    }
+    else {
+       LINES: for (@{ $self->{state}{$type} }) {
          if ($mask && $_->{mask} eq $mask) {
              $result = splice @{ $self->{state}{$type} }, $i, 1;
              last LINES;
@@ -8120,6 +8532,7 @@ sub _state_del_drkx_line {
              last LINES;
          }
          ++$i;
+       }
     }
     return if !$result;
     if ( my $alarm = delete $result->{alarm} ) {
@@ -8135,6 +8548,7 @@ sub _state_del_drkx_line {
     'klines'  => 'K-Line',
     'dlines'  => 'D-Line',
     'xlines'  => 'X-Line',
+    'resvs'   => 'RESV',
   );
 
   sub _state_drkx_line_alarm {
@@ -8142,12 +8556,17 @@ sub _state_del_drkx_line {
       my $fancy = $drkxlines{$type};
       delete $ref->{alarm};
       my $res; my $i = 0;
-      LINES: foreach my $drkxline ( @{ $self->{state}{$type} } ) {
-         if ( $drkxline eq $ref ) {
-             $res = splice @{ $self->{state}{$type} }, $i, 1;
-             last LINES;
+      if ( $type eq 'resvs' ) {
+          $res = delete $self->{state}{resvs}{uc_irc $ref->{mask}};
+      }
+      else {
+         LINES: foreach my $drkxline ( @{ $self->{state}{$type} } ) {
+            if ( $drkxline eq $ref ) {
+                $res = splice @{ $self->{state}{$type} }, $i, 1;
+                last LINES;
+            }
+            ++$i;
          }
-         ++$i;
       }
       return if !$res;
       my $mask = $res->{mask} || join '@', $res->{user}, $res->{host};
@@ -8158,6 +8577,24 @@ sub _state_del_drkx_line {
       return;
   }
 
+}
+
+sub _state_is_resv {
+    my $self  = shift;
+    my $thing = shift || return;
+    foreach my $mask ( keys %{ $self->{state}{resvs} } ) {
+      if ( matches_mask( $mask, $thing ) ) {
+        return $self->{state}{resvs}{$mask}{reason};
+      }
+    }
+    return 0;
+}
+
+sub _state_have_resv {
+    my $self = shift;
+    my $mask = shift || return;
+    return 1 if $self->{state}{resvs}{uc_irc $mask};
+    return 0;
 }
 
 sub _state_do_away_notify {
@@ -9709,7 +10146,7 @@ EOF
         482 => [1, "You\'re not channel operator"],
         483 => [0, "You can\'t kill a server!"],
         484 => [0, "Your connection is restricted!"],
-        485 => [0, "You\'re not the original channel operator"],
+        485 => [1, "Cannot join channel (%s)"],
         491 => [0, "No O-lines for your host"],
         501 => [0, "Unknown MODE flag"],
         502 => [0, "Cannot change mode for other users"],

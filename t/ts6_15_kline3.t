@@ -258,7 +258,7 @@ sub groucho_input {
   if ( $cmd eq 'NOTICE' ) {
     pass($cmd);
     is( $prefix, '1FU', 'Remote SID is correct' );
-    is( $params->[0], 'groucho', 'Nickname is correct' );
+    is( $params->[0], '7UPAAAAAA', 'Nickname is correct' );
     if ( $heap->{unkline} ) {
       is( $params->[1], 'K-Line for [*bobb*@127.0.0.1] is removed', 'K-Line for [*bobb*@127.0.0.1] is removed' );
     }

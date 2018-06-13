@@ -1,36 +1,3 @@
-{
-  package Poco::Server::IRC::Plugin::Hackity;
-
-  use strict;
-  use warnings;
-  use POE;
-  use POE::Component::Server::IRC::Plugin qw(:ALL);
-
-  sub new {
-    my ($package, %args) = @_;
-    return bless \%args, $package;
-  }
-
-  sub PCSI_register {
-    my ($self, $ircd) = splice @_, 0, 2;
-
-    $ircd->plugin_register($self, 'SERVER', qw(daemon_xline));
-    return 1;
-  }
-
-  sub PCSI_unregister {
-    return 1;
-  }
-
-  sub IRCD_daemon_xline {
-    my ($self, $ircd) = splice @_, 0, 2;
-    my $alarm_id = $ircd->{state}{xlines}[0]{alarm};
-    $poe_kernel->delay_adjust( $alarm_id, 10 );
-    return PCSI_EAT_NONE;
-  }
-
-}
-
 use strict;
 use warnings;
 use Test::More 'no_plan';
@@ -57,8 +24,6 @@ my $pocosi = POE::Component::Server::IRC->spawn(
     config => { servername => 'listen.server.irc', sid => '1FU' },
 );
 
-$pocosi->plugin_add( 'hackity', Poco::Server::IRC::Plugin::Hackity->new() );
-
 POE::Session->create(
     package_states => [
         'main' => [qw(
@@ -67,8 +32,8 @@ POE::Session->create(
             _launch_client
             ircd_listener_add
             ircd_daemon_nick
-            ircd_daemon_xline
-            ircd_daemon_expired
+            ircd_daemon_resv
+            ircd_daemon_unresv
             ircd_daemon_eob
             client_connected
             client_input
@@ -99,7 +64,7 @@ sub _start {
     my ($kernel, $heap) = @_[KERNEL, HEAP];
     $heap->{ircd}->yield('register', 'all');
     $heap->{ircd}->add_listener();
-    $kernel->delay('_shutdown', 100, 'timeout');
+    $kernel->delay('_shutdown', 60, 'timeout');
 }
 
 sub _shutdown {
@@ -160,20 +125,20 @@ sub ircd_daemon_nick {
     return;
 }
 
-sub ircd_daemon_xline {
+sub ircd_daemon_resv {
     my ($heap,@args) = @_[HEAP,ARG0..$#_];
     is($args[0], 'groucho!groucho@groucho.marx', 'Setter is okay' );
-    is($args[1], '*NastyBot*', 'The mask is right' );
-    is($args[2], 1, 'Duration should be 1 minute' );
+    is($args[1], 'bobbins', 'The mask is right' );
+    is($args[2], 10, 'Duration should be zero' );
     is($args[3], 'Banhammer', 'The reasoning is sound' );
     $poe_kernel->yield('_launch_client');
     return;
 }
 
-sub ircd_daemon_expired {
+sub ircd_daemon_unresv {
     my ($heap,@args) = @_[HEAP,ARG0..$#_];
-    is($args[0], 'x-line', 'Type is X-Line' );
-    is($args[1], '*NastyBot*', 'The mask is right' );
+    is($args[0], 'groucho!groucho@groucho.marx', 'unsetter is okay' );
+    is($args[1], 'bobbins', 'The mask is right' );
     $poe_kernel->post('client','connect');
     return;
 }
@@ -199,7 +164,7 @@ sub client_connected {
   my ($kernel,$heap,$sender) = @_[KERNEL,HEAP,SENDER];
   pass($_[STATE]);
   $kernel->post( $sender, 'send_to_server', { command => 'NICK', params => [ 'bobbins' ], colonify => 0 } );
-  $kernel->post( $sender, 'send_to_server', { command => 'USER', params => [ 'bobbins', '*', '*', 'This is NastyBot v1.2' ], colonify => 1 } );
+  $kernel->post( $sender, 'send_to_server', { command => 'USER', params => [ 'bobbins', '*', '*', 'bobbins along' ], colonify => 1 } );
   return;
 }
 
@@ -223,8 +188,7 @@ sub harpo_connected {
   my ($kernel,$heap,$sender) = @_[KERNEL,HEAP,SENDER];
   pass($_[STATE]);
   $kernel->post( $sender, 'send_to_server', { command => 'PASS', params => [ 'foo', 'TS', '6', '9T9' ], } );
-  #$kernel->post( $sender, 'send_to_server', { command => 'CAPAB', params => [ 'KNOCK UNDLN DLN TBURST GLN ENCAP UNKLN KLN CHW IE EX HOPS SVS CLUSTER EOB QS' ], colonify => 1 } );
-  $kernel->post( $sender, 'send_to_server', { command => 'CAPAB', params => [ 'KNOCK UNDLN DLN TBURST GLN ENCAP UNKLN KLN CHW IE EX HOPS SVS EOB QS' ], colonify => 1 } );
+  $kernel->post( $sender, 'send_to_server', { command => 'CAPAB', params => [ 'KNOCK UNDLN DLN TBURST GLN ENCAP UNKLN KLN CHW IE EX HOPS SVS CLUSTER EOB QS' ], colonify => 1 } );
   $kernel->post( $sender, 'send_to_server', { command => 'SERVER', params => [ 'harpo.server.irc', '1', 'Open the door and come in!!!!!!' ], colonify => 1 } );
   $kernel->post( $sender, 'send_to_server', { command => 'SVINFO', params => [ '6', '6', '0', time() ], colonify => 1 } );
   $uidts = time() - 20;
@@ -234,19 +198,16 @@ sub harpo_connected {
   return;
 }
 
-
 sub client_input {
   my ($heap,$sender,$in) = @_[HEAP,SENDER,ARG0];
   my $prefix = $in->{prefix};
   my $cmd    = $in->{command};
   my $params = $in->{params};
   diag($in->{raw_line}, "\n");
-  if ( $cmd eq 'ERROR' ) {
-    is( $cmd, 'ERROR', 'ERROR ERROR!' );
-    is( $params->[0], 'Closing Link: 127.0.0.1 (X-Lined: [Banhammer])', 'I want to be your Banhammer' );
-    return;
-  }
-  is( $cmd, '465', 'Got a 465' );
+  is( $cmd, '432', 'Erroneous' );
+  is( $params->[1], 'bobbins', 'But we wants it, yes' );
+  is( $params->[2], 'Banhammer', 'Banhammer' );
+  $poe_kernel->post( $sender, 'terminate' );
   return;
 }
 
@@ -268,10 +229,9 @@ sub client_input2 {
   return;
 }
 
-
 sub groucho_input {
   my ($heap,$sender,$in) = @_[HEAP,SENDER,ARG0];
-  #diag($in->{raw_line}, "\n");
+  #diag("Groucho: ", $in->{raw_line}, "\n");
   my $prefix = $in->{prefix};
   my $cmd    = $in->{command};
   my $params = $in->{params};
@@ -292,23 +252,36 @@ sub groucho_input {
     pass($cmd);
     is( $prefix, '1FU', 'Remote SID is correct' );
     is( $params->[0], '7UPAAAAAA', 'Nickname is correct' );
-    is( $params->[1], 'Added temporary 1 min. X-Line [*NastyBot*]', 'Added temporary 1 min. X-Line [*NastyBot*]' );
+    if ( $heap->{unresv} ) {
+      is( $params->[1], 'RESV for [bobbins] is removed', 'RESV for [bobbins] is removed' );
+    }
+    else {
+      is( $params->[1], 'Added temporary 10 min. RESV [bobbins]', 'Added temporary 10 min. RESV [bobbins]' );
+    }
   }
   return;
 }
 
 sub harpo_input {
   my ($heap,$in) = @_[HEAP,ARG0];
-  #diag($in->{raw_line}, "\n");
+  #diag("Harpo: ", $in->{raw_line}, "\n");
   my $prefix = $in->{prefix};
   my $cmd    = $in->{command};
   my $params = $in->{params};
-  if ( $cmd eq 'XLINE' ) {
-    fail($cmd);
+  if ( $cmd eq 'RESV' ) {
+    pass($cmd);
+    is( $prefix, '7UPAAAAAA', 'Correct prefix: 7UPAAAAAAA' );
+    is( $params->[0], '*', 'Target is all servers' );
+    is( $params->[1], 600, 'Duration is 600 seconds' );
+    is( $params->[2], 'bobbins', 'Mask is correct' );
+    is( $params->[3], 'Banhammer', 'A sound reason indeed' );
     return;
   }
-  if ( $cmd eq 'UNXLINE' ) {
-    fail($cmd);
+  if ( $cmd eq 'UNRESV' ) {
+    pass($cmd);
+    is( $prefix, '7UPAAAAAA', 'Correct prefix: 7UPAAAAAAA' );
+    is( $params->[0], '*', 'Target is all servers' );
+    is( $params->[1], 'bobbins', 'Mask is correct' );
     return;
   }
   if ( $cmd eq 'QUIT' ) {
@@ -325,8 +298,8 @@ sub client_disconnected {
   pass($state);
   $poe_kernel->state('client_disconnected','main','client_disconnected2');
   $poe_kernel->state('client_input','main','client_input2');
-  $heap->{unxline}++;
-  diag("Waiting for X-Line to expire, should be 10 seconds or so\n");
+  $heap->{unresv}++;
+  $poe_kernel->post( 'groucho', 'send_to_server', { prefix => '7UPAAAAAA', command => 'UNRESV', params => [ '*', 'bobbins' ], colonify => 0 } );
   return;
 }
 sub client_disconnected2 {
@@ -366,7 +339,7 @@ sub ircd_daemon_eob {
     fail('No such server expected');
   }
   if ( $heap->{eob} >= 3 ) {
-    $kernel->post( 'groucho', 'send_to_server', { prefix => '7UPAAAAAA', command => 'XLINE', params => [ '*', '60', '*NastyBot*', 'Banhammer'] } );
+    $kernel->post( 'groucho', 'send_to_server', { prefix => '7UPAAAAAA', command => 'RESV', params => [ '*', '600', 'bobbins', 'Banhammer'] } );
   }
   return;
 }
