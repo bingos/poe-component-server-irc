@@ -4044,7 +4044,7 @@ sub _daemon_do_whois {
                params  => [
                     $uid,
                     $record->{nick},
-                    $record->{socket}[0],
+                    ( $record->{ipaddress} || 'fake.hidden' ),
                     'actually using host',
                ],
         };
@@ -8879,7 +8879,7 @@ sub _state_auth_peer_conn {
     }
 
     my $conn = $self->{state}{conns}{$conn_id};
-    if (!$peers->{uc $name}{ipmask} && $conn->{socket}[0] =~ /^127\./) {
+    if (!$peers->{uc $name}{ipmask} && $conn->{socket}[0] =~ /^(127\.|::1)/) {
         return 1;
     }
     return 0 if !$peers->{uc $name}{ipmask};
@@ -8986,8 +8986,6 @@ sub _state_send_burst {
 
         my $umode_fixed = $record->{umode};
         $umode_fixed =~ s/[^aiow]//g;
-        # :8H8 UID rhefr 1 1525788887 +aceiklnoswy pi staff.gumbynet.org.uk 127.0.0.1 8H8AAAAAA * :*Unknown*
-        # :<SID> UID <NICK> <HOPS> <TS> +<UMODE> <USERNAME> <HOSTNAME> <IP> <UID> <ACCOUNT> :<GECOS>
         my $prefix = $record->{sid};
         my $arrayref = [
             $record->{nick},
@@ -9358,7 +9356,7 @@ sub _state_register_client {
     }
 
     if ($record->{auth}{hostname} eq 'localhost' ||
-        !$record->{auth}{hostname} && $record->{socket}[0] =~ /^127\./) {
+        !$record->{auth}{hostname} && $record->{socket}[0] =~ /^(127\.|::1)/) {
         $record->{auth}{hostname} = $self->server_name();
     }
 
@@ -9367,6 +9365,7 @@ sub _state_register_client {
     }
 
     $record->{ipaddress} = $record->{socket}[0]; # Needed latter for UID command
+    $record->{ipaddress} = '0' if $record->{ipaddress} =~ m!^:!;
 
     $self->{state}{users}{uc_irc($record->{nick})} = $record;
     $self->{state}{uids}{ $record->{uid} } = $record if $record->{uid};
@@ -9880,7 +9879,7 @@ sub _state_o_line {
 
     my $client_ip = $self->_state_user_ip($nick);
     return if !$client_ip;
-    if (!$ops->{$user}{ipmask} && ($client_ip && $client_ip =~ /^127\./)) {
+    if (!$ops->{$user}{ipmask} && ($client_ip && $client_ip =~ /^(127\.|::1)/)) {
         return 1;
     }
     return 0 if !$ops->{$user}{ipmask};
