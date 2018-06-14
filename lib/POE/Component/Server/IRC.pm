@@ -11074,7 +11074,7 @@ course =]). There is also a Plugin system, similar to that sported by
 L<POE::Component::IRC|POE::Component::IRC>.
 
 B<Note:> This is a subclass of
-L<POE::Component::Server::IRC::Backend|POE::Component::IRC::Server::Backend>.
+L<POE::Component::Server::IRC::Backend|POE::Component::Server::IRC::Backend>.
 You should read its documentation too.
 
 =head1 CONSTRUCTOR
