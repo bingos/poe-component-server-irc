@@ -6407,6 +6407,7 @@ sub _daemon_peer_sid {
         $self->{state}{sids}{ $prefix }{sids}{ $record->{sid} } = $record;
         $self->{state}{sids}{ $record->{sid} } = $record;
         my $uname = uc $record->{name};
+        $record->{serv} = 1 if $self->{state}{services}{$uname};
         $self->{state}{peers}{$uname} = $record;
         $self->{state}{peers}{ uc $record->{peer} }{peers}{$uname} = $record;
         $self->send_output(
@@ -8347,6 +8348,55 @@ sub _daemon_peer_links {
         }
         push @$ref, $_ for
              @{ $self->_daemon_do_links($uid,$sid,$mask ) };
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _daemon_peer_svsjoin {
+    my $self    = shift;
+    my $peer_id = shift || return;
+    my $prefix  = shift || return;
+    my $sid     = $self->server_sid();
+    my $ref     = [ ];
+    my $args    = [ @_ ];
+    my $count   = @$args;
+
+    SWITCH: {
+        if (!$self->_state_sid_serv($prefix) && $prefix ne $sid) {
+            last SWITCH;
+        }
+        if (!$count || $count < 2) {
+            last SWITCH;
+        }
+        my $client = shift @$args;
+        my $uid = $self->state_user_uid($client);
+        last SWITCH if !$uid;
+        if ( $uid =~ m!^$sid! ) {
+           my $rec = $self->{state}{uids}{$uid};
+           $self->_send_output_to_client(
+                $rec->{route_id},
+                (ref $_ eq 'ARRAY' ? @{ $_ } : $_),
+           ) for $self->_daemon_cmd_join($rec->{nick}, @$args);
+           last SWITCH;
+        }
+        my $route_id = $self->_state_uid_route($uid);
+        if ( $route_id eq $peer_id ) {
+          # The fuck
+          last SWITCH;
+        }
+        $self->send_output(
+            {
+                prefix  => $prefix,
+                command => 'SVSJOIN',
+                params  => [
+                    $client,
+                    @$args,
+                ],
+            },
+            $route_id,
+        );
     }
 
     return @$ref if wantarray;
@@ -10579,6 +10629,34 @@ sub _terminate_conn_error {
     return 1;
 }
 
+sub daemon_server_join {
+    my $self   = shift;
+    my $server = $self->server_name();
+    my $mysid  = $self->server_sid();
+    my $ref    = [ ];
+    my $args   = [ @_ ];
+    my $count  = @$args;
+
+    SWITCH: {
+        if (!$count || $count < 2) {
+            last SWITCH;
+        }
+        if ( $args->[0] =~ m!^\d! && !$self->state_uid_exists($args->[0]) ) {
+            last SWITCH;
+        }
+        elsif ( $args->[0] !~ m!^\d! && !$self->state_nick_exists($args->[0])) {
+            last SWITCH;
+        }
+        if ( $args->[1] !~ m!^[#&]! ) {
+            last SWITCH;
+        }
+        $ref = $self->_daemon_peer_svsjoin( 'spoofed', $mysid, @$args );
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
 sub daemon_server_kill {
     my $self   = shift;
     my $server = $self->server_name();
@@ -11482,6 +11560,11 @@ a SERVER KILL of the given nick;
 
 First argument is a channel name, remaining arguments are channel modes
 and their parameters to apply.
+
+=head3 C<daemon_server_join>
+
+Takes two arguments that are mandatory: a nickname of a user and a channel
+name. The user will join the channel.
 
 =head3 C<daemon_server_kick>
 
