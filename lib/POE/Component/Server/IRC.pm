@@ -9350,8 +9350,10 @@ sub _state_register_peer {
     $record->{users} = { };
     $record->{peers} = { };
     $record->{sid} = $psid;
-    $self->{state}{peers}{uc $server}{peers}{uc $record->{name}} = $record;
-    $self->{state}{peers}{ uc $record->{name} } = $record;
+    my $ucname = uc $record->{name};
+    $record->{serv} = 1 if $self->{state}{services}{$ucname};
+    $self->{state}{peers}{uc $server}{peers}{ $ucname } = $record;
+    $self->{state}{peers}{ $ucname } = $record;
     $self->{state}{sids}{ $mysid }{sids}{ $psid } = $record;
     $self->{state}{sids}{ $psid } = $record;
     $self->antiflood($conn_id, 0);
@@ -9529,6 +9531,14 @@ sub _state_sid_name {
     my $sid = shift || return;
     return if !$self->state_sid_exists($sid);
     return $self->{state}{sids}{$sid}{name};
+}
+
+sub _state_sid_serv {
+    my $self = shift;
+    my $sid = shift || return;
+    return if !$self->state_sid_exists($sid);
+    return 0 if !$self->{state}{sids}{$sid}{serv};
+    return 1;
 }
 
 sub _state_peer_desc {
@@ -10426,6 +10436,20 @@ sub del_operator {
     return;
 }
 
+sub add_service {
+    my $self = shift;
+    my $host = shift || return;
+    $self->{state}{services}{uc $host} = $host;
+    return 1;
+}
+
+sub del_service {
+    my $self = shift;
+    my $host = shift || return;
+    delete $self->{state}{services}{uc $host};
+    return 1;
+}
+
 sub add_auth {
     my $self = shift;
     my $parms;
@@ -10507,6 +10531,7 @@ sub add_peer {
 
     my $name = $parms->{name};
     $self->{config}{peers}{uc $name} = $parms;
+    $self->add_service( $name ) if $parms->{service};
     $self->add_connector(
         remoteaddress => $parms->{raddress},
         remoteport    => $parms->{rport},
@@ -11314,12 +11339,26 @@ remote server if type is 'r';
 be done on both ends of the connection. Requires
 L<POE::Filter::Zlib::Stream|POE::Filter::Zlib::Stream>;
 
+=item * B<'service'>, set to a true value to enable the peer to be
+accepted as a services peer.
+
 =back
 
 =head3 C<del_peer>
 
 Takes a single argument, the peer to remove. This does not disconnect the
 said peer if it is currently connected.
+
+=head3 C<add_service>
+
+Adds a service peer. A service peer is a peer that is accepted to send
+service commands C<SVS*>. Takes a single argument the service peer to add.
+This does not have to be a directly connected peer as defined with C<add_peer>.
+
+=head3 C<del_service>
+
+Takes a single argument, the service peer to remove. This does not disconnect
+the said service peer, but it will deny the peer access to service commands.
 
 =head2 State queries
 
