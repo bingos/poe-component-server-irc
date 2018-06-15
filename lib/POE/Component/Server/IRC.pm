@@ -5875,6 +5875,60 @@ sub _daemon_peer_undline {
     return $ref;
 }
 
+sub _daemon_peer_encap {
+    my $self    = shift;
+    my $peer_id = shift || return;
+    my $prefix  = shift || return;
+    my $server  = $self->server_name();
+    my $ref     = [ ];
+    my $args    = [ @_ ];
+    my $count   = @$args;
+
+    SWITCH: {
+        if (!$count) {
+            last SWITCH;
+        }
+        my $target = $args->[0];
+        my $us = 0;
+        my $ucserver = uc $server;
+        my %targets;
+
+        for my $peer (keys %{ $self->{state}{peers} }) {
+            if (matches_mask($target, $peer)) {
+                if ($ucserver eq $peer) {
+                    $us = 1;
+                }
+                else {
+                    $targets{$self->_state_peer_route($peer)}++;
+                }
+            }
+        }
+        delete $targets{$peer_id};
+        $self->send_output(
+            {
+                prefix   => $prefix,
+                command  => 'ENCAP',
+                params   => $args,
+                colonify => 1,
+            },
+            grep { $self->_state_peer_capab($_, 'ENCAP') } keys %targets,
+        );
+
+        last SWITCH if !$us;
+
+        $self->send_event(
+            'daemon_encap',
+            ( $self->_state_sid_name($prefix) || $self->state_user_full($prefix) ),
+            @$args,
+        );
+
+        # Add ENCAP subcommand handling here if required.
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
 sub _daemon_peer_kline {
     my $self    = shift;
     my $peer_id = shift || return;
@@ -10167,7 +10221,7 @@ EOF
             NETWORK MODES AWAYLEN),
     };
 
-    $self->{config}{capab} = [qw(CLUSTER QS DLN UNDLN EX IE HOPS UNKLN KLN GLN EOB)];
+    $self->{config}{capab} = [qw(ENCAP CLUSTER QS DLN UNDLN EX IE HOPS UNKLN KLN GLN EOB)];
 
     return 1;
 }
@@ -12101,6 +12155,30 @@ B<Note:> the component will shutdown, this is a feature;
 =item * C<ARG0>, What expired, can be C<d-line>, C<x-line>, C<k-line> or C<rk-line>;
 
 =item * C<ARG1>, the mask (D-Line and X-Line) or user@host (K-Line and RK-Line);
+
+=back
+
+=back
+
+=head2 C<ircd_daemon_encap>
+
+=over
+
+=item Emitted: when the server receives an C<ENCAP> message;
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>, the server name or full nick!user@host;
+
+=item * C<ARG1>, peermask of targets for the C<ENCAP>;
+
+=item * C<ARG2>, the sub command being propagated;
+
+=item * Subsequent ARGs are dependent on the sub command;
 
 =back
 
