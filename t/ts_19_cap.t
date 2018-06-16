@@ -16,6 +16,8 @@ my $pocosi = POE::Component::Server::IRC->spawn(
     config => { servername   => 'listen.server.irc', sid => '1FU' },
 );
 
+my $CAPS = join ' ', sort keys %{ $pocosi->{state}{caps} };
+
 POE::Session->create(
     package_states => [
         'main' => [qw(
@@ -90,7 +92,7 @@ sub testc_input {
         pass('Not registered so NICK is *');
       }
       if ( $in->{params}[1] eq 'LS' ) {
-        is( $in->{params}[2], 'away-notify invite-notify multi-prefix', 'LS listed "away-notify invite-notify multi-prefix"' );
+        is( $in->{params}[2], $CAPS, qq{LS listed "$CAPS"} );
         $poe_kernel->post( $sender, 'send_to_server', { command => 'CAP', params => [ 'REQ', 'bogus invite-notify' ], colonify => 1 } );
         last SWITCH;
       }

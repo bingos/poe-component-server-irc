@@ -3805,6 +3805,8 @@ sub _daemon_cmd_names {
         $chan_prefix_method = 'state_chan_list_multi_prefixed'
           if $self->{state}{uids}{$uid}{caps}{'multi-prefix'};
 
+        my $flag = ( $self->{state}{uids}{$uid}{caps}{'userhost-in-names'} ? 'FULL' : '' );
+
         for my $chan (@chans) {
             my $record = $self->{state}{chans}{uc_irc($chan)};
             my $type = '=';
@@ -3813,7 +3815,7 @@ sub _daemon_cmd_names {
             my $length = length($server)+3+length($chan)+length($nick)+7;
             my $buffer = '';
 
-            for my $name (sort $self->$chan_prefix_method($record->{name})) {
+            for my $name (sort $self->$chan_prefix_method($record->{name},$flag)) {
                 if (length(join ' ', $buffer, $name) + $length > 510) {
                     push @$ref, {
                         prefix  => $server,
@@ -8443,9 +8445,10 @@ sub _state_create {
     };
 
     $self->{state}{caps} = {
-      'invite-notify' => 1,
-      'multi-prefix'  => 1,
-      'away-notify'   => 1,
+      'invite-notify'     => 1,
+      'multi-prefix'      => 1,
+      'away-notify'       => 1,
+      'userhost-in-names' => 1,
     };
 
     return 1;
@@ -9792,11 +9795,13 @@ sub state_chan_list {
 sub state_chan_list_prefixed {
     my $self = shift;
     my $chan = shift || return;
+    my $flag = shift;
     return if !$self->state_chan_exists($chan);
     my $record = $self->{state}{chans}{uc_irc($chan)};
 
     return map {
         my $n = $self->{state}{uids}{$_}{nick};
+        $n = (($flag && $flag eq 'FULL') ? $self->state_user_full($_) : $n );
         my $m = $record->{users}{$_};
         my $p = '';
         $p = '@' if $m =~ /o/;
@@ -9814,7 +9819,9 @@ sub state_chan_list_multi_prefixed {
     my $record = $self->{state}{chans}{uc_irc($chan)};
 
     return map {
-        my $n = ( !$flag ? $self->{state}{uids}{$_}{nick} : $_ );
+        my $rec = $self->{state}{uids}{$_};
+        my $n = ( ($flag && $flag eq 'UIDS') ? $_ : $rec->{nick} );
+        $n = (($flag && $flag eq 'FULL') ? $self->state_user_full($_) : $n );
         my $m = $record->{users}{$_};
         my $p = '';
         $p .= '@' if $m =~ /o/;
@@ -9823,6 +9830,7 @@ sub state_chan_list_multi_prefixed {
         $p . $n;
     } keys %{ $record->{users} };
 }
+
 sub _state_chan_timestamp {
     my $self = shift;
     my $chan = shift || return;

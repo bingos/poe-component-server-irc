@@ -114,11 +114,11 @@ sub testc_input {
       }
       if ( $in->{params}[1] eq 'LS' ) {
         is( $in->{params}[2], $CAPS, qq{LS listed "$CAPS"} );
-        $poe_kernel->post( $sender, 'send_to_server', { command => 'CAP', params => [ 'REQ', 'multi-prefix' ], colonify => 1 } );
+        $poe_kernel->post( $sender, 'send_to_server', { command => 'CAP', params => [ 'REQ', 'userhost-in-names' ], colonify => 1 } );
         last SWITCH;
       }
       if ( $in->{params}[1] eq 'ACK' ) {
-        is( $in->{params}[2], 'multi-prefix', 'ACK for capability' );
+        is( $in->{params}[2], 'userhost-in-names', 'ACK for capability' );
         $poe_kernel->post( $sender, 'send_to_server', { command => 'CAP', params => [ 'END' ], colonify => 0 } );
         $heap->{end}++;
         last SWITCH;
@@ -143,13 +143,14 @@ sub testc_input {
     return;
   }
   if ( $in->{command} eq '353' && $nick ne 'teapot' ) {
-    like( $in->{params}[-1], qr/^\Q@%+teapot\E/, 'We have the correct prefix for teapot');
+    like( $in->{params}[-1], qr/^\@teapot/, 'We have the correct prefix for teapot');
+    like( $in->{params}[-1], qr/^\@teapot!~teapot\@listen.server.irc /, 'We have the full nick!user@host for teapot');
     $poe_kernel->post( $sender, 'send_to_server', { command => 'WHO', params => [ '#nursery' ], colonify => 0 } );
     return;
   }
   if ( $in->{command} eq '352' && $nick ne 'teapot' ) {
     return if $in->{params}[5] ne 'teapot';
-    is( $in->{params}[6], 'H@%+', 'Have correct prefix for teapot' );
+    is( $in->{params}[6], 'H@', 'Have correct prefix for teapot' );
     return;
   }
   return;
