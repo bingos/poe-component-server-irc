@@ -14,9 +14,10 @@ use POSIX 'strftime';
 use Net::CIDR ();
 use base qw(POE::Component::Server::IRC::Backend);
 
-my $sid_re = qr/^[0-9][A-Z0-9][A-Z0-9]$/;
-my $id_re  = qr/^[A-Z][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9]$/;
-my $uid_re = qr/^[0-9][A-Z0-9][A-Z0-9][A-Z][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9]$/;
+my $sid_re  = qr/^[0-9][A-Z0-9][A-Z0-9]$/;
+my $id_re   = qr/^[A-Z][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9]$/;
+my $uid_re  = qr/^[0-9][A-Z0-9][A-Z0-9][A-Z][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9]$/;
+my $host_re = qr/^[^.:][A-Za-z0-9.:-]+$/;
 
 sub spawn {
     my ($package, %args) = @_;
@@ -8448,6 +8449,7 @@ sub _state_create {
       'invite-notify'     => 1,
       'multi-prefix'      => 1,
       'away-notify'       => 1,
+      'chghost'           => 1,
       'userhost-in-names' => 1,
     };
 
@@ -9260,6 +9262,115 @@ sub _state_server_burst {
             params  => [$rec->{name}, $rec->{hops} + 1, $server, $rec->{desc}],
         };
         push @$ref, $_ for $self->_state_server_burst($rec->{sid}, $targ);
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _state_do_change_hostmask {
+    my $self   = shift;
+    my $uid    = shift || return;
+    my $nhost  = shift || return;
+    my $ref    = [ ];
+    my $sid    = $self->server_sid();
+    my $server = $self->server_name();
+
+    SWITCH: {
+        if ($nhost !~ $host_re ) {
+          last SWITCH;
+        }
+        my $rec = $self->{state}{uids}{$uid};
+        if ($nhost eq $rec->{auth}{hostname}) {
+          last SWITCH;
+        }
+        my $local = ( $uid =~ m!^$sid! );
+        my $conn_id = ($local ? $rec->{route_id} : '');
+        my $full = $self->state_user_full($uid);
+        foreach my $chan ( keys %{ $rec->{chans} } ) {
+          $self->_send_output_channel_local(
+              $chan,
+              {
+                prefix  => $full,
+                command => 'QUIT',
+                params  => [ 'Changing hostname' ],
+              },
+              $conn_id, '', '', 'chghost'
+          );
+          $self->_send_output_channel_local(
+              $chan,
+              {
+                prefix   => $full,
+                command  => 'CHGHOST',
+                colonify => 0,
+                params   => [ $rec->{auth}{user}, $nhost ],
+              },
+              $conn_id,
+              '',
+              'chghost'
+          );
+        }
+        $rec->{auth}{hostname} = $nhost;
+        if ($local) {
+           $self->send_output(
+              {
+                  prefix  => $server,
+                  command => '396',
+                  params  => [
+                      $rec->{nick},
+                      $nhost,
+                      'is now your visible host',
+                  ],
+              },
+              $rec->{route_id},
+           );
+        }
+        $full = $self->state_user_full($uid);
+        CHAN: foreach my $uchan ( keys %{ $rec->{chans} } ) {
+           my $chan = $self->{state}{chans}{$uchan}{name};
+           my $modeline;
+           MODES: {
+              my $modes = $rec->{chans}{$uchan};
+              last MODES if !$modes;
+              my @args;
+              push @args, $_ for
+                 map { $rec->{nick} } split //, $modes;
+              $modeline = join ' ', "+$modes", @args;
+           }
+           $self->_send_output_channel_local(
+              $chan,
+              {
+                prefix   => $full,
+                command  => 'JOIN',
+                colonify => 0,
+                params   => [ $chan ],
+              },
+              $conn_id, '', '', 'chghost'
+           );
+           if ($modeline) {
+              $self->_send_output_channel_local(
+                  $chan,
+                  {
+                      prefix   => $server,
+                      command  => 'MODE',
+                      colonify => 0,
+                      params   => [ $chan, $modeline ],
+                  },
+                  $conn_id, '', '', 'chghost'
+              );
+           }
+           if ($rec->{away}) {
+              $self->_send_output_channel_local(
+                  $chan,
+                  {
+                      prefix   => $full,
+                      command  => 'AWAY',
+                      params   => [ $rec->{away} ],
+                  },
+                  $conn_id, '', 'away-notify', 'chghost'
+              );
+           }
+        }
     }
 
     return @$ref if wantarray;
