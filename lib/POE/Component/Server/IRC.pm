@@ -8406,6 +8406,47 @@ sub _daemon_peer_svsjoin {
     return $ref;
 }
 
+sub _daemon_peer_svshost {
+    my $self    = shift;
+    my $peer_id = shift || return;
+    my $prefix  = shift || return;
+    my $sid     = $self->server_sid();
+    my $ref     = [ ];
+    my $args    = [ @_ ];
+    my $count   = @$args;
+
+    # :9T9 SVSHOST 7UPAAAABO 1529239224 fake.host.name
+    SWITCH: {
+        if (!$self->_state_sid_serv($prefix) && $prefix ne $sid) {
+            last SWITCH;
+        }
+        if (!$count || $count < 3) {
+            last SWITCH;
+        }
+        my $client = shift @$args;
+        my $uid = $self->state_user_uid($client);
+        last SWITCH if !$uid;
+        last SWITCH if $args->[0] !~ m!^\d+$!;
+        last SWITCH if $args->[0] != $self->{state}{uids}{$uid}{ts};
+        if ($args->[1] =~ $host_re) {
+            $self->_state_do_change_hostmask($uid, $args->[1]);
+        }
+        unshift @$args, $uid;
+        $self->send_output(
+            {
+                prefix   => $prefix,
+                command  => 'SVSHOST',
+                params   => $args,
+                colonify => 0,
+            },
+            grep { $_ ne $peer_id } $self->_state_connected_peers(),
+        );
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
 sub _state_create {
     my $self = shift;
 
@@ -9126,8 +9167,6 @@ sub _state_send_burst {
     # Send SJOIN+MODE burst
     for my $chan (keys %{ $self->{state}{chans} }) {
         next if $chan =~ /^\&/;
-        # TODO: may as well add TBURST gathering here if applicable
-        #       but actually send after MODE burst
         my $chanrec = $self->{state}{chans}{$chan};
         my @uids = map { $_->[1] }
             sort { $a->[0] cmp $b->[0] }
@@ -9152,9 +9191,6 @@ sub _state_send_burst {
             $conn_id,
         );
 
-        # TODO: MODE burst
-        # Banlist|Exceptions|Invex
-        # :<SID> BMASK <TS> <CHANNAME> <TYPE> :<MASKS>
         my @output_modes;
         OUTER: for my $type (@lists) {
             my $length = length($sid) + 5 + length($chan) + 4 + length($chanrec->{ts}) + 2;
@@ -9303,7 +9339,7 @@ sub _state_do_change_hostmask {
                 prefix   => $full,
                 command  => 'CHGHOST',
                 colonify => 0,
-                params   => [ $rec->{auth}{user}, $nhost ],
+                params   => [ $rec->{auth}{ident}, $nhost ],
               },
               $conn_id,
               '',
@@ -9332,6 +9368,11 @@ sub _state_do_change_hostmask {
            MODES: {
               my $modes = $rec->{chans}{$uchan};
               last MODES if !$modes;
+              $modes = join '',
+                map { $_->[1] }
+                sort { $a->[0] cmp $b->[0] }
+                map { my $w = $_; $w =~ tr/ohv/ABC/; [$w, $_] }
+                split //, $modes;
               my @args;
               push @args, $_ for
                  map { $rec->{nick} } split //, $modes;
@@ -9354,7 +9395,7 @@ sub _state_do_change_hostmask {
                       prefix   => $server,
                       command  => 'MODE',
                       colonify => 0,
-                      params   => [ $chan, $modeline ],
+                      params   => [ $chan, split m! !, $modeline ],
                   },
                   $conn_id, '', '', 'chghost'
               );
