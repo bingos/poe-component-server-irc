@@ -8447,6 +8447,64 @@ sub _daemon_peer_svshost {
     return $ref;
 }
 
+sub _daemon_peer_svskill {
+    my $self    = shift;
+    my $peer_id = shift || return;
+    my $prefix  = shift || return;
+    my $sid     = $self->server_sid();
+    my $ref     = [ ];
+    my $args    = [ @_ ];
+    my $count   = @$args;
+
+    SWITCH: {
+        if (!$self->_state_sid_serv($prefix) && $prefix ne $sid) {
+            last SWITCH;
+        }
+        if (!$count || $count < 2) {
+            last SWITCH;
+        }
+        my $client = shift @$args;
+        my $uid = $self->state_user_uid($client);
+        last SWITCH if !$uid;
+        last SWITCH if $args->[0] !~ m!^\d+$!;
+        last SWITCH if $args->[0] != $self->{state}{uids}{$uid}{ts};
+        if ( $uid =~ m!^$sid! ) {
+           my $rec = $self->{state}{uids}{$uid};
+           my $reason = 'SVSKilled: ';
+           if ( $count == 3 ) {
+              $reason .= pop @$args;
+           }
+           else {
+              $reason .= '<No reason supplied>';
+           }
+           $self->_terminate_conn_error(
+                $rec->{route_id},
+                $reason,
+           );
+           last SWITCH;
+        }
+        my $route_id = $self->_state_uid_route($uid);
+        if ( $route_id eq $peer_id ) {
+          # The fuck
+          last SWITCH;
+        }
+        $self->send_output(
+            {
+                prefix  => $prefix,
+                command => 'SVSKILL',
+                params  => [
+                    $client,
+                    @$args,
+                ],
+            },
+            $route_id,
+        );
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
 sub _state_create {
     my $self = shift;
 
