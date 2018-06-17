@@ -8406,6 +8406,55 @@ sub _daemon_peer_svsjoin {
     return $ref;
 }
 
+sub _daemon_peer_svspart {
+    my $self    = shift;
+    my $peer_id = shift || return;
+    my $prefix  = shift || return;
+    my $sid     = $self->server_sid();
+    my $ref     = [ ];
+    my $args    = [ @_ ];
+    my $count   = @$args;
+
+    SWITCH: {
+        if (!$self->_state_sid_serv($prefix) && $prefix ne $sid) {
+            last SWITCH;
+        }
+        if (!$count || $count < 2) {
+            last SWITCH;
+        }
+        my $client = shift @$args;
+        my $uid = $self->state_user_uid($client);
+        last SWITCH if !$uid;
+        if ( $uid =~ m!^$sid! ) {
+           my $rec = $self->{state}{uids}{$uid};
+           $self->_send_output_to_client(
+                $rec->{route_id},
+                (ref $_ eq 'ARRAY' ? @{ $_ } : $_),
+           ) for $self->_daemon_cmd_part($rec->{nick}, @$args);
+           last SWITCH;
+        }
+        my $route_id = $self->_state_uid_route($uid);
+        if ( $route_id eq $peer_id ) {
+          # The fuck
+          last SWITCH;
+        }
+        $self->send_output(
+            {
+                prefix  => $prefix,
+                command => 'SVSPART',
+                params  => [
+                    $client,
+                    @$args,
+                ],
+            },
+            $route_id,
+        );
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
 sub _daemon_peer_svshost {
     my $self    = shift;
     my $peer_id = shift || return;
