@@ -6514,6 +6514,9 @@ sub _daemon_peer_uid {
     my $ref     = [ ];
     my $args    = [ @_ ];
     my $count   = @$args;
+    my $rhost   = ( $self->_state_our_capab('RHOST')
+                    && $self->_state_peer_capab( $peer_id, 'RHOST') );
+
 
     SWITCH: {
         if (!$count || $count < 9) {
@@ -6543,7 +6546,7 @@ sub _daemon_peer_uid {
                   {
                     prefix  => $mysid,
                     command => 'KILL',
-                    params  => [$args->[7], 'Nick Collision'],
+                    params  => [$args->[7+$rhost], 'Nick Collision'],
                   },
                   $peer_id,
                 );
@@ -6559,7 +6562,7 @@ sub _daemon_peer_uid {
                  {
                     prefix  => $mysid,
                     command => 'KILL',
-                    params  => [$args->[7], 'Nick Collision'],
+                    params  => [$args->[7+$rhost], 'Nick Collision'],
                  },
                  $peer_id,
               );
@@ -6580,7 +6583,7 @@ sub _daemon_peer_uid {
                   {
                     prefix  => $mysid,
                     command => 'KILL',
-                    params  => [$args->[7], 'Nick Collision'],
+                    params  => [$args->[7+$rhost], 'Nick Collision'],
                   },
                   $peer_id,
                 );
@@ -6590,22 +6593,33 @@ sub _daemon_peer_uid {
             #last SWITCH;
         }
 
+        # check if we have RHOST set and they do, if so then there will be 11 args not 10
+
         my $record = {
-            nick  => $args->[0],
-            uid   => $args->[7],
-            sid   => $prefix,
-            hops  => $args->[1],
-            ts    => $args->[2],
-            type  => 'r',
-            umode => $args->[3],
-            auth  => {
-                ident => $args->[4],
-                hostname => $args->[5],
+            server      => $self->_state_sid_name( $prefix ),
+            type        => 'r',
+            route_id    => $peer_id,
+            sid         => $prefix,
+            nick        => $args->[0],
+            hops        => $args->[1],
+            ts          => $args->[2],
+            umode       => $args->[3],
+            auth        => {
+               ident    => $args->[4],
+               hostname => $args->[5],
             },
-            route_id => $peer_id,
-            server => $self->_state_sid_name( $prefix ),
-            ircname => ( $args->[9] || '' ),
+            ipaddress   => $args->[6+$rhost],
+            uid         => $args->[7+$rhost],
+            account     => $args->[8+$rhost],
+            ircname     => ( $args->[9+$rhost] || '' ),
         };
+
+        if ( $rhost ) {
+          $record->{auth}{realhost} = $args->[6];
+        }
+        else {
+          $record->{auth}{realhost} = $record->{auth}{hostname};
+        }
 
         my $unick = uc_irc( $args->[0] );
 
@@ -9224,6 +9238,8 @@ sub _state_send_burst {
     my $invex   = grep { /^IE$/i } @{ $conn->{capab} };
     my $excepts = grep { /^EX$/i } @{ $conn->{capab} };
     my $tburst  = grep { /^TBURST$/i } @{ $conn->{capab} };
+    my $rhost   = grep { /^RHOST$/i } @{ $conn->{capab} };
+    $rhost      = ( $self->_state_our_capab('RHOST') && $rhost );
     my %map     = qw(bans b excepts e invex I);
     my @lists   = qw(bans);
     push @lists, 'excepts' if $excepts;
@@ -9251,9 +9267,10 @@ sub _state_send_burst {
             '+' . $umode_fixed,
             $record->{auth}{ident},
             $record->{auth}{hostname},
-            ( $record->{ipaddress} || 0 ),
-            $record->{uid}, '*', $record->{ircname},
         ];
+        push @$arrayref, $record->{auth}{realhost} if $rhost;
+        push @$arrayref, ( $record->{ipaddress} || 0 ),
+             $record->{uid}, $record->{account}, $record->{ircname};
         my @uid_burst = (
             {
                 prefix  => $prefix,
@@ -9732,7 +9749,11 @@ sub _state_register_client {
         $record->{auth}{hostname} = $record->{socket}[0];
     }
 
-    $record->{ipaddress} = $record->{socket}[0]; # Needed latter for UID command
+    $record->{auth}{realhost} = $record->{auth}{hostname};
+
+    $record->{account} = '*';
+
+    $record->{ipaddress} = $record->{socket}[0]; # Needed later for UID command
     $record->{ipaddress} = '0' if $record->{ipaddress} =~ m!^:!;
 
     $self->{state}{users}{uc_irc($record->{nick})} = $record;
@@ -9748,18 +9769,48 @@ sub _state_register_client {
         $record->{auth}{hostname},
         $record->{ipaddress},
         $record->{uid},
-        '*',
+        $record->{account},
         $record->{ircname},
     ];
+
+    my $rhostref = [
+        $record->{nick},
+        $record->{hops} + 1,
+        $record->{ts}, '+i',
+        $record->{auth}{ident},
+        $record->{auth}{hostname},
+        $record->{auth}{realhost},
+        $record->{ipaddress},
+        $record->{uid},
+        $record->{account},
+        $record->{ircname},
+    ];
+
     delete $self->{state}{pending}{uc_irc($record->{nick})};
-    $self->send_output(
-        {
-            prefix  => $record->{sid},
-            command => 'UID',
-            params  => $arrayref,
-        },
-        $self->_state_connected_peers(),
-    );
+
+    foreach my $peer_id ( $self->_state_connected_peers() ) {
+        if ( $self->_state_peer_capab( $peer_id, 'RHOST' ) ) {
+            $self->send_output(
+              {
+                  prefix  => $record->{sid},
+                  command => 'UID',
+                  params  => $rhostref,
+              },
+              $peer_id,
+            );
+        }
+        else {
+            $self->send_output(
+              {
+                  prefix  => $record->{sid},
+                  command => 'UID',
+                  params  => $arrayref,
+              },
+              $peer_id,
+            );
+        }
+    }
+
     $self->send_event('daemon_uid', @$arrayref);
     $self->send_event('daemon_nick', @{ $arrayref }[0..5], $record->{server}, ( $arrayref->[9] || '' ) );
     $self->_state_update_stats();
@@ -9868,6 +9919,14 @@ sub _state_peer_capab {
     return if !$self->_connection_is_peer($conn_id);
     my $conn = $self->{state}{conns}{$conn_id};
     return scalar grep { $_ eq $capab } @{ $conn->{capab} };
+}
+
+sub _state_our_capab {
+    my $self = shift;
+    my $capab = shift || return;
+    $capab = uc $capab;
+    my $capabs = $self->{config}{capab};
+    return scalar grep { $_ eq $capab } @{ $capabs };
 }
 
 sub state_user_full {
@@ -10548,7 +10607,7 @@ EOF
             NETWORK MODES AWAYLEN),
     };
 
-    $self->{config}{capab} = [qw(ENCAP CLUSTER QS DLN UNDLN EX IE HOPS UNKLN KLN GLN EOB)];
+    $self->{config}{capab} = [qw(ENCAP CLUSTER QS DLN UNDLN EX IE HOPS UNKLN KLN GLN EOB RHOST)];
 
     return 1;
 }
@@ -11314,6 +11373,9 @@ sub add_spoofed_nick {
     $record->{auth}{ident} = delete $record->{user} || $record->{nick};
     $record->{auth}{hostname} = delete $record->{hostname}
         || $self->server_name();
+    $record->{auth}{realhost} = $record->{auth}{hostname};
+    $record->{account} = '*' if !$record->{account};
+    $record->{ipaddress} = 0;
     $self->{state}{users}{uc_irc($record->{nick})} = $record;
     $self->{state}{uids}{ $record->{uid} } = $record if $record->{uid};
     $self->{state}{peers}{uc $record->{server}}{users}{uc_irc($record->{nick})} = $record;
@@ -11325,19 +11387,50 @@ sub add_spoofed_nick {
         $record->{ts},
         '+' . $record->{umode},
         $record->{auth}{ident},
-        $record->{auth}{hostname}, '0',
-        $record->{uid}, '*',
+        $record->{auth}{hostname},
+        $record->{ipaddress},
+        $record->{uid},
+        $record->{account},
         $record->{ircname},
     ];
 
-    $self->send_output(
-        {
-            prefix  => $record->{sid},
-            command => 'UID',
-            params  => $arrayref,
-        },
-        $self->_state_connected_peers(),
-    );
+    my $rhostref = [
+        $record->{nick},
+        $record->{hops} + 1,
+        $record->{ts},
+        '+' . $record->{umode},
+        $record->{auth}{ident},
+        $record->{auth}{hostname},
+        $record->{auth}{realhost},
+        $record->{ipaddress},
+        $record->{uid},
+        $record->{account},
+        $record->{ircname},
+    ];
+
+    foreach my $peer_id ( $self->_state_connected_peers() ) {
+        if ( $self->_state_peer_capab( $peer_id, 'RHOST' ) ) {
+            $self->send_output(
+              {
+                  prefix  => $record->{sid},
+                  command => 'UID',
+                  params  => $rhostref,
+              },
+              $peer_id,
+            );
+        }
+        else {
+            $self->send_output(
+              {
+                  prefix  => $record->{sid},
+                  command => 'UID',
+                  params  => $arrayref,
+              },
+              $peer_id,
+            );
+        }
+    }
+
     $self->send_event('daemon_uid', @$arrayref);
     $self->send_event('daemon_nick', @{ $arrayref }[0..5], $record->{server}, ( $arrayref->[9] || '' ) );
     $self->_state_update_stats();
