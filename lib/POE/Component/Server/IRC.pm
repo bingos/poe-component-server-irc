@@ -3960,7 +3960,8 @@ sub _daemon_do_whois {
     my $ref    = [ ];
     my $query  = shift;
 
-    my $record = $self->{state}{uids}{$query};
+    my $querier = $self->{state}{uids}{$uid};
+    my $record  = $self->{state}{uids}{$query};
 
     push @$ref, {
        prefix  => $sid,
@@ -3975,7 +3976,9 @@ sub _daemon_do_whois {
        ],
     };
     my @chans;
+    my $noshow = ( $record->{umode} =~ m!p! && $querier->{umode} !~ m!o! && $uid ne $query );
     LOOP: for my $chan (keys %{ $record->{chans} }) {
+        next LOOP if $noshow;
         if ($self->{state}{chans}{$chan}{mode} =~ /[ps]/
               && !defined $self->{state}{chans}{$chan}{users}{$uid}) {
               next LOOP;
@@ -4014,6 +4017,7 @@ sub _daemon_do_whois {
              params  => [$uid, $record->{nick}, $buffer],
         };
     }
+    # RPL_WHOISSERVER
     push @$ref, {
         prefix  => $sid,
         command => '312',
@@ -4024,6 +4028,28 @@ sub _daemon_do_whois {
              $self->_state_peer_desc($record->{server}),
         ],
     };
+    # RPL_WHOISREGNICK
+    push @$ref, {
+        prefix  => $sid,
+        command => '307',
+        params  => [
+              $uid,
+              $record->{nick},
+              'has identified for this nick'
+        ],
+    } if $record->{umode} =~ m!r!;
+    # RPL_WHOISACCOUNT
+    push @$ref, {
+        prefix  => $sid,
+        command => '330',
+        params  => [
+              $uid,
+              $record->{nick},
+              $record->{account},
+              'is logged in as'
+        ],
+    } if $record->{account} ne '*';
+    # RPL_AWAY
     push @$ref, {
         prefix  => $sid,
         command => '301',
@@ -4033,11 +4059,29 @@ sub _daemon_do_whois {
               $record->{away},
         ],
     } if $record->{type} eq 'c' && $record->{away};
-    push @$ref, {
-        prefix  => $sid,
-        command => '313',
-        params  => [$uid, $record->{nick}, 'is an IRC Operator'],
-    } if $record->{umode} && $record->{umode} =~ /o/;
+    {
+        my $operstring;
+        $operstring = 'is a Network Service' if $self->_state_sid_serv($record->{sid});
+        $operstring = 'is a Server Administrator' if $record->{umode} =~ m!a! && !$operstring;
+        $operstring = 'is an IRC Operator' if $record->{umode} =~ m!o! && !$operstring;
+        push @$ref, {
+            prefix  => $sid,
+            command => '313',
+            params  => [$uid, $record->{nick}, $operstring],
+        } if $operstring && ( $record->{umode} !~ m!H! || $querier->{umode} =~ m!o! );
+    }
+    if ($record->{type} eq 'c' && ($uid eq $query || $querier->{umode} =~ m!o!) ) {
+        my $umodes = join '', '+', sort split //, $record->{umode};
+        push @$ref, {
+               prefix  => $sid,
+               command => '379',
+               params  => [
+                    $uid,
+                    $record->{nick},
+                    "is using modes $umodes"
+               ],
+        };
+    }
     if ($record->{type} eq 'c'
          && ($self->server_config('whoisactually')
          or $self->{state}{uids}{$uid}{umode} =~ /o/)) {
@@ -4052,23 +4096,43 @@ sub _daemon_do_whois {
                ],
         };
      }
-     push @$ref, {
-         prefix  => $sid,
-         command => '317',
-         params  => [
-               $uid,
-               $record->{nick},
-               time - $record->{idle_time},
-               $record->{conn_time},
-               'seconds idle, signon time',
-         ],
-     } if $record->{type} eq 'c';
-
+     if ($record->{type} eq 'c') {
+        push @$ref, {
+            prefix  => $sid,
+            command => '317',
+            params  => [
+                  $uid,
+                  $record->{nick},
+                  time - $record->{idle_time},
+                  $record->{conn_time},
+                  'seconds idle, signon time',
+            ],
+        } if $record->{umode} !~ m!q! || $querier->{umode} =~ m!o! || $uid eq $query;
+     }
      push @$ref, {
         prefix  => $sid,
         command => '318',
         params  => [$uid, $record->{nick}, 'End of /WHOIS list.'],
      };
+
+    if ($record->{umode} =~ m!y! && $uid ne $query) {
+        # Send NOTICE
+        my $local = ( $record->{sid} eq $sid );
+        $self->send_output(
+            {
+                prefix  => ( $local ? $self->server_name() : $sid ),
+                command => 'NOTICE',
+                params  => [
+                    ( $local ? $record->{nick} : $record->{uid} ),
+                    sprintf('*** Notice -- %s (%s@%s) [%s] is doing a /whois on you',
+                        $querier->{nick}, $querier->{auth}{ident}, $querier->{auth}{hostname},
+                        $querier->{server},
+                    ),
+                ],
+            },
+            $record->{route_id},
+        );
+    }
     return @$ref if wantarray;
     return $ref;
 }
@@ -5053,7 +5117,7 @@ sub _daemon_cmd_umode {
             next if $mode eq '+o';
             my ($action, $char) = split //, $mode;
             if ($action eq '+' && $record->{umode} !~ /$char/) {
-                next if $char =~ /[wl]a/ && $record->{umode} !~ /o/;
+                next if $char =~ /[wla]/ && $record->{umode} !~ /o/;
                 $record->{umode} .= $char;
                 if ($char eq 'i') {
                     $self->{state}{stats}{invisible}++;
@@ -8504,6 +8568,118 @@ sub _daemon_peer_svshost {
             },
             grep { $_ ne $peer_id } $self->_state_connected_peers(),
         );
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _daemon_peer_svsmode {
+    my $self    = shift;
+    my $peer_id = shift || return;
+    my $prefix  = shift || return;
+    my $sid     = $self->server_sid();
+    my $ref     = [ ];
+    my $args    = [ @_ ];
+    my $count   = @$args;
+
+    # :9T9 SVSMODE 7UPAAAABO 1529239224 +<modes> extra_arg
+    SWITCH: {
+        if (!$self->_state_sid_serv($prefix) && $prefix ne $sid) {
+            last SWITCH;
+        }
+        if (!$count || $count < 3) {
+            last SWITCH;
+        }
+        my $client = shift @$args;
+        my $uid = $self->state_user_uid($client);
+        last SWITCH if !$uid;
+        last SWITCH if $args->[0] !~ m!^\d+$!;
+        last SWITCH if $args->[0] != $self->{state}{uids}{$uid}{ts};
+        my $rec = $self->{state}{uids}{$uid};
+        my $local = ( $uid =~ m!^$sid! );
+        $local = $rec->{route_id} if $local;
+        my $extra_arg = ( $count >= 4 ? $args->[2] : '' );
+        my $umode = unparse_mode_line($args->[1]);
+        my $parsed_mode = parse_mode_line($umode);
+        my $previous = $rec->{umode};
+        MODE: while (my $mode = shift @{ $parsed_mode->{modes} }) {
+            next MODE if $mode eq '+o';
+            my ($action, $char) = split //, $mode;
+            next MODE if $char =~ m![SW]!;
+            if ($action eq '+' && $char eq 'x') {
+                if ($extra_arg && $extra_arg =~ $host_re) {
+                    $self->_state_do_change_hostmask($uid, $extra_arg);
+                }
+                next MODE;
+            }
+            if ($action eq '+' && $char eq 'd') {
+                if ($extra_arg) {
+                    $rec->{account} = $extra_arg;
+                    # TODO: account-notify
+                }
+                next MODE;
+            }
+            if ($action eq '+' && $rec->{umode} !~ /$char/) {
+                $rec->{umode} .= $char;
+                if ($char eq 'i') {
+                    $self->{state}{stats}{invisible}++;
+                }
+                if ($char eq 'w' && $local ) {
+                    $self->{state}{wallops}{$local} = time;
+                }
+                if ($char eq 'l' && $local ) {
+                    $self->{state}{locops}{$local} = time;
+                }
+            }
+            if ($action eq '-' && $rec->{umode} =~ /$char/) {
+                $rec->{umode} =~ s/$char//g;
+                $self->{state}{stats}{invisible}-- if $char eq 'i';
+
+                if ($char eq 'o') {
+                    $self->{state}{stats}{ops_online}--;
+                    if ( $local ) {
+                        delete $self->{state}{localops}{$local};
+                        $self->antiflood( $local, 1);
+                    }
+                }
+                if ($char eq 'w' && $local) {
+                    delete $self->{state}{wallops}{$local};
+                }
+                if ($char eq 'l' && $local) {
+                    delete $self->{state}{locops}{$local};
+                }
+            }
+        }
+        $rec->{umode} = join '', sort split //, $rec->{umode};
+        unshift @$args, $uid;
+        $self->send_output(
+            {
+                prefix   => $prefix,
+                command  => 'SVSMODE',
+                params   => $args,
+                colonify => 0,
+            },
+            grep { $_ ne $peer_id } $self->_state_connected_peers(),
+        );
+        last SWITCH if !$local;
+        my $set = gen_mode_change($previous, $rec->{umode});
+        if ($set) {
+            my $full = $self->state_user_full($uid);
+            $self->send_output(
+                {
+                    prefix  => $full,
+                    command => 'MODE',
+                    params  => [$rec->{nick}, $set],
+                },
+                $local
+            );
+            $self->send_event(
+                "daemon_umode",
+                $full,
+                $set,
+            );
+        }
     }
 
     return @$ref if wantarray;
