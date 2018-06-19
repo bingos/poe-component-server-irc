@@ -160,8 +160,6 @@ sub client_connected {
 sub client2_connected {
   my ($kernel,$heap,$sender) = @_[KERNEL,HEAP,SENDER];
   pass($_[STATE]);
-  $kernel->post( $sender, 'send_to_server', { command => 'CAP',  params => [ 'REQ', 'chghost' ], colonify => 0 } );
-  $kernel->post( $sender, 'send_to_server', { command => 'CAP',  params => [ 'END' ], colonify => 0 } );
   $kernel->post( $sender, 'send_to_server', { command => 'NICK', params => [ 'rubbarb' ], colonify => 0 } );
   $kernel->post( $sender, 'send_to_server', { command => 'USER', params => [ 'rubbarb', '*', '*', 'rubbarb rubbarb' ], colonify => 1 } );
   return;
@@ -170,6 +168,8 @@ sub client2_connected {
 sub client3_connected {
   my ($kernel,$heap,$sender) = @_[KERNEL,HEAP,SENDER];
   pass($_[STATE]);
+  $kernel->post( $sender, 'send_to_server', { command => 'CAP',  params => [ 'REQ', 'chghost' ], colonify => 0 } );
+  $kernel->post( $sender, 'send_to_server', { command => 'CAP',  params => [ 'END' ], colonify => 0 } );
   $kernel->post( $sender, 'send_to_server', { command => 'NICK', params => [ 'custard' ], colonify => 0 } );
   $kernel->post( $sender, 'send_to_server', { command => 'USER', params => [ 'custard', '*', '*', 'custard cream' ], colonify => 1 } );
   return;

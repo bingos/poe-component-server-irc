@@ -160,6 +160,8 @@ sub client_connected {
 sub client2_connected {
   my ($kernel,$heap,$sender) = @_[KERNEL,HEAP,SENDER];
   pass($_[STATE]);
+  $kernel->post( $sender, 'send_to_server', { command => 'CAP',  params => [ 'REQ', 'extended-join' ], colonify => 0 } );
+  $kernel->post( $sender, 'send_to_server', { command => 'CAP',  params => [ 'END' ], colonify => 0 } );
   $kernel->post( $sender, 'send_to_server', { command => 'NICK', params => [ 'rubbarb' ], colonify => 0 } );
   $kernel->post( $sender, 'send_to_server', { command => 'USER', params => [ 'rubbarb', '*', '*', 'rubbarb rubbarb' ], colonify => 1 } );
   return;
@@ -168,7 +170,7 @@ sub client2_connected {
 sub client3_connected {
   my ($kernel,$heap,$sender) = @_[KERNEL,HEAP,SENDER];
   pass($_[STATE]);
-  $kernel->post( $sender, 'send_to_server', { command => 'CAP',  params => [ 'REQ', 'chghost' ], colonify => 0 } );
+  $kernel->post( $sender, 'send_to_server', { command => 'CAP',  params => [ 'REQ', 'chghost', 'extended-join' ], colonify => 0 } );
   $kernel->post( $sender, 'send_to_server', { command => 'CAP',  params => [ 'END' ], colonify => 0 } );
   $kernel->post( $sender, 'send_to_server', { command => 'NICK', params => [ 'custard' ], colonify => 0 } );
   $kernel->post( $sender, 'send_to_server', { command => 'USER', params => [ 'custard', '*', '*', 'custard cream' ], colonify => 1 } );
@@ -262,6 +264,8 @@ sub client2_input {
   }
   if ( $cmd eq 'JOIN' && $prefix =~ m!^bobbins! ) {
     pass($cmd);
+    is($params->[1], '*', 'No account name set' );
+    is($params->[2], 'bobbins along', 'Got GECOS' );
     return;
   }
   if ( $cmd eq 'MODE' ) {
@@ -290,7 +294,7 @@ sub client3_input {
   if ( $cmd eq '366' ) {
     my $ts  = $heap->{ircd}{state}{users}{'BOBBINS'}{ts};
     my $uid = $heap->{ircd}{state}{users}{'BOBBINS'}{uid};
-    $poe_kernel->post('groucho', 'send_to_server', { prefix => '4AK', command => 'SVSHOST', params => [ $uid, $ts, 'fakey.mac.fake.host' ] } );
+    $poe_kernel->post('groucho', 'send_to_server', { prefix => '4AK', command => 'SVSMODE', params => [ $uid, $ts, '+x', 'fakey.mac.fake.host' ] } );
     return;
   }
   if ( $cmd eq 'CHGHOST' ) {
