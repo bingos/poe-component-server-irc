@@ -8622,6 +8622,20 @@ sub _daemon_peer_svsmode {
                 if ($extra_arg) {
                     $rec->{account} = $extra_arg;
                     # TODO: account-notify
+                    foreach my $chan ( keys %{ $rec->{chans} } ) {
+                        $self->_send_output_channel_local(
+                            $chan,
+                            {
+                                prefix   => $self->state_user_full($uid),
+                                command  => 'ACCOUNT',
+                                colonify => 0,
+                                params   => [ $rec->{account} ],
+                            },
+                            $rec->{route_id},
+                            '',
+                            'account-notify',
+                        );
+                    }
                 }
                 next MODE;
             }
@@ -8794,6 +8808,7 @@ sub _state_create {
       'away-notify'       => 1,
       'chghost'           => 1,
       'userhost-in-names' => 1,
+      'account-notify'    => 1,
     };
 
     return 1;
