@@ -322,7 +322,7 @@ sub _client_register {
                 $nick,
                 $server,
                 $version,
-                'DGiglow',
+                'DFGHRSWabcdefgijklnopqrsuwy',
                 'biklmnopstveIh',
                 'bkloveIh',
             ],
@@ -5103,7 +5103,13 @@ sub _daemon_cmd_umode {
         my $modestring = join('', @$args);
         $modestring =~ s/\s+//g;
         my $cnt += $modestring =~ s/[^a-zA-Z+-]+//g;
-        $cnt += $modestring =~ s/[^DGglwiozl+-]+//g;
+        $cnt += $modestring =~ s/[^DFGHRSWabcdefgijklnopqrsuwy+-]+//g;
+
+        # These can only be set by servers/services
+        $modestring =~ s/[SWr]+//g;
+
+        # These can only be set by an OPER
+        $cnt += $modestring =~ s/[FHabcdefjklnsuy]+//g if $record->{umode} !~ /o/;
 
         push @$ref, ['501'] if $cnt;
 
@@ -5117,7 +5123,6 @@ sub _daemon_cmd_umode {
             next if $mode eq '+o';
             my ($action, $char) = split //, $mode;
             if ($action eq '+' && $record->{umode} !~ /$char/) {
-                next if $char =~ /[wla]/ && $record->{umode} !~ /o/;
                 $record->{umode} .= $char;
                 if ($char eq 'i') {
                     $self->{state}{stats}{invisible}++;
