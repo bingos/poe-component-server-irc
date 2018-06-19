@@ -4586,7 +4586,6 @@ sub _daemon_cmd_join {
     my $args     = [@_];
     my $count    = @$args;
     my $route_id = $self->_state_user_route($nick);
-    # TODO: Ultimately want all _damon_cmd_* to be passed the client UID
     my $uid      = $self->state_user_uid($nick);
     my $unick    = uc_irc($nick);
 
@@ -4749,8 +4748,18 @@ sub _daemon_cmd_join {
                 command => 'JOIN',
                 params  => [$channel],
             };
+            my $extout = {
+                prefix  => $self->state_user_full($nick),
+                command => 'JOIN',
+                params  => [
+                    $channel,
+                    $self->{state}{uids}{$uid}{account},
+                    $self->{state}{uids}{$uid}{ircname},
+                ],
+            };
             $self->_send_output_to_client($route_id, $output);
-            $self->_send_output_to_channel($channel, $output, $route_id);
+            $self->_send_output_channel_local($channel, $output, $route_id, '', '', 'extended-join');
+            $self->_send_output_channel_local($channel, $extout, $route_id, '', 'extended-join');
 
             # Send NAMES and TOPIC to client
             $self->_send_output_to_client(
@@ -7049,10 +7058,23 @@ sub _daemon_do_joins {
         # :8H8 SJOIN 1526826863 #ooby +cmntlk 699 secret :@7UPAAAAAA
 
         my $chanrec = $self->{state}{chans}{uc_irc($chan)};
-        my @local_users = map { $self->_state_uid_route($_) }
-            grep { $self->_state_is_local_uid($_) }
-            keys %{ $chanrec->{users} };
+        my @local_users; my @local_extjoin; my @local_nextjoin;
+        {
+            my @tmp_users =
+                grep { $self->_state_is_local_uid($_) }
+                keys %{ $chanrec->{users} };
 
+            @local_extjoin = map { $self->_state_uid_route($_) }
+                grep { $self->{state}{uids}{$_}{caps}{'extended-join'} }
+                @tmp_users;
+
+            @local_nextjoin = map { $self->_state_uid_route($_) }
+                grep { !$self->{state}{uids}{$_}{caps}{'extended-join'} }
+                @tmp_users;
+
+            @local_users = ( @local_extjoin, @local_nextjoin );
+
+        }
         # If the TS received is lower than our TS of the channel a TS6 server must
         # remove status modes (+ov etc) and channel modes (+nt etc).  If the
         # originating server is TS6 capable (ie, it has a SID), the server must
@@ -7384,15 +7406,30 @@ sub _daemon_do_joins {
             $chanrec->{users}{$uid} = $umode;
             $self->{state}{uids}{$uid}{chans}{$uchan} = $umode;
             push @op_list, $self->state_user_nick($uid) for split //, $umode;
-            my $output = {
-                prefix  => $self->state_user_full($uid),
-                command => 'JOIN',
-                params  => [$chanrec->{name}],
-            };
-            $self->send_output($output, @local_users);
+            my $full = $self->state_user_full($uid);
+            if ( @local_nextjoin ) {
+                my $output = {
+                    prefix  => $full,
+                    command => 'JOIN',
+                    params  => [$chanrec->{name}],
+                };
+                $self->send_output($output, @local_nextjoin);
+            }
+            if ( @local_extjoin ) {
+                my $extout = {
+                    prefix  => $full,
+                    command => 'JOIN',
+                    params  => [
+                        $chanrec->{name},
+                        $self->{state}{uids}{$uid}{account},
+                        $self->{state}{uids}{$uid}{ircname},
+                    ],
+                };
+                $self->send_output($extout, @local_extjoin);
+            }
             $self->send_event(
                 "daemon_join",
-                $output->{prefix},
+                $full,
                 $chanrec->{name},
             );
             if ($umode) {
@@ -8803,12 +8840,13 @@ sub _state_create {
     };
 
     $self->{state}{caps} = {
-      'invite-notify'     => 1,
-      'multi-prefix'      => 1,
+      'account-notify'    => 1,
       'away-notify'       => 1,
       'chghost'           => 1,
+      'extended-join'     => 1,
+      'invite-notify'     => 1,
+      'multi-prefix'      => 1,
       'userhost-in-names' => 1,
-      'account-notify'    => 1,
     };
 
     return 1;
@@ -9706,7 +9744,17 @@ sub _state_do_change_hostmask {
                 colonify => 0,
                 params   => [ $chan ],
               },
-              $conn_id, '', '', 'chghost'
+              $conn_id, '', '', [ qw[chghost extended-join] ]
+           );
+           $self->_send_output_channel_local(
+              $chan,
+              {
+                prefix   => $full,
+                command  => 'JOIN',
+                colonify => 0,
+                params   => [ $chan, $rec->{account}, $rec->{ircname} ],
+              },
+              $conn_id, '', 'extended-join', 'chghost'
            );
            if ($modeline) {
               $self->_send_output_channel_local(
@@ -10901,10 +10949,14 @@ sub _send_output_channel_local {
         next UID if !$matched;
       }
       if ( $poscap ) {
-        next UID if !$self->{state}{uids}{$uid}{caps}{$poscap};
+        foreach my $cap ( @{ ref $poscap eq 'ARRAY' ? $poscap : [ $poscap ] } ) {
+            next UID if !$self->{state}{uids}{$uid}{caps}{$cap};
+        }
       }
       if ( $negcap ) {
-        next UID if $self->{state}{uids}{$uid}{caps}{$negcap};
+        foreach my $cap ( @{ ref $negcap eq 'ARRAY' ? $negcap : [ $negcap ] } ) {
+            next UID if $self->{state}{uids}{$uid}{caps}{$cap};
+        }
       }
       if ( $is_msg && $self->{state}{uids}{$uid}{umode} =~ m!D! ) { # +D 'deaf'
         next UID;

@@ -11,8 +11,9 @@ Revision history for POE-Component-Server-IRC
     - RKLINE is now local only and not propagated
     - Added UNRKLINE for removing RKLINEs
     - Added IRCv3.x capability negotiations CAP cmd
-      - added 'away-notify', 'invite-notify' and 'multi-prefix'
+      - added 'away-notify', 'invite-notify' 'multi-prefix'
       - added 'userhost-in-names', 'chghost', 'account-notify'
+      - added 'extended-join'
     - Added bcrypt passwd support for OPER passwords
     - Added bcrypt passwd support for auth passwords
     - Fixed problem with pmkpasswd utility
