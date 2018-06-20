@@ -889,7 +889,7 @@ sub _daemon_cmd_message {
             }
 
             if ($targ_type =~ /(server|host)mask/
-                    && $targs->{$target}[0] =~ /\x2E.*[\x2A\x3F]+.*$/) {
+                    && $targs->{$target}[1] =~ /\x2E[^.]*[\x2A\x3F]+[^.]*$/) {
                 push @$ref, ['414', $target];
                 next LOOP;
             }
@@ -7899,13 +7899,14 @@ sub _daemon_peer_umode {
 sub _daemon_peer_message {
     my $self    = shift;
     my $peer_id = shift || return;
-    my $nick    = shift || return;
+    my $uid     = shift || return;
     my $type    = shift || return;
     my $ref     = [ ];
     my $args    = [ @_ ];
     my $count   = @$args;
 
     SWITCH: {
+        my $nick = $self->state_user_nick($uid);
         if (!$count) {
             push @$ref, ['461', $type];
             last SWITCH;
@@ -7916,7 +7917,7 @@ sub _daemon_peer_message {
         }
         my $targets     = 0;
         my $max_targets = $self->server_config('MAXTARGETS');
-        my $full        = $self->state_user_full($nick);
+        my $full        = $self->state_user_full($uid);
         my $targs       = $self->_state_parse_msg_targets($args->[0]);
 
         LOOP: for my $target (keys %$targs) {
@@ -7932,7 +7933,7 @@ sub _daemon_peer_message {
                 next LOOP;
             }
             if ($targ_type =~ /(server|host)mask/
-                    && $targs->{$target}[0] !~ /\x2E.*[\x2A\x3F]+.*$/) {
+                    && $targs->{$target}[0] =~ /\x2E[^.]*[\x2A\x3F]+[^.]*$/) {
                 push @$ref, ['414', $target];
                 next LOOP;
             }
@@ -7950,6 +7951,14 @@ sub _daemon_peer_message {
                     && !$self->state_nick_exists($target)) {
                 push @$ref, ['401', $target];
                 next LOOP;
+            }
+            if ($targ_type eq 'uid'
+                    && !$self->state_uid_exists($target)) {
+                push @$ref, ['401', $target];
+                next LOOP;
+            }
+            if ($targ_type eq 'uid') {
+                $target = $self->state_user_nick($target);
             }
             if ($targ_type eq 'nick_ext'
                     && !$self->state_peer_exists($targs->{$target}[1])) {
@@ -7979,7 +7988,7 @@ sub _daemon_peer_message {
                 delete $targets{$peer_id};
                 $self->send_output(
                     {
-                        prefix  => $nick,
+                        prefix  => $uid,
                         command => $type,
                         params  => [$target, $args->[1]],
                     },
@@ -8035,7 +8044,7 @@ sub _daemon_peer_message {
                 delete $targets{$peer_id};
                 $self->send_output(
                     {
-                        prefix  => $nick,
+                        prefix  => $uid,
                         command => $type,
                         params  => [$target, $args->[1]],
                     },
@@ -8068,7 +8077,7 @@ sub _daemon_peer_message {
                 if ($targs->{$target}[1] ne $self->server_name()) {
                     $self->send_output(
                         {
-                            prefix  => $nick,
+                            prefix  => $uid,
                             command => $type,
                             params  => [$target, $args->[1]],
                         },
@@ -8167,7 +8176,7 @@ sub _daemon_peer_message {
                     }
                     delete $common->{$peer_id};
                     for my $route_id (keys %$common) {
-                        $msg->{prefix} = $nick;
+                        $msg->{prefix} = $uid;
                         if ($self->_connection_is_client($route_id)) {
                             $msg->{prefix} = $full;
                         }
@@ -8247,7 +8256,7 @@ sub _daemon_peer_message {
                     }
                 }
                 my $msg = {
-                    prefix  => $nick,
+                    prefix  => $uid,
                     command => $type,
                     params  => [$target, $args->[1]],
                 };
@@ -10609,7 +10618,7 @@ sub _state_parse_msg_targets {
             $results{$target} = ['channel_ext', $1, $2];
             next;
         }
-        if ( $target =~ /^\${2}(.+)$/ ) {
+        if ( $target =~ /^\$([^#].+)$/ ) {
             $results{$target} = ['servermask', $1];
             next;
         }
@@ -10622,6 +10631,10 @@ sub _state_parse_msg_targets {
             my $host;
             ($nick, $host) = split ( /%/, $nick, 2 ) if $nick =~ /%/;
             $results{$target} = ['nick_ext', $nick, $server, $host];
+            next;
+        }
+        if ($target =~ $uid_re) {
+            $results{$target} = ['uid'];
             next;
         }
         $results{$target} = ['nick'];
