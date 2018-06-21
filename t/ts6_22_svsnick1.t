@@ -318,7 +318,7 @@ sub client3_input {
   }
   if ( $cmd eq 'NOTICE' ) {
     pass($cmd);
-    $poe_kernel->post( $sender, 'send_to_server', { command => 'NICK', params => [ 'cream' ] } );
+    $poe_kernel->post('groucho', 'send_to_server', { prefix => '4AK', command => 'SVSNICK', params => [ '1FUAAAAAC', 'cream', time()] } );
     return;
   }
   if ( $cmd eq 'MODE' && $prefix =~ m'^custard' && $params->[1] eq '-r' ) {

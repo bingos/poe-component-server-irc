@@ -3021,6 +3021,20 @@ sub _daemon_cmd_nick {
             $self->{state}{users}{$unew} = $record;
             delete $self->{state}{peers}{$server}{users}{$unick};
             $self->{state}{peers}{$server}{users}{$unew} = $record;
+            if ( $record->{umode} =~ /r/ ) {
+                $record->{umode} =~ s/r//g;
+                $self->send_output(
+                    {
+                        prefix  => $full,
+                        command => 'MODE',
+                        params  => [
+                            $record->{nick},
+                            '-r',
+                        ],
+                    },
+                    $record->{route_id},
+                );
+            }
         }
 
         $self->send_output(
@@ -6837,6 +6851,9 @@ sub _daemon_peer_nick {
             $self->{state}{users}{$unew} = $record;
             delete $self->{state}{sids}{$sid}{users}{$unick};
             $self->{state}{sids}{$sid}{users}{$unew} = $record;
+            if ( $record->{umode} =~ /r/ ) {
+                $record->{umode} =~ s/r//g;
+            }
         }
         my $common = { };
         for my $chan (keys %{ $record->{chans} }) {
@@ -8745,6 +8762,140 @@ sub _daemon_peer_svsmode {
                 $set,
             );
         }
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _daemon_peer_svsnick {
+    my $self    = shift;
+    my $peer_id = shift || return;
+    my $prefix  = shift || return;
+    my $sid     = $self->server_sid();
+    my $ref     = [ ];
+    my $args    = [ @_ ];
+    my $count   = @$args;
+
+     #      - parv[0] = old nickname or uid
+     #      - parv[1] = old timestamp
+     #      - parv[2] = new nickname
+     #      - parv[3] = new timestamp
+
+     #        parv[0] = old nickname
+     #        parv[1] = new nickname
+     #        parv[2] = timestamp
+
+    SWITCH: {
+        if (!$self->_state_sid_serv($prefix) && $prefix ne $sid) {
+            last SWITCH;
+        }
+        if (!$count) {
+            last SWITCH;
+        }
+        my $newnick = ( $count == 4 ? $args->[2] : $args->[1] );
+        last SWITCH if !is_valid_nick_name($newnick); # maybe check nicklen too
+        my $uid = $self->state_user_uid($args->[0]);
+        last SWITCH if !$uid;
+        my $rec = $self->{state}{uids}{$uid};
+        my $ts = 0; my $newts = 0;
+        if ( $count == 4 ) {
+            $ts = $args->[1];
+            last SWITCH if $ts && $ts != $rec->{ts};
+        }
+        else {
+            $ts = $args->[2];
+        }
+        if ( $count == 3 ) {
+            $newts = $ts;
+        }
+        else {
+            $newts = $args->[3];
+        }
+        if ($uid !~ m!^$sid!) { # Not ours
+            if ($rec->{route_id} eq $peer_id) {
+                # eh!?
+                last SWITCH;
+            }
+            $self->send_output(
+                {
+                    prefix  => $prefix,
+                    command => 'SVSNICK',
+                    params  => [
+                        $uid,
+                        $newnick,
+                        $newts,
+                    ],
+                },
+                $rec->{route_id},
+            );
+            last SWITCH;
+        }
+        # Deal with a local nick change
+        my $common;
+        for my $chan (keys %{ $rec->{chans} }) {
+            for my $user ( keys %{ $self->{state}{chans}{$chan}{users} } ) {
+                next if $user !~ m!^$sid!;
+                $common->{$user} = $self->_state_uid_route($user);
+            }
+        }
+
+        my $full  = $self->state_user_full($uid);
+        my $unick = uc_irc $rec->{nick};
+        my $unew  = uc_irc $newnick;
+        my $server = uc $self->server_name();
+
+        if ($unick eq $unew) {
+            $rec->{nick} = $newnick;
+            $rec->{ts}   = time;
+        }
+        else {
+            $rec->{nick} = $newnick;
+            $rec->{ts}   = time;
+            # Remove from peoples accept lists
+            for (keys %{ $rec->{accepts} }) {
+                delete $self->{state}{users}{$_}{accepts}{$unick};
+            }
+            delete $rec->{accepts};
+            delete $self->{state}{users}{$unick};
+            $self->{state}{users}{$unew} = $rec;
+            delete $self->{state}{peers}{$server}{users}{$unick};
+            $self->{state}{peers}{$server}{users}{$unew} = $rec;
+            if ( $rec->{umode} =~ /r/ ) {
+                $rec->{umode} =~ s/r//g;
+                $self->send_output(
+                    {
+                        prefix  => $full,
+                        command => 'MODE',
+                        params  => [
+                            $rec->{nick},
+                            '-r',
+                        ],
+                    },
+                    $rec->{route_id},
+                );
+            }
+        }
+
+        $self->send_output(
+            {
+                prefix  => $rec->{uid},
+                command => 'NICK',
+                params  => [$newnick, $rec->{ts}],
+            },
+            $self->_state_connected_peers(),
+        );
+
+        $self->send_event("daemon_nick", $full, $newnick);
+
+        $self->send_output(
+            {
+                prefix  => $full,
+                command => 'NICK',
+                params  => [$newnick],
+            },
+            values %$common,
+        );
     }
 
     return @$ref if wantarray;
