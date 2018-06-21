@@ -1572,6 +1572,27 @@ sub _daemon_cmd_oper {
         };
 
         my @peers = $self->_state_connected_peers();
+
+        if (my $whois = $self->{config}{ops}{$opuser}{whois}) {
+            $record->{svstags}{313} = {
+                numeric => '313',
+                umodes  => '+',
+                tagline => $whois,
+            };
+            $self->send_output(
+              {
+                prefix  => $sid,
+                command => 'SVSTAG',
+                params  => [
+                  $record->{uid},
+                  $record->{ts},
+                  '313', '+', $whois,
+                ],
+              },
+              @peers,
+            );
+        }
+
         my $uid = $record->{uid};
         my $full = $record->{nick} . '!' . $record->{auth}{ident}
                     . '@' . $record->{auth}{hostname};
@@ -4073,16 +4094,21 @@ sub _daemon_do_whois {
               $record->{away},
         ],
     } if $record->{type} eq 'c' && $record->{away};
-    {
+    if ($record->{umode} !~ m!H! || $querier->{umode} =~ m!o!) {
         my $operstring;
-        $operstring = 'is a Network Service' if $self->_state_sid_serv($record->{sid});
-        $operstring = 'is a Server Administrator' if $record->{umode} =~ m!a! && !$operstring;
-        $operstring = 'is an IRC Operator' if $record->{umode} =~ m!o! && !$operstring;
+        if ( $record->{svstags}{313} ) {
+           $operstring = $record->{svstags}{313}{tagline};
+        }
+        else {
+           $operstring = 'is a Network Service' if $self->_state_sid_serv($record->{sid});
+           $operstring = 'is a Server Administrator' if $record->{umode} =~ m!a! && !$operstring;
+           $operstring = 'is an IRC Operator' if $record->{umode} =~ m!o! && !$operstring;
+        }
         push @$ref, {
             prefix  => $sid,
             command => '313',
             params  => [$uid, $record->{nick}, $operstring],
-        } if $operstring && ( $record->{umode} !~ m!H! || $querier->{umode} =~ m!o! );
+        } if $operstring;
     }
     if ($record->{type} eq 'c' && ($uid eq $query || $querier->{umode} =~ m!o!) ) {
         my $umodes = join '', '+', sort split //, $record->{umode};
@@ -5166,6 +5192,7 @@ sub _daemon_cmd_umode {
                     $self->{state}{stats}{ops_online}--;
                     delete $self->{state}{localops}{$route_id};
                     $self->antiflood( $route_id, 1);
+                    delete $record->{svstags}{313};
                 }
                 if ($char eq 'w') {
                     delete $self->{state}{wallops}{$route_id};
@@ -8720,6 +8747,7 @@ sub _daemon_peer_svsmode {
 
                 if ($char eq 'o') {
                     $self->{state}{stats}{ops_online}--;
+                    delete $rec->{svstags}{313};
                     if ( $local ) {
                         delete $self->{state}{localops}{$local};
                         $self->antiflood( $local, 1);
@@ -8953,6 +8981,76 @@ sub _daemon_peer_svskill {
                 ],
             },
             $route_id,
+        );
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _daemon_peer_svstag {
+    my $self    = shift;
+    my $peer_id = shift || return;
+    my $prefix  = shift || return;
+    my $sid     = $self->server_sid();
+    my $ref     = [ ];
+    my $args    = [ @_ ];
+    my $count   = @$args;
+
+    #      - parv[0] = nickname
+    #      - parv[1] = TS
+    #      - parv[2] = [-][raw]
+    #      - parv[3] = required user mode(s) to see the tag
+    #      - parv[4] = tag line
+
+    SWITCH: {
+        if (!$self->_state_sid_serv($prefix) && $prefix ne $sid) {
+            last SWITCH;
+        }
+        if (!$count || $count < 2) {
+            last SWITCH;
+        }
+        my $client = shift @$args;
+        my $uid = $self->state_user_uid($client);
+        last SWITCH if !$uid;
+        last SWITCH if $args->[0] !~ m!^\d+$!;
+        last SWITCH if $args->[0] != $self->{state}{uids}{$uid}{ts};
+        my $rec = $self->{state}{uids}{$uid};
+        if ( $args->[1] eq '-' ) {
+            delete $rec->{svstags}{$_} for keys %{ $rec->{svstags} };
+            $self->send_output(
+                {
+                    prefix  => $prefix,
+                    command => 'SVSTAG',
+                    params  => [
+                        $uid,
+                        $rec->{ts},
+                        $args->[1],
+                    ],
+                },
+                grep { $_ ne $peer_id } $self->_state_connected_peers(),
+            );
+            last SWITCH;
+        }
+        last SWITCH if $count < 5 || !$args->[3];
+        $rec->{svstags}{$args->[1]} = {
+            numeric => $args->[1],
+            umodes  => $args->[2],
+            tagline => $args->[3],
+        };
+        $self->send_output(
+            {
+                prefix  => $prefix,
+                command => 'SVSTAG',
+                params  => [
+                    $uid,
+                    $rec->{ts},
+                    $args->[1],
+                    $args->[2],
+                    $args->[3],
+                ],
+            },
+            grep { $_ ne $peer_id } $self->_state_connected_peers(),
         );
     }
 
@@ -9676,7 +9774,20 @@ sub _state_send_burst {
             push @uid_burst, {
                 prefix  => $record->{uid},
                 command => 'AWAY',
-                params  => $record->{away},
+                params  => [ $record->{away} ],
+            };
+        }
+        foreach my $svstag ( keys %{ $record->{svstags} } ) {
+            push @uid_burst, {
+                prefix  => $prefix,
+                command => 'SVSTAG',
+                params  => [
+                    $record->{uid},
+                    $record->{ts},
+                    $svstag,
+                    $record->{svstags}{$svstag}{umodes},
+                    $record->{svstags}{$svstag}{tagline},
+                ],
             };
         }
         $self->send_output( $_, $conn_id ) for @uid_burst;
@@ -11820,6 +11931,14 @@ sub add_spoofed_nick {
         $record->{ircname},
     ];
 
+    if (my $whois = $record->{whois}) {
+        $record->{svstags}{313} = {
+             numeric => '313',
+             umodes  => '+',
+             tagline => $whois,
+        };
+    }
+
     foreach my $peer_id ( $self->_state_connected_peers() ) {
         if ( $self->_state_peer_capab( $peer_id, 'RHOST' ) ) {
             $self->send_output(
@@ -11841,7 +11960,20 @@ sub add_spoofed_nick {
               $peer_id,
             );
         }
+        $self->send_output(
+             {
+                prefix  => $record->{sid},
+                command => 'SVSTAG',
+                params  => [
+                  $record->{uid},
+                  $record->{ts},
+                  '313', '+', $record->{whois},
+                ],
+             },
+             $peer_id,
+        ) if $record->{whois};
     }
+
 
     $self->send_event('daemon_uid', @$arrayref);
     $self->send_event('daemon_nick', @{ $arrayref }[0..5], $record->{server}, ( $arrayref->[9] || '' ) );
