@@ -3230,7 +3230,7 @@ sub _daemon_do_isupport {
                     ? join '=', $_, $self->{config}{isupport}{$_}
                     : $_
                 )
-                } qw(CHANTYPES PREFIX CHANMODES NETWORK CASEMAPPING DEAF)
+                } qw(CHANTYPES PREFIX CHANMODES NETWORK CASEMAPPING KNOCK DEAF)
             ), 'are supported by this server',
         ],
     };
@@ -4744,7 +4744,7 @@ sub _daemon_cmd_join {
             }
             # Channel is full
             if (!$bypass && $chanrec->{mode} =~ /l/
-                && keys %$chanrec >= $chanrec->{climit}) {
+                && keys %{$chanrec->{users}} >= $chanrec->{climit}) {
                 $self->_send_output_to_client($route_id, '471', $channel);
                 next LOOP;
             }
@@ -5419,6 +5419,142 @@ sub _daemon_do_links {
         command => '365',
         params  => [$client, $mask, 'End of /LINKS list.'],
     };
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _daemon_cmd_knock {
+    my $self   = shift;
+    my $nick   = shift || return;
+    my $server = $self->server_name();
+    my $sid    = $self->server_sid();
+    my $args   = [ @_ ];
+    my $count  = @$args;
+    my $ref    = [ ];
+
+    SWITCH:{
+        if (!$count) {
+            push @$ref, ['461', 'KNOCK'];
+            last SWITCH;
+        }
+        my $channel = shift @$args;
+        if ( !$self->state_chan_exists($channel) ) {
+            push @$ref, ['401', $channel];
+            last SWITCH;
+        }
+        if ( $self->state_is_chan_member($nick,$channel) ) {
+            push @$ref, ['714', $channel];
+            last SWITCH;
+        }
+        my $chanrec = $self->{state}{chans}{uc_irc $channel};
+        if ( !( $chanrec->{mode} =~ /i/ || $chanrec->{ckey} || ($chanrec->{mode} =~ /l/
+             && keys %{$chanrec->{users}} >= $chanrec->{climit}) ) )  {
+            push @$ref, ['713', $channel];
+            last SWITCH;
+        }
+        if ( $chanrec->{mode} =~ /p/ || $self->_state_user_banned($nick,$channel) ) {
+            push @$ref, ['404', $channel];
+            next SWITCH;
+        }
+
+        my $uid = $self->state_user_uid($nick);
+        my $rec = $self->{state}{uids}{$uid};
+
+        if ( !$rec->{last_knock} ) {
+            $rec->{knock_count} = 0;
+        }
+        if ( $rec->{last_knock} && ( $rec->{last_knock} + $self->{config}{knock_client_time} ) < time() ) {
+            $rec->{knock_count} = 0;
+        }
+        if ( $rec->{knock_count} && $rec->{knock_count} > $self->{config}{knock_client_count} ) {
+            push @$ref, ['712', $channel,'user'];
+            last SWITCH;
+        }
+        if ( $chanrec->{last_knock} && ( $chanrec->{last_knock} + $self->{config}{knock_delay_channel} ) > time() ) {
+            push @$ref, ['712', $channel,'channel'];
+            last SWITCH;
+        }
+
+        $rec->{last_knock} = time();
+        $rec->{knock_count}++;
+
+        push @$ref, ['711', $channel]; # KNOCK Delivered
+
+        $chanrec->{last_knock} = time();
+
+        $self->_send_output_channel_local(
+            $channel,
+            {
+                prefix  => $server,
+                command => 'NOTICE',
+                params  => [
+                    $chanrec->{name},
+                    sprintf("KNOCK: %s (%s [%s] has asked for an invite)",
+                        $chanrec->{name}, split /!/, $self->state_user_full($nick) ),
+                ],
+            },
+            '', 'oh',
+        );
+        $self->send_output(
+            {
+                prefix   => $uid,
+                command  => 'KNOCK',
+                colonify => 0,
+                params   => [ $chanrec->{name} ],
+            },
+            grep { $self->_state_peer_capab($_,'KNOCK') }
+              $self->_state_connected_peers(),
+        );
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _daemon_peer_knock {
+    my $self    = shift;
+    my $peer_id = shift || return;
+    my $prefix  = shift || return;
+    my $sid     = $self->server_sid();
+    my $ref     = [ ];
+    my $args    = [ @_ ];
+    my $count   = @$args;
+
+    SWITCH: {
+        if (!$count) {
+            last SWITCH;
+        }
+        my $channel = shift @$args;
+        if ( !$self->state_chan_exists($channel) ) {
+            last SWITCH;
+        }
+        my $chanrec = $self->{state}{chans}{uc_irc $channel};
+        $chanrec->{last_knock} = time();
+        $self->_send_output_channel_local(
+            $channel,
+            {
+                prefix  => $self->server_name(),
+                command => 'NOTICE',
+                params  => [
+                    $chanrec->{name},
+                    sprintf("KNOCK: %s (%s [%s] has asked for an invite)",
+                        $chanrec->{name}, split /!/, $self->state_user_full($prefix) ),
+                ],
+            },
+            '', 'oh',
+        );
+        $self->send_output(
+            {
+                prefix   => $prefix,,
+                command  => 'KNOCK',
+                colonify => 0,
+                params   => [ $chanrec->{name} ],
+            },
+            grep { $_ ne $peer_id && $self->_state_peer_capab($_,'KNOCK') }
+              $self->_state_connected_peers(),
+        );
+    }
 
     return @$ref if wantarray;
     return $ref;
@@ -10973,7 +11109,7 @@ sub configure {
         CHANNELLEN    => 50,
         PASSWDLEN     => 20,
         KEYLEN        => 23,
-        MAXCHANNELS   => 15,
+        MAXCHANNELS   => 15,  # Think this is called CHANLIMIT now
         MAXACCEPT     => 20,
         MODES         => 4,
         MAXTARGETS    => 4,
@@ -10983,6 +11119,9 @@ sub configure {
         ANTIFLOOD     => 1,
         WHOISACTUALLY => 1,
         OPHACKS       => 0,
+        knock_client_count  => 1,
+        knock_client_time   => 5 * 60,
+        knock_delay_channel => 60,
     );
     $self->{config}{$_} = $defaults{$_} for keys %defaults;
 
@@ -11108,14 +11247,20 @@ EOF
         491 => [0, "No O-lines for your host"],
         501 => [0, "Unknown MODE flag"],
         502 => [0, "Cannot change mode for other users"],
+        710 => [2, "has asked for an invite."],
+        711 => [1, "Your KNOCK has been delivered."],
+        712 => [1, "Too many KNOCKs (%s)."],
+        713 => [1, "Channel is open."],
+        714 => [1, "You are already on that channel."],
         723 => [1, "Insufficient oper privileges."],
     };
 
     $self->{config}{isupport} = {
         INVEX     => 'I',
-        EXCEPT    => 'e',
+        EXCEPTS   => 'e',
         CALLERID  => undef,
         CHANTYPES => '#&',
+        KNOCK     => undef,
         PREFIX    => '(ohv)@%+',
         CHANMODES => 'eIb,k,l,cimnpst',
         STATUSMSG => '@%+',
@@ -11126,7 +11271,7 @@ EOF
             NETWORK MODES AWAYLEN),
     };
 
-    $self->{config}{capab} = [qw(ENCAP CLUSTER QS DLN UNDLN EX IE HOPS UNKLN KLN GLN EOB RHOST)];
+    $self->{config}{capab} = [qw(ENCAP KNOCK CLUSTER QS DLN UNDLN EX IE HOPS UNKLN KLN GLN EOB RHOST)];
 
     return 1;
 }
