@@ -282,6 +282,20 @@ sub _client_register {
     my $network   = $self->server_config('NETWORK');
     my $server_is = "$server\[$server/$port]";
 
+    if (my $sslinfo = $self->connection_secured($conn_id)) {
+        $self->_send_output_to_client(
+            $conn_id,
+            {
+                prefix  => $server,
+                command => 'NOTICE',
+                params  => [
+                    $nick,
+                    "*** Connected securely via $sslinfo",
+                ],
+            },
+        );
+    }
+
     $self->_send_output_to_client(
         $conn_id,
         {
@@ -10412,10 +10426,13 @@ sub _state_register_client {
     $self->{state}{peers}{uc $record->{server}}{users}{uc_irc($record->{nick})} = $record;
     $self->{state}{peers}{uc $record->{server}}{uids}{ $record->{uid} } = $record if $record->{uid};
 
+    my $umode = '+i';
+    $umode .= 'S' if $record->{secured};
+
     my $arrayref = [
         $record->{nick},
         $record->{hops} + 1,
-        $record->{ts}, '+i',
+        $record->{ts}, $umode,
         $record->{auth}{ident},
         $record->{auth}{hostname},
         $record->{ipaddress},
@@ -10427,7 +10444,7 @@ sub _state_register_client {
     my $rhostref = [
         $record->{nick},
         $record->{hops} + 1,
-        $record->{ts}, '+i',
+        $record->{ts}, $umode,
         $record->{auth}{ident},
         $record->{auth}{hostname},
         $record->{auth}{realhost},

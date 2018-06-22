@@ -31,6 +31,7 @@ use constant {
         _event_dispatcher
         _sock_failed
         _sock_up
+        _sock_ssl
     )],
 };
 
@@ -196,12 +197,17 @@ sub _accept_connection {
 
     my $listener = $self->{listeners}{$listener_id};
 
+    my $secured = 0;
+    my $context = { };
+
     if ($self->{got_ssl} && $listener->{usessl}) {
+        my $cb = $_[SESSION]->callback('_sock_ssl',$context);
         eval {
-            $socket = POE::Component::SSLify::Server_SSLify($socket);
+            $socket = POE::Component::SSLify::Server_SSLify($socket,undef,$cb);
         };
         chomp $@;
         die "Failed to SSLify server socket: $@" if $@;
+        $secured = 1;
     }
 
     my $wheel = POE::Wheel::ReadWrite->new(
@@ -214,6 +220,7 @@ sub _accept_connection {
 
     if ($wheel) {
         my $wheel_id = $wheel->ID();
+        $context->{wheel_id} = $wheel_id;
         my $ref = {
             wheel     => $wheel,
             peeraddr  => $peeraddr,
@@ -223,7 +230,8 @@ sub _accept_connection {
             sockport  => $sockport,
             idle      => $listener->{idle},
             antiflood => $listener->{antiflood},
-            compress  => 0
+            compress  => 0,
+            secured   => $secured,
         };
 
         my $needs_auth = $listener->{auth} && $self->{auth} ? 1 : 0;
@@ -235,6 +243,7 @@ sub _accept_connection {
             $sockaddr,
             $sockport,
             $needs_auth,
+            $secured,
         );
 
         $ref->{alarm} = $kernel->delay_set(
@@ -251,6 +260,41 @@ sub _accept_connection {
         }
     }
     return;
+}
+
+sub _sock_ssl {
+    my ($kernel,$self,$first,$second) = @_[KERNEL,OBJECT,ARG0,ARG1];
+    my ($cont) = @$first;
+    return if !$cont->{wheel_id};
+    my $wheel_id = delete $cont->{wheel_id};
+    return if !$self->{wheels}{$wheel_id};
+    my ($sock,$stat,$err) = @$second;
+    return if !$stat;
+    my $sslinf = _get_ssl_info($sock);
+    my $ref = $self->{wheels}{$wheel_id};
+    $ref->{sslinf} = $sslinf if $sslinf;
+    return;
+}
+
+sub _get_ssl_info {
+    my $sock = shift || return;
+    my $sslinf = eval {
+       require Net::SSLeay;
+       my $ssl = POE::Component::SSLify::SSLify_GetSSL($sock);
+       my $cipher = Net::SSLeay::get_cipher($ssl);
+       my $bits = Net::SSLeay::get_cipher_bits($ssl);
+       my $version = Net::SSLeay::version($ssl);
+       my $ver =
+        $version == 0x0303 ? 'TLSv1_2' :
+        $version == 0x0302 ? 'TLSv1_1' :
+        $version == 0x0301 ? 'TLSv1'   :
+        $version == 0x0300 ? 'SSLv3'   :
+        $version == 0x0002 ? 'SSLv2'   :
+        $version == 0xfeff ? 'DTLS1'   :
+        undef;
+        return "$ver-$cipher-$bits";
+    };
+    return $sslinf;
 }
 
 sub add_listener {
@@ -718,6 +762,20 @@ sub connection_exists {
     my ($self, $wheel_id) = @_;
     return if !$wheel_id || !defined $self->{wheels}{$wheel_id};
     return 1;
+}
+
+sub connection_secured {
+    my ($self, $wheel_id) = @_;
+    return if !$wheel_id || !defined $self->{wheels}{$wheel_id};
+    return if !$self->{wheels}{$wheel_id}{secured};
+    my $sslinfo = $self->{wheels}{$wheel_id}{sslinfo};
+    if (!$sslinfo) {
+       my $sock = $self->{wheels}{$wheel_id}{wheel}->get_input_handle();
+       $sslinfo = _get_ssl_info($sock);
+       $self->{wheels}{$wheel_id}{sslinfo} = $sslinfo
+          if $sslinfo;
+    }
+    return $sslinfo;
 }
 
 sub _conn_flooded {

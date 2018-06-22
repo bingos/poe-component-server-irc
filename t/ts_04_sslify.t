@@ -19,7 +19,7 @@ if (!$GOT_SSL) {
     plan skip_all => "POE::Component::SSLify not available";
 }
 
-plan tests => 15;
+plan tests => 16;
 
 my $pocosi = POE::Component::Server::IRC->spawn(
     auth           => 0,
@@ -120,5 +120,9 @@ sub _default {
     elsif ($event eq 'irc_error') {
         pass($event);
         $_[HEAP]->{ircd}->del_listener(port => $_[HEAP]->{port});
+    }
+    elsif($event eq 'irc_snotice') {
+        pass($event);
+        diag($_[ARG1]->[0]);
     }
 }
