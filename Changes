@@ -23,7 +23,11 @@ Revision history for POE-Component-Server-IRC
     - Implemented WHOWAS command
     - Added RESV/UNRESV for reserving nicknames/channels
     - Added ENCAP peer command
-    - Implemented SVSJOIN, SVSHOST commands
+    - Implemented SVSJOIN, SVSHOST, SVSNICK, SVSTAG, SVSPART,
+      SVSMODE and SVSKILL services commands
+    - Added methods for defining services hosts
+    - Implemented KNOCK command with throttling
+    - Added account and nick registration support
 
 1.54  Fri Nov 25 15:36:51 UTC 2011
     - Resolve problem with remote (versus localhost) clients
