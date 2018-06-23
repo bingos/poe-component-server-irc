@@ -3597,15 +3597,7 @@ sub _daemon_cmd_stats {
         }
         $char = substr $char, 0, 1;
         if ($char !~ /[ump]/) {
-            push @$ref, {
-                prefix  => $server,
-                command => '263',
-                params  => [
-                    $nick,
-                    'Server load is temporarily too heavy. '
-                        .'Please wait a while and try again.'
-                ],
-            };
+            push @$ref, ['263', 'STATS'];
             last SWITCH;
         }
         if ($target && !$self->state_peer_exists($target)) {
@@ -5420,17 +5412,27 @@ sub _daemon_cmd_map {
     my $sid    = $self->server_sid();
     my $ref    = [ ];
 
-    push @$ref, $_ for
-      $self->_state_do_map( $nick, $sid, 0 );
+    SWITCH: {
+        my $lastuse = $self->{state}{lastuse}{map};
+        my $pacewait = $self->{config}{pace_wait};
+        if ( $lastuse && $pacewait && ( $lastuse + $pacewait ) > time() ) {
+            push @$ref, ['263', 'MAP'];
+            last SWITCH;
+        }
+        $self->{state}{lastuse}{map} = time();
 
-    push @$ref, {
-        prefix  => $server,
-        command => '017',
-        params => [
-          $nick,
-          'End of /MAP',
-        ],
-    };
+        push @$ref, $_ for
+            $self->_state_do_map( $nick, $sid, 0 );
+
+        push @$ref, {
+            prefix  => $server,
+            command => '017',
+            params => [
+                $nick,
+                'End of /MAP',
+            ],
+        };
+    }
 
     return @$ref if wantarray;
     return $ref;
@@ -5446,12 +5448,18 @@ sub _daemon_cmd_links {
     my $ref    = [ ];
 
     SWITCH:{
-        # TODO: load throttling
         my $target;
         if ($count > 1 && !$self->state_peer_exists( $args->[0] )) {
             push @$ref, ['402', $args->[0]];
             last SWITCH;
         }
+        my $lastuse  = $self->{state}{lastuse}{links};
+        my $pacewait = $self->{config}{pace_wait};
+        if ( $lastuse && $pacewait && ( $lastuse + $pacewait ) > time() ) {
+            push @$ref, ['263', 'LINKS'];
+            last SWITCH;
+        }
+        $self->{state}{lastuse}{links} = time();
         if ( $count > 1 ) {
           $target = shift @$args;
         }
@@ -11245,6 +11253,11 @@ sub configure {
         }
     }
 
+    for my $opt (keys %$opts) {
+      next if $opt !~ m!^(knock_|pace_)!i;
+      $self->{config}{lc $opt} = delete $opts->{$opt}
+        if defined $opts->{$opt};
+    }
 
     for my $opt (keys %$opts) {
         $self->{config}{$opt} = $opts->{$opt} if defined $opts->{$opt};
@@ -11298,6 +11311,7 @@ EOF
     }
 
     $self->{Error_Codes} = {
+        263 => [1, "Server load is temporarily too heavy. Please wait a while and try again."],
         401 => [1, "No such nick/channel"],
         402 => [1, "No such server"],
         403 => [1, "No such channel"],

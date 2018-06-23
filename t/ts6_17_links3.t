@@ -12,19 +12,7 @@ my @responses = (
 ':listen.server.irc 364 bobbins harpo.server.irc listen.server.irc :1 Open the door and come in!!!!!!',
 ':listen.server.irc 364 bobbins listen.server.irc listen.server.irc :0 Poco? POCO? POCO!',
 ':listen.server.irc 365 bobbins * :End of /LINKS list.',
-':listen.server.irc 364 bobbins fake.server.irc groucho.server.irc :2 This is a fake server',
-':listen.server.irc 364 bobbins groucho.server.irc listen.server.irc :1 Open the door and come in!!!!!!',
-':listen.server.irc 364 bobbins harpo.server.irc listen.server.irc :1 Open the door and come in!!!!!!',
-':listen.server.irc 364 bobbins listen.server.irc listen.server.irc :0 Poco? POCO? POCO!',
-':listen.server.irc 365 bobbins * :End of /LINKS list.',
-':listen.server.irc 364 bobbins fake.server.irc groucho.server.irc :2 This is a fake server',
-':listen.server.irc 365 bobbins fake* :End of /LINKS list.',
-':listen.server.irc 402 bobbins made.up.irc :No such server',
-':fake.server.irc 364 bobbins harpo.server.irc listen.server.irc :3 Open the door and come in!!!!!!',
-':fake.server.irc 364 bobbins listen.server.irc groucho.server.irc :2 Poco? POCO? POCO!',
-':fake.server.irc 364 bobbins groucho.server.irc fake.server.irc :1 Open the door and come in!!!!!!',
-':fake.server.irc 364 bobbins fake.server.irc fake.server.irc :0 This is a fake server',
-':fake.server.irc 365 bobbins * :End of /LINKS list.',
+':listen.server.irc 263 bobbins LINKS :Server load is temporarily too heavy. Please wait a while and try again.',
 );
 
 my %servers = (
@@ -42,7 +30,7 @@ my $pocosi = POE::Component::Server::IRC->spawn(
     auth         => 0,
     antiflood    => 0,
     plugin_debug => 1,
-    config => { servername => 'listen.server.irc', sid => '1FU', pace_wait => 0 },
+    config => { servername => 'listen.server.irc', sid => '1FU', },
 );
 
 POE::Session->create(
@@ -187,11 +175,8 @@ sub client_input {
     pass($cmd);
     $poe_kernel->post( $sender, 'send_to_server', { command => 'LINKS' } );
     $poe_kernel->post( $sender, 'send_to_server', { command => 'LINKS', params => [ '*' ], colonify => 0 } );
-    $poe_kernel->post( $sender, 'send_to_server', { command => 'LINKS', params => [ 'fake*' ], colonify => 0 } );
-    $poe_kernel->post( $sender, 'send_to_server', { command => 'LINKS', params => [ 'made.up.irc', '*' ], colonify => 0 } );
-    $poe_kernel->post( $sender, 'send_to_server', { command => 'LINKS', params => [ 'fake.server.irc', '*' ], colonify => 0 } );
   }
-  if ( $cmd =~ m!^(36[45]|402)$! ) {
+  if ( $cmd =~ m!^(36[45]|263)$! ) {
     my $resp = shift @responses;
     is($in->{raw_line},$resp,$resp);
     if ( !scalar @responses ) {
