@@ -3164,7 +3164,7 @@ sub _daemon_client_miscell {
             $self->send_output(
                 {
                     prefix  => $self->state_user_uid($nick),
-                    command => 'INFO',
+                    command => uc $cmd,
                     params  => [$target],
                 },
                 $self->_state_sid_route($target),
@@ -3371,30 +3371,29 @@ sub _daemon_do_time {
     return $ref;
 }
 
-sub _daemon_cmd_users {
+sub _daemon_do_users {
     my $self   = shift;
-    my $nick   = shift || return;
-    my $server = $self->server_name();
+    my $uid    = shift || return;
     my $sid    = $self->server_sid();
     my $ref    = [ ];
     my $global = keys %{ $self->{state}{uids} };
     my $local  = keys %{ $self->{state}{sids}{$sid}{uids} };
 
     push @$ref, {
-        prefix  => $server,
+        prefix  => $sid,
         command => '265',
         params  => [
-            $nick,
+            $uid,
             "Current local users: $local  Max: "
                 . $self->{state}{stats}{maxlocal},
         ],
     };
 
     push @$ref, {
-        prefix  => $server,
+        prefix  => $sid,
         command => '266',
         params  => [
-            $nick,
+            $uid,
             "Current global users: $global  Max: "
                 . $self->{state}{stats}{maxglobal},
         ],
@@ -3408,11 +3407,87 @@ sub _daemon_cmd_lusers {
     my $self       = shift;
     my $nick       = shift || return;
     my $server     = $self->server_name();
+    my $ref        = [ ];
+    my $args   = [@_];
+    my $count  = @$args;
+
+    SWITCH: {
+        if ($count && $count > 1) {
+            my $target = ( $self->_state_peer_sid($args->[1]) || $self->state_user_uid($args->[1]) );
+            if (!$target) {
+                push @$ref, ['402', $args->[1]];
+                last SWITCH;
+            }
+            my $targsid = substr $target, 0, 3;
+            my $sid = $self->server_sid();
+            if ( $targsid ne $sid ) {
+                $self->send_output(
+                    {
+                        prefix  => $self->state_user_uid($nick),
+                        command => 'LUSERS',
+                        params  => [
+                            $args->[0],
+                            $target,
+                        ],
+                    },
+                    $self->_state_sid_route($targsid),
+                );
+                last SWITCH;
+            }
+        }
+        my $uid = $self->state_user_uid($nick);
+        push @$ref, $_ for map { $_->{prefix} = $server; $_->{params}[0] = $nick; $_ }
+                       @{ $self->_daemon_do_lusers($uid) };
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _daemon_peer_lusers {
+    my $self       = shift;
+    my $uid        = shift || return;
+    my $sid        = $self->server_sid();
+    my $ref        = [ ];
+    my $args       = [@_];
+    my $count      = @$args;
+
+    SWITCH: {
+        if (!$count || $count < 2) {
+            last SWITCH;
+        }
+        my $target = ( $self->_state_peer_sid($args->[1]) || $self->state_user_uid($args->[1]) );
+        if (!$target) {
+            push @$ref, ['402', $args->[1]];
+            last SWITCH;
+        }
+        my $targsid = substr $target, 0, 3;
+        if ( $targsid ne $sid ) {
+            $self->send_output(
+                {
+                    prefix  => $uid,
+                    command => 'LUSERS',
+                    params  => $args,
+                },
+                $self->_state_sid_route($targsid),
+            );
+            last SWITCH;
+        }
+        push @$ref, $_ for @{ $self->_daemon_do_lusers($uid) };
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _daemon_do_lusers {
+    my $self       = shift;
+    my $uid        = shift || return;
     my $sid        = $self->server_sid();
     my $ref        = [ ];
     my $invisible  = $self->{state}{stats}{invisible};
-    my $users      = keys(%{ $self->{state}{users} }) - $invisible;
-    my $servers    = keys %{ $self->{state}{peers} };
+    my $users      = keys(%{ $self->{state}{uids} }) - $invisible;
+    my $servers    = keys %{ $self->{state}{sids} };
     my $chans      = keys %{ $self->{state}{chans} };
     my $local      = keys %{ $self->{state}{sids}{$sid}{uids} };
     my $peers      = keys %{ $self->{state}{sids}{$sid}{sids} };
@@ -3421,10 +3496,10 @@ sub _daemon_cmd_lusers {
     my $conns      = $self->{state}{stats}{maxconns};
 
     push @$ref, {
-        prefix  => $server,
+        prefix  => $sid,
         command => '251',
         params  => [
-            $nick,
+            $uid,
             "There are $users users and $invisible invisible on "
                 . "$servers servers",
         ],
@@ -3433,34 +3508,34 @@ sub _daemon_cmd_lusers {
     $servers--;
 
     push @$ref, {
-        prefix  => $server,
+        prefix  => $sid,
         command => '252',
         params  => [
-            $nick,
+            $uid,
             $self->{state}{stats}{ops_online},
             "IRC Operators online",
         ]
     } if $self->{state}{stats}{ops_online};
 
     push @$ref, {
-        prefix  => $server,
+        prefix  => $sid,
         command => '254',
-        params  => [$nick, $chans, "channels formed"],
+        params  => [$uid, $chans, "channels formed"],
     } if $chans;
 
     push @$ref, {
-        prefix  => $server,
+        prefix  => $sid,
         command => '255',
-        params  => [$nick, "I have $local clients and $peers servers"],
+        params  => [$uid, "I have $local clients and $peers servers"],
     };
 
-    push @$ref, $_ for $self->_daemon_cmd_users($nick);
+    push @$ref, $_ for $self->_daemon_do_users($uid);
 
     push @$ref, {
-        prefix  => $server,
+        prefix  => $sid,
         command => '250',
         params  => [
-            $nick, "Highest connection count: $conns ($mlocal clients) "
+            $uid, "Highest connection count: $conns ($mlocal clients) "
                 . "($totalconns connections received)",
         ],
     };
@@ -11139,6 +11214,7 @@ sub configure {
         knock_client_count  => 1,
         knock_client_time   => 5 * 60,
         knock_delay_channel => 60,
+        pace_wait     => 10,
     );
     $self->{config}{$_} = $defaults{$_} for keys %defaults;
 
