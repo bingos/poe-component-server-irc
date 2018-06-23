@@ -1404,12 +1404,12 @@ sub _daemon_cmd_quit {
     my $nick = shift || return;
     my $qmsg = shift || 'Client Quit';
     my $ref  = [ ];
-    my $full = $self->state_user_full($nick);
     my $name = uc $self->server_name();
     my $sid  = $self->server_sid();
 
     $nick = uc_irc($nick);
     my $record = delete $self->{state}{peers}{$name}{users}{$nick};
+    my $full = $record->{full}->();
     delete $self->{state}{peers}{$name}{uids}{ $record->{uid} };
     my $uid = $record->{uid};
     $self->send_output(
@@ -1607,9 +1607,8 @@ sub _daemon_cmd_oper {
             );
         }
 
-        my $uid = $record->{uid};
-        my $full = $record->{nick} . '!' . $record->{auth}{ident}
-                    . '@' . $record->{auth}{hostname};
+        my $uid  = $record->{uid};
+        my $full = $record->{full}->();
 
         my $notice = sprintf("%s{%s} is now an operator",$full,$opuser);
 
@@ -1636,7 +1635,7 @@ sub _daemon_cmd_oper {
         );
         $self->send_event(
             "daemon_umode",
-            $self->state_user_full($nick),
+            $full,
             '+o',
         );
 
@@ -3029,8 +3028,8 @@ sub _daemon_cmd_nick {
             push @$ref, ['433', $new];
             last SWITCH;
         }
-        my $full = $self->state_user_full($nick);
         my $record = $self->{state}{users}{$unick};
+        my $full   = $record->{full}->();
         my $common = { $record->{uid} => $record->{route_id} };
 
         for my $chan (keys %{ $record->{chans} }) {
@@ -3800,7 +3799,7 @@ sub _daemon_cmd_list {
         if ($count && $last !~ /^[#&]/ && uc $last ne uc $server) {
             $self->send_output(
                 {
-                    prefix  => $self->state_user_full($nick),
+                    prefix  => $self->state_user_uid($nick),
                     command => 'LIST',
                     params  => [
                         @$args,
@@ -5580,7 +5579,7 @@ sub _daemon_cmd_knock {
                 params  => [
                     $chanrec->{name},
                     sprintf("KNOCK: %s (%s [%s] has asked for an invite)",
-                        $chanrec->{name}, split /!/, $self->state_user_full($nick) ),
+                        $chanrec->{name}, split /!/, $rec->{full}->() ),
                 ],
             },
             '', 'oh',
@@ -6797,10 +6796,10 @@ sub _daemon_peer_quit {
     my $conn_id = shift;
     my $ref     = [ ];
     my $sid     = $self->server_sid();
-    my $full    = $self->state_user_full($uid);
 
     my $record = delete $self->{state}{uids}{$uid};
     return $ref if !$record;
+    my $full    = $record->{full}->();
     my $nick = uc_irc($record->{nick});
     delete $self->{state}{users}{$nick};
     delete $self->{state}{sids}{ $record->{sid} }{users}{$nick};
@@ -6958,6 +6957,13 @@ sub _daemon_peer_uid {
             ircname     => ( $args->[9+$rhost] || '' ),
         };
 
+        $record->{full} = sub {
+            return sprintf('%s!%s@%s',
+              $record->{nick},
+              $record->{auth}{ident},
+              $record->{auth}{hostname});
+        };
+
         if ( $rhost ) {
           $record->{auth}{realhost} = $args->[6];
         }
@@ -7086,7 +7092,7 @@ sub _daemon_peer_nick {
         my $record = $self->{state}{uids}{$prefix};
         my $unick = uc_irc($record->{nick});
         my $sid    = $record->{sid};
-        my $full   = $self->state_user_full($prefix);
+        my $full   = $record->{full}->();
 
         if ($unick eq $unew) {
             $record->{nick} = $new;
@@ -8157,7 +8163,7 @@ sub _daemon_peer_umode {
     );
     $self->send_event(
         "daemon_umode",
-        $self->state_user_full($uid),
+        $record->{full}->(),
         $umode,
     );
 
@@ -8941,7 +8947,7 @@ sub _daemon_peer_svsmode {
                         $self->_send_output_channel_local(
                             $chan,
                             {
-                                prefix   => $self->state_user_full($uid),
+                                prefix   => $rec->{full}->(),
                                 command  => 'ACCOUNT',
                                 colonify => 0,
                                 params   => [ $rec->{account} ],
@@ -9000,7 +9006,7 @@ sub _daemon_peer_svsmode {
         last SWITCH if !$local;
         my $set = gen_mode_change($previous, $rec->{umode});
         if ($set) {
-            my $full = $self->state_user_full($uid);
+            my $full = $rec->{full}->();
             $self->send_output(
                 {
                     prefix  => $full,
@@ -9093,7 +9099,7 @@ sub _daemon_peer_svsnick {
             }
         }
 
-        my $full  = $self->state_user_full($uid);
+        my $full  = $rec->{full}->();
         my $unick = uc_irc $rec->{nick};
         my $unew  = uc_irc $newnick;
         my $server = uc $self->server_name();
@@ -9609,7 +9615,7 @@ sub _state_do_away_notify {
         }
     }
     my $ref = {
-      prefix  => $self->state_user_full($uid),
+      prefix  => $rec->{full}->(),
       command => 'AWAY',
     };
     $ref->{params} = [ $msg ] if $msg;
@@ -10176,7 +10182,7 @@ sub _state_do_change_hostmask {
         }
         my $local = ( $uid =~ m!^$sid! );
         my $conn_id = ($local ? $rec->{route_id} : '');
-        my $full = $self->state_user_full($uid);
+        my $full = $rec->{full}->();
         foreach my $chan ( keys %{ $rec->{chans} } ) {
           $self->_send_output_channel_local(
               $chan,
@@ -10215,7 +10221,7 @@ sub _state_do_change_hostmask {
               $rec->{route_id},
            );
         }
-        $full = $self->state_user_full($uid);
+        $full = $rec->{full}->();
         CHAN: foreach my $uchan ( keys %{ $rec->{chans} } ) {
            my $chan = $self->{state}{chans}{$uchan}{name};
            my $modeline;
@@ -10501,6 +10507,13 @@ sub _state_register_client {
     $self->{state}{peers}{uc $record->{server}}{users}{uc_irc($record->{nick})} = $record;
     $self->{state}{peers}{uc $record->{server}}{uids}{ $record->{uid} } = $record if $record->{uid};
 
+    $record->{full} = sub {
+        return sprintf('%s!%s@%s',
+          $record->{nick},
+          $record->{auth}{ident},
+          $record->{auth}{hostname});
+    };
+
     my $umode = '+i';
     $umode .= 'S' if $record->{secured};
 
@@ -10689,8 +10702,7 @@ sub state_user_full {
     if ( $oper && defined $record->{opuser} ) {
       $opuser = '{' . $record->{opuser} . '}';
     }
-    return $record->{nick} . '!' . $record->{auth}{ident}
-        . '@' . $record->{auth}{hostname} . $opuser;
+    return $record->{full}->() . $opuser;
 }
 
 sub state_user_nick {
@@ -12141,6 +12153,13 @@ sub add_spoofed_nick {
     $self->{state}{uids}{ $record->{uid} } = $record if $record->{uid};
     $self->{state}{peers}{uc $record->{server}}{users}{uc_irc($record->{nick})} = $record;
     $self->{state}{peers}{uc $record->{server}}{uids}{ $record->{uid} } = $record if $record->{uid};
+
+    $record->{full} = sub {
+        return sprintf('%s!%s@%s',
+          $record->{nick},
+          $record->{auth}{ident},
+          $record->{auth}{hostname});
+    };
 
     my $arrayref = [
         $record->{nick},
