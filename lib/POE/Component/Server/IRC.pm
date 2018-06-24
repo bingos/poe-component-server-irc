@@ -12395,9 +12395,9 @@ behaviour with regards to interactions with IRC clients and other IRC
 servers.
 
 Yes, that's right. POE::Component::Server::IRC is capable of linking to
-foreign IRC networks. It supports the TS5 server to server protocol and
-has been tested with linking to Hybrid-7 based networks. It should in
-theory work with any TS5-based IRC network.
+foreign IRC networks. It supports the TS6 server to server protocol and
+has been tested with linking to Hybrid-8 based networks. It should in
+theory work with any TS6-based IRC network.
 
 POE::Component::Server::IRC also has a services API, which enables one to
 extend the IRCd to create IRC Services. This is fully event-driven (of
