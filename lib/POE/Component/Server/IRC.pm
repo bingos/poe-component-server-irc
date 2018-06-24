@@ -351,16 +351,16 @@ sub _client_register {
 
     $self->{state}{conns}{$conn_id}{registered} = 1;
     $self->{state}{conns}{$conn_id}{type} = 'c';
-    $self->send_event(
-        'cmd_lusers',
-        $conn_id,
-        { command => 'LUSERS' },
-    );
-    $self->send_event(
-        'cmd_motd',
-        $conn_id,
-        { command => 'MOTD' },
-    );
+
+    $self->send_output( $_, $conn_id ) for
+      map { $_->{prefix} = $server; $_->{params}[0] = $nick; $_ }
+        @{ $self->_daemon_do_lusers($uid) };
+
+
+    $self->send_output( $_, $conn_id ) for
+      map { $_->{prefix} = $server; $_->{params}[0] = $nick; $_ }
+        @{ $self->_daemon_do_motd($uid) };
+
     $self->send_event(
         'cmd_mode',
         $conn_id,
