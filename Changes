@@ -28,6 +28,7 @@ Revision history for POE-Component-Server-IRC
     - Added methods for defining services hosts
     - Implemented KNOCK command with throttling
     - Added account and nick registration support
+    - LIST command now supports SAFELIST and ELIST filters
 
 1.54  Fri Nov 25 15:36:51 UTC 2011
     - Resolve problem with remote (versus localhost) clients

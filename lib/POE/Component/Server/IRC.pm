@@ -4,7 +4,7 @@ use strict;
 use warnings;
 use Carp qw(carp croak);
 use IRC::Utils qw(uc_irc parse_mode_line unparse_mode_line normalize_mask
-                  matches_mask gen_mode_change is_valid_nick_name
+                  matches_mask matches_mask_array gen_mode_change is_valid_nick_name
                   is_valid_chan_name has_color has_formatting);
 use List::Util qw(sum);
 use POE;
@@ -28,7 +28,7 @@ sub spawn {
         ($debug ? (raw_events => 1) : ()),
         %args,
         states => [
-            [qw(add_spoofed_nick del_spoofed_nick _state_drkx_line_alarm)],
+            [qw(add_spoofed_nick del_spoofed_nick _state_drkx_line_alarm _daemon_do_safelist)],
             {
                 map { +"daemon_cmd_$_" => '_spoofed_command' }
                     qw(join part mode kick topic nick privmsg notice xline unxline resv unresv
@@ -3227,7 +3227,7 @@ sub _daemon_do_isupport {
                     : $_
                 )
                 } qw(CALLERID EXCEPTS INVEX MAXCHANNELS MAXLIST MAXTARGETS
-                     NICKLEN TOPICLEN KICKLEN)
+                     NICKLEN TOPICLEN KICKLEN KNOCK DEAF)
             ),
             'are supported by this server',
         ],
@@ -3243,7 +3243,7 @@ sub _daemon_do_isupport {
                     ? join '=', $_, $self->{config}{isupport}{$_}
                     : $_
                 )
-                } qw(CHANTYPES PREFIX CHANMODES NETWORK CASEMAPPING KNOCK DEAF)
+                } qw(CHANTYPES PREFIX CHANMODES NETWORK CASEMAPPING SAFELIST ELIST)
             ), 'are supported by this server',
         ],
     };
@@ -3768,6 +3768,162 @@ sub _daemon_cmd_ison {
     return $ref;
 }
 
+sub _daemon_do_safelist {
+    my ($kernel,$self,$client) = @_[KERNEL,OBJECT,ARG0];
+    my $server = $self->server_name();
+    my $mask = $client->{safelist};
+    return if !$mask;
+    my $start = delete $mask->{start};
+
+    if ($start) {
+        $self->send_output(
+            {
+            prefix  => $server,
+            command => '321',
+            params  => [$client->{nick}, 'Channel', 'Users  Name'],
+            },
+            $client->{route_id},
+        );
+        $mask->{chans} = [ keys %{ $self->{state}{chans} } ];
+        $kernel->yield('_daemon_do_safelist',$client);
+        return;
+    }
+    else {
+        my $chan = shift @{ $mask->{chans} };
+        if (!$chan) {
+            $self->send_output(
+                {
+                    prefix  => $server,
+                    command => '323',
+                    params  => [$client->{nick}, 'End of /LIST'],
+                },
+                $client->{route_id},
+            );
+            delete $client->{safelist};
+            return;
+        }
+        my $show = 0;
+        SWITCH: {
+            last SWITCH if !defined $self->{state}{chans}{$chan};
+            if ($mask->{all}) {
+                $show = 1;
+                last SWITCH;
+            }
+            if ($mask->{hide}) {
+                my $match = matches_mask_array($mask->{hide},[$chan]);
+                $show = 0 if keys %$match;
+                last SWITCH;
+            }
+            if ($mask->{show}) {
+                my $match = matches_mask_array($mask->{show},[$chan]);
+                if ( keys %$match ) {
+                   $show = 1;
+                }
+                else {
+                   $show = 0;
+                   last SWITCH;
+                }
+            }
+            if ($mask->{users_max} || $mask->{users_min}) {
+                my $usercnt = keys %{ $self->{state}{chans}{$chan}{users} };
+                if ($mask->{users_max}) {
+                    if ($usercnt > $mask->{users_max}) {
+                        $show = 1;
+                    }
+                    else {
+                        $show = 0;
+                    }
+                }
+                if ($mask->{users_min}) {
+                    if ($usercnt < $mask->{users_min}) {
+                        $show = 1;
+                    }
+                    else {
+                        $show = 0;
+                    }
+                }
+            }
+            if ($mask->{create_max} || $mask->{create_min}) {
+                my $chants = $self->{state}{chans}{$chan}{ts};
+                if ($mask->{create_max}) {
+                    if ($chants > $mask->{create_max}) {
+                        $show = 1;
+                    }
+                    else {
+                        $show = 0;
+                    }
+                }
+                if ($mask->{create_min}) {
+                    if ($chants < $mask->{create_min}) {
+                        $show = 1;
+                    }
+                    else {
+                        $show = 0;
+                    }
+                }
+            }
+            if ($mask->{topic_max} || $mask->{topic_min} || $mask->{topic_msk}) {
+                my $chantopic = $self->{state}{chans}{$chan}{topic};
+                if (!$chantopic) {
+                    $show = 0;
+                }
+                else {
+                    if ($mask->{topic_max}) {
+                        if($mask->{topic_max} > $chantopic->[2]) {
+                              $show = 1;
+                        }
+                        else {
+                              $show = 0;
+                        }
+                    }
+                    if ($mask->{topic_min}) {
+                        if($mask->{topic_min} < $chantopic->[2]) {
+                              $show = 1;
+                        }
+                        else {
+                              $show = 0;
+                        }
+                    }
+                    if ($mask->{topic_msk}) {
+                        if(matches_mask($mask->{topic_msk},$chantopic->[0],'ascii')) {
+                              $show = 1;
+                        }
+                        else {
+                              $show = 0;
+                        }
+                    }
+                }
+            }
+        }
+        my $hidden = ( $self->{state}{chans}{$chan}{mode} =~ m![ps]! );
+        if ($show && $hidden && !defined $client->{chans}{$chan}) {
+            $show = 0;
+        }
+        if ($show) {
+            my $chanrec = $self->{state}{chans}{$chan};
+            my $bluf = sprintf('[+%s]', $chanrec->{mode});
+            if ( defined $chanrec->{topic} ) {
+                $bluf = join ' ', $bluf, $chanrec->{topic}[0];
+            }
+            $self->send_output(
+                {
+                    prefix  => $server,
+                    command => '322',
+                    params  => [
+                        $client->{nick},
+                        $chanrec->{name},
+                        scalar keys %{ $chanrec->{users} },
+                        $bluf,
+                    ],
+                },
+                $client->{route_id},
+            );
+        }
+        $kernel->yield('_daemon_do_safelist',$client);
+    }
+    return;
+}
+
 sub _daemon_cmd_list {
     my $self   = shift;
     my $nick   = shift || return;
@@ -3777,84 +3933,91 @@ sub _daemon_cmd_list {
     my $count  = @$args;
 
     SWITCH: {
-        my @chans;
+        my $rec = $self->{state}{users}{uc_irc $nick};
+        my $task = { start => 1 };
+        my $errors;
         if (!$count) {
-            @chans = map { $self->_state_chan_name($_) }
-                keys %{ $self->{state}{chans} };
+            if ($rec->{safelist}) {
+               delete $rec->{safelist};
+               push @$ref, {
+                    prefix  => $server,
+                    command => '323',
+                    params  => [$nick, 'End of /LIST'],
+               };
+               last SWITCH;
+            }
+            $task->{all} = 1;
         }
-        my $last = pop @$args;
-        if ($count && $last !~ /^[#&]/ &&
-            !$self->state_peer_exists($last)) {
-            push @$ref, ['401', $last];
-            last SWITCH;
-        }
-        if ($count && $last !~ /^[#&]/ && uc $last ne uc $server) {
-            $self->send_output(
-                {
-                    prefix  => $self->state_user_uid($nick),
-                    command => 'LIST',
-                    params  => [
-                        @$args,
-                        $self->_state_peer_name($last),
-                    ],
-                }, $self->_state_peer_route($last),
-            );
-            last SWITCH;
-        }
-        if ($count && $last !~ /^[#&]/ && @$args == 0) {
-            @chans = map { $self->_state_chan_name($_) }
-                keys %{ $self->{state}{chans} };
-        }
-        if ($count && $last !~ /^[#&]/ && @$args == 1) {
-            $last = pop @$args;
-        }
-        if ($count && $last =~ /^[#&]/) {
-            @chans = split /,/, $last;
-        }
-        push @$ref, {
-            prefix  => $server,
-            command => '321',
-            params  => [$nick, 'Channel', 'Users  Name'],
-        };
-
-        my $count = 0;
-        INNER: for my $chan (@chans) {
-            if (!is_valid_chan_name($chan)
-                || !$self->state_chan_exists($chan)) {
-                if (!$count) {
-                    push @$ref, ['401', $chan];
-                    last INNER;
+        else {
+            OPTS: foreach my $opt ( split /,/, $args->[0] ) {
+                if ($opt =~ m!^T!i) {
+                    if ($opt !~ m!^T:!i && $opt !~ m!^T[<>]\d+$!i) {
+                        $errors++;
+                        last OPTS;
+                    }
+                    my ($pre,$act,$mins) = $opt =~ m!^(T)([<>:])(.+)$!i;
+                    if ($act eq '<') {
+                        $task->{topic_min} = time() - ( $mins * 60 );
+                    }
+                    elsif ($act eq '>') {
+                        $task->{topic_max} = time() - ( $mins * 60 );
+                    }
+                    else {
+                        $task->{topic_msk} = $mins;
+                    }
+                    next OPTS;
                 }
-                $count++;
-                next INNER;
+                if ($opt =~ m!^C!i) {
+                    if ($opt !~ m!^C[<>]\d+$!i) {
+                        $errors++;
+                        last OPTS;
+                    }
+                    my ($pre,$act,$mins) = $opt =~ m!^(C)([<>])(\d+)$!i;
+                    if ($act eq '<') {
+                        $task->{create_min} = time() - ( $mins * 60 );
+                    }
+                    else {
+                        $task->{create_max} = time() - ( $mins * 60 );
+                    }
+                    next OPTS;
+                }
+                if ($opt =~ m!^\<!) {
+                    if ($opt !~ m!^\<\d+$!) {
+                        $errors++;
+                        last OPTS;
+                    }
+                    my ($act,$users) = $opt =~ m!^(\<)(\d+)$!;
+                    $task->{users_min} = $users;
+                    next OPTS;
+                }
+                if ($opt =~ m!^\>!) {
+                    if ($opt !~ m!^\>\d+$!) {
+                        $errors++;
+                        last OPTS;
+                    }
+                    my ($act,$users) = $opt =~ m!^(\>)(\d+)$!;
+                    $task->{users_max} = $users;
+                    next OPTS;
+                }
+                my ($hide) = $opt =~ s/^!//;
+                if ($opt !~ m![\x2A\x3F]! && $opt !~ m!^[#&]! ) {
+                    $errors++;
+                    last OPTS;
+                }
+                if ( $hide ) {
+                    push @{ $task->{hide} }, $opt;
+                }
+                else {
+                    push @{ $task->{show} }, $opt;
+                }
             }
-            $count++;
-            if ($self->state_chan_mode_set( $chan, 'p')
-                    || $self->state_chan_mode_set($chan, 's')
-                    && !$self->state_is_chan_member($nick, $chan)) {
-                next INNER;
-            }
-            my $record = $self->{state}{chans}{uc_irc($chan)};
-            push @$ref, {
-                prefix  => $server,
-                command => '322',
-                params  => [
-                    $nick,
-                    $record->{name},
-                    scalar keys %{ $record->{users} },
-                    (defined $record->{topic}
-                        ? $record->{topic}[0]
-                        : ''
-                    ),
-                ],
-            };
         }
-
-        push @$ref, {
-            prefix  => $server,
-            command => '323',
-            params  => [$nick, 'End of /LIST'],
-        };
+        if ( $errors ) {
+            push @$ref, ['521'];
+            last SWITCH;
+        }
+        $rec->{safelist} = $task;
+        $poe_kernel->yield('_daemon_do_safelist',$rec);
     }
 
     return @$ref if wantarray;
@@ -11366,6 +11529,7 @@ EOF
         491 => [0, "No O-lines for your host"],
         501 => [0, "Unknown MODE flag"],
         502 => [0, "Cannot change mode for other users"],
+        521 => [0, "Bad list syntax"],
         710 => [2, "has asked for an invite."],
         711 => [1, "Your KNOCK has been delivered."],
         712 => [1, "Too many KNOCKs (%s)."],
@@ -11385,6 +11549,8 @@ EOF
         STATUSMSG => '@%+',
         DEAF      => 'D',
         MAXLIST   => 'beI:' . $self->{config}{MAXBANS},
+        SAFELIST  => undef,
+        ELIST     => 'CMNTU',
         map { ($_, $self->{config}{$_}) }
             qw(MAXCHANNELS MAXTARGETS NICKLEN TOPICLEN KICKLEN CASEMAPPING
             NETWORK MODES AWAYLEN),
