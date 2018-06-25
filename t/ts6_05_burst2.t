@@ -173,7 +173,7 @@ sub harpo_connected {
   $kernel->post( $sender, 'send_to_server', { command => 'SVINFO', params => [ '6', '6', '0', time() ], colonify => 1 } );
   $uidts = time() - 50;
   $kernel->post( $sender, 'send_to_server', { prefix => '9T9', command => 'UID', params => [ 'harpo', '1', $uidts, '+aiow', 'harpo', 'harpo.marx', '0', '9T9AAAAAA', '0', 'Harpo Marx' ], colonify => 1 } );
-  $kernel->post( $sender, 'send_to_server', { prefix => '7UP', command => 'SJOIN', params => [ ( $chants - 30 ), '#marxbros', '+nt', '@9T9AAAAAA' ], colonify => 1 } );
+  $kernel->post( $sender, 'send_to_server', { prefix => '9T9', command => 'SJOIN', params => [ ( $chants - 30 ), '#marxbros', '+nt', '@9T9AAAAAA' ], colonify => 1 } );
   $kernel->post( $sender, 'send_to_server', { command => 'EOB', prefix => '9T9' } );
   $kernel->post( $sender, 'send_to_server', { command => 'PING', params => [ '9T9' ], colonify => 1 } );
   return;

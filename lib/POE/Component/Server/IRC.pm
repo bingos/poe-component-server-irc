@@ -7834,7 +7834,7 @@ sub _daemon_do_joins {
            {
              prefix  => $prefix,
              command => $cmd,
-             params  => $args,
+             params  => [ @$args, $uids ]
            },
            grep { $_ ne $peer_id } $self->_state_connected_peers(),
         );
@@ -7849,6 +7849,7 @@ sub _daemon_do_joins {
             $umode .= 'o' if $uid =~ s/\@//g;
             $umode .= 'h' if $uid =~ s/\%//g;
             $umode .= 'v' if $uid =~ s/\+//g;
+            next if !defined $self->{state}{uids}{$uid};
             $chanrec->{users}{$uid} = $umode;
             $self->{state}{uids}{$uid}{chans}{$uchan} = $umode;
             push @op_list, $self->state_user_nick($uid) for split //, $umode;
@@ -8246,6 +8247,7 @@ sub _daemon_peer_tburst {
     my $count       = @$args;
 
     # :8H8 TBURST 1525787545 #dummynet 1526409011 llestr!bingos@staff.gumbynet.org.uk :this is dummynet, foo
+
     SWITCH: {
       if ( !$self->state_chan_exists( $args->[1] ) ) {
         last SWITCH;
@@ -10204,23 +10206,42 @@ sub _state_send_burst {
             map { my $w = $_; $w =~ tr/@%+/ABC/; [$w, $_] }
             $self->state_chan_list_multi_prefixed($chan,'UIDS');
 
-        my $arrayref2 = [
+        my $chanref = [
             $chanrec->{ts},
             $chanrec->{name},
             '+' . $chanrec->{mode},
             ($chanrec->{ckey} || ()),
             ($chanrec->{climit} || ()),
-            join ' ', @uids,
         ];
 
-        $self->send_output(
-            {
-                prefix  => $sid,
-                command => 'SJOIN',
-                params  => $arrayref2,
-            },
-            $conn_id,
-        );
+        my $length = length( join ' ', @$chanref ) + 11;
+        my $buf = '';
+        UID: foreach my $uid ( @uids ) {
+            if (length(join ' ', $buf, '1', $uid)+$length+1 > 510) {
+                $self->send_output(
+                  {
+                      prefix  => $sid,
+                      command => 'SJOIN',
+                      params  => [ @$chanref, $buf ],
+                  },
+                  $conn_id,
+                );
+                $buf = $uid;
+                next UID;
+            }
+            $buf = join ' ', $buf, $uid;
+            $buf =~ s!^\s+!!;
+        }
+        if ($buf) {
+            $self->send_output(
+               {
+                   prefix  => $sid,
+                   command => 'SJOIN',
+                   params  => [ @$chanref, $buf ],
+               },
+               $conn_id,
+            );
+        }
 
         my @output_modes;
         OUTER: for my $type (@lists) {
