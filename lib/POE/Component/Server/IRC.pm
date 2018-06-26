@@ -780,6 +780,213 @@ sub _cmd_from_client {
     return 1;
 }
 
+# 600 */  [RPL_LOGON] = "%s %s %s %ju :logged online"
+# 601 */  [RPL_LOGOFF] = "%s %s %s %ju :logged offline"
+# 604 */  [RPL_NOWON] = "%s %s %s %ju :is online"
+# 605 */  [RPL_NOWOFF] = "%s %s %s %ju :is offline"
+# 602 */  [RPL_WATCHOFF] = "%s %s %s %ju :stopped watching"
+# 603 */  [RPL_WATCHSTAT] = ":You have %u and are on %u WATCH entries"
+# 606 */  [RPL_WATCHLIST] = ":%s"
+# 607 */  [RPL_ENDOFWATCHLIST] = ":End of WATCH %c"
+# 512 */  [ERR_TOOMANYWATCH] = "%s :Maximum size for WATCH-list is %u entries"
+
+sub _daemon_cmd_watch {
+    my $self   = shift;
+    my $nick   = shift || return;
+    my $server = $self->server_name();
+    my $ref    = [ ];
+    my $args   = [@_];
+    my $count  = @$args;
+
+    SWITCH: {
+        if (!$count) {
+            $args->[0] = 'l';
+        }
+        my $uid = $self->state_user_uid($nick);
+        my $watches = $self->{state}{uids}{$uid}{watches} || { };
+        my $list = 0;
+        ITEM: foreach my $item ( split m!,!, $args->[0] ) {
+            if ( $item =~ m!^\+! ) {
+               $item =~ s!^\+!!;
+               if ( keys %$watches >= $self->{config}{max_watch} ) {
+                  push @$ref, ['512', $self->{config}{max_watch}];
+                  next ITEM;
+               }
+               next ITEM if !$item || !is_valid_nick_name($item);
+               # Add_to_watch_list
+               $watches->{uc_irc $item} = $item;
+               $self->{state}{watches}{uc_irc $item}{uids}{$uid} = 1;
+               # Show_watch possible refactor here
+               if ( my $tuid = $self->state_user_uid($item) ) {
+                  my $rec = $self->{state}{uids}{$tuid};
+                  push @$ref, {
+                      prefix  => $server,
+                      command => '604',
+                      params  => [
+                          $nick,
+                          $rec->{nick},
+                          $rec->{auth}{ident},
+                          $rec->{auth}{hostname},
+                          $rec->{ts},
+                          'is online',
+                      ],
+                  };
+               }
+               else {
+                  my $laston = $self->{state}{watches}{uc_irc $item}{laston} || 0;
+                  push @$ref, {
+                      prefix  => $server,
+                      command => '605',
+                      params  => [
+                          $nick, $item, '*', '*', $laston, 'is offline'
+                      ],
+                  };
+               }
+               next ITEM;
+            }
+            if ( $item =~ m!^\-! ) {
+               $item =~ s!^\-!!;
+               next ITEM if !$item;
+               $item = uc_irc $item;
+               my $pitem = delete $watches->{$item};
+               delete $self->{state}{watches}{$item}{uids}{$uid};
+               if ( my $tuid = $self->state_user_uid($item) ) {
+                  my $rec = $self->{state}{uids}{$tuid};
+                  push @$ref, {
+                      prefix  => $server,
+                      command => '602',
+                      params  => [
+                          $nick,
+                          $rec->{nick},
+                          $rec->{auth}{ident},
+                          $rec->{auth}{hostname},
+                          $rec->{ts},
+                          'stopped watching',
+                      ],
+                  };
+               }
+               else {
+                  my $laston = $self->{state}{watches}{$item}{laston} || 0;
+                  push @$ref, {
+                      prefix  => $server,
+                      command => '602',
+                      params  => [
+                          $nick, $pitem, '*', '*', $laston, 'stopped watching'
+                      ],
+                  };
+               }
+               delete $self->{state}{watches}{$item}
+                  if !keys %{ $self->{state}{watches}{$item}{uids} };
+               next ITEM;
+            }
+            if ( $item =~ m!^C!i ) {
+               foreach my $watched ( keys %$watches ) {
+                  delete $self->{state}{watches}{$watched}{uids}{$uid};
+                  delete $self->{state}{watches}{$watched}
+                    if !keys %{ $self->{state}{watches}{$watched}{uids} };
+               }
+               $watches = { };
+               next ITEM;
+            }
+            if ( $item =~ m!^S!i ) {
+               next ITEM if $list & 0x1;
+               $item = substr $item, 0, 1;
+               $list |= 0x1;
+               my @watching = sort keys %$watches;
+               my $wcount = 0;
+               my $mcount = @watching;
+               if ( defined $self->{state}{watches}{uc_irc $nick} ) {
+                  $wcount = keys %{ $self->{state}{watches}{uc_irc $nick}{uids} };
+               }
+               push @$ref, {
+                   prefix  => $server,
+                   command => '603',
+                   params  => [
+                        $nick,
+                        "You have $mcount and are on $wcount WATCH entries",
+                   ],
+               };
+               my $len = length($server) + length($nick) + 8;
+               my $buf = '';
+               WATCHED: foreach my $watched ( @watching ) {
+                   $watched = $watches->{$watched};
+                   if (length(join ' ', $buf, $watched)+$len+1 > 510) {
+                      push @$ref, {
+                          prefix  => $server,
+                          command => '606',
+                          params  => [ $nick, $buf ],
+                      };
+                      $buf = $watched;
+                      next WATCHED;
+                   }
+                   $buf = join ' ', $buf, $watched;
+                   $buf =~ s!^\s+!!;
+               }
+               if ($buf) {
+                   push @$ref, {
+                       prefix  => $server,
+                       command => '606',
+                       params  => [ $nick, $buf ],
+                   };
+               }
+               push @$ref, {
+                   prefix  => $server,
+                   command => '607',
+                   params  => [
+                         $nick,
+                         "End of WATCH $item",
+                   ],
+               };
+               next ITEM;
+            }
+            if ( $item =~ m!^L!i ) {
+               next ITEM if $list & 0x2;
+               $item = substr $item, 0, 1;
+               $list |= 0x2;
+               foreach my $watched ( keys %$watches ) {
+                  if ( my $tuid = $self->state_user_uid($watched) ) {
+                      my $rec = $self->{state}{uids}{$tuid};
+                      push @$ref, {
+                          prefix  => $server,
+                          command => '604',
+                          params  => [
+                              $nick,
+                              $rec->{nick},
+                              $rec->{auth}{ident},
+                              $rec->{auth}{hostname},
+                              $rec->{ts},
+                              'is online',
+                          ],
+                      };
+                  }
+                  elsif ( $item eq 'L' ) {
+                      push @$ref, {
+                          prefix  => $server,
+                          command => '605',
+                          params  => [
+                              $nick, $watches->{$watched}, '*', '*', 0, 'is offline'
+                          ],
+                      };
+                  }
+               }
+               push @$ref, {
+                   prefix  => $server,
+                   command => '607',
+                   params  => [
+                        $nick,
+                        "End of WATCH $item",
+                   ],
+               };
+               next ITEM;
+            }
+        }
+        $self->{state}{uids}{$uid}{watches} = $watches;
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
 sub _daemon_cmd_cap {
     my $self     = shift;
     my $wheel_id = shift || return;
@@ -1431,6 +1638,36 @@ sub _daemon_cmd_quit {
     # Remove for peoples accept lists
     for my $user (keys %{ $record->{accepts} }) {
         delete $self->{state}{users}{$user}{accepts}{uc_irc($nick)};
+    }
+
+    if ( defined $self->{state}{watches}{$nick} ) {
+        my $laston = time();
+        $self->{state}{watches}{$nick}{laston} = $laston;
+        foreach my $wuid ( keys %{ $self->{state}{watches}{$nick}{uids} } ) {
+            next if !defined $self->{state}{uids}{$wuid};
+            my $wrec = $self->{state}{uids}{$wuid};
+            $self->send_output(
+                {
+                    prefix  => $record->{server},
+                    command => '601',
+                    params  => [
+                         $wrec->{nick},
+                         $record->{nick},
+                         $record->{auth}{ident},
+                         $record->{auth}{hostname},
+                         $laston,
+                         'logged offline',
+                    ],
+                },
+                $wrec->{route_id},
+            );
+        }
+    }
+    # clear WATCH list
+    foreach my $watched ( keys %{ $record->{watches} } ) {
+       delete $self->{state}{watches}{$watched}{uids}{$uid};
+       delete $self->{state}{watches}{$watched}
+          if !keys %{ $self->{state}{watches}{$watched}{uids} };
     }
 
     # Okay, all 'local' users who share a common channel with user.
@@ -3051,6 +3288,51 @@ sub _daemon_cmd_nick {
                 delete $self->{state}{users}{$_}{accepts}{$unick};
             }
             delete $record->{accepts};
+            # WATCH ON/OFF
+            if ( defined $self->{state}{watches}{$unick} ) {
+                foreach my $wuid ( keys %{ $self->{state}{watches}{$unick}{uids} } ) {
+                    next if !defined $self->{state}{uids}{$wuid};
+                    my $wrec = $self->{state}{uids}{$wuid};
+                    my $laston = time();
+                    $self->{state}{watches}{$unick}{laston} = $laston;
+                    $self->send_output(
+                        {
+                            prefix  => $record->{server},
+                            command => '605',
+                            params  => [
+                                $wrec->{nick},
+                                $nick,
+                                $record->{auth}{ident},
+                                $record->{auth}{hostname},
+                                $laston,
+                                'is offline',
+                            ],
+                        },
+                        $wrec->{route_id},
+                    );
+                }
+            }
+            if ( defined $self->{state}{watches}{$unew} ) {
+                foreach my $wuid ( keys %{ $self->{state}{watches}{$unew}{uids} } ) {
+                    next if !defined $self->{state}{uids}{$wuid};
+                    my $wrec = $self->{state}{uids}{$wuid};
+                    $self->send_output(
+                        {
+                            prefix  => $record->{server},
+                            command => '604',
+                            params  => [
+                                $wrec->{nick},
+                                $record->{nick},
+                                $record->{auth}{ident},
+                                $record->{auth}{hostname},
+                                $record->{ts},
+                                'is online',
+                            ],
+                        },
+                        $wrec->{route_id},
+                    );
+                }
+            }
             delete $self->{state}{users}{$unick};
             $self->{state}{users}{$unew} = $record;
             delete $self->{state}{peers}{$server}{users}{$unick};
@@ -5877,7 +6159,32 @@ sub _daemon_peer_squit {
                     $output->{params}[0],
                 );
                 my $record = delete $self->{state}{uids}{$uid};
-                delete $self->{state}{users}{uc_irc($record->{nick})};
+                my $nick = uc_irc $record->{nick};
+                delete $self->{state}{users}{$nick};
+                # WATCH LOGOFF
+                if ( defined $self->{state}{watches}{$nick} ) {
+                  my $laston = time();
+                  $self->{state}{watches}{$nick}{laston} = $laston;
+                  foreach my $wuid ( keys %{ $self->{state}{watches}{$nick}{uids} } ) {
+                    next if !defined $self->{state}{uids}{$wuid};
+                    my $wrec = $self->{state}{uids}{$wuid};
+                    $self->send_output(
+                      {
+                          prefix  => $record->{server},
+                          command => '601',
+                          params  => [
+                              $wrec->{nick},
+                              $record->{nick},
+                              $record->{auth}{ident},
+                              $record->{auth}{hostname},
+                              $laston,
+                              'logged offline',
+                          ],
+                      },
+                      $wrec->{route_id},
+                    );
+                  }
+                }
                 if ($record->{umode} =~ /o/) {
                     $self->{state}{stats}{ops_online}--;
                 }
@@ -6970,7 +7277,7 @@ sub _daemon_peer_quit {
 
     my $record = delete $self->{state}{uids}{$uid};
     return $ref if !$record;
-    my $full    = $record->{full}->();
+    my $full = $record->{full}->();
     my $nick = uc_irc($record->{nick});
     delete $self->{state}{users}{$nick};
     delete $self->{state}{sids}{ $record->{sid} }{users}{$nick};
@@ -6997,6 +7304,30 @@ sub _daemon_peer_quit {
     delete $self->{state}{users}{$_}{accepts}{uc_irc($nick)}
         for keys %{ $record->{accepts} };
 
+    # WATCH LOGOFF
+    if ( defined $self->{state}{watches}{$nick} ) {
+        my $laston = time();
+        $self->{state}{watches}{$nick}{laston} = $laston;
+        foreach my $wuid ( keys %{ $self->{state}{watches}{$nick}{uids} } ) {
+            next if !defined $self->{state}{uids}{$wuid};
+            my $wrec = $self->{state}{uids}{$wuid};
+            $self->send_output(
+                {
+                    prefix  => $record->{server},
+                    command => '601',
+                    params  => [
+                         $wrec->{nick},
+                         $record->{nick},
+                         $record->{auth}{ident},
+                         $record->{auth}{hostname},
+                         $laston,
+                         'logged offline',
+                    ],
+                },
+                $wrec->{route_id},
+            );
+        }
+    }
     # Okay, all 'local' users who share a common channel with user.
     my $common = { };
     for my $uchan (keys %{ $record->{chans} }) {
@@ -7152,6 +7483,28 @@ sub _daemon_peer_uid {
         $self->{state}{sids}{$prefix}{uids}{ $record->{uid} } = $record;
         $self->_state_update_stats();
 
+        if ( defined $self->{state}{watches}{$unick} ) {
+            foreach my $wuid ( keys %{ $self->{state}{watches}{$unick}{uids} } ) {
+                next if !defined $self->{state}{uids}{$wuid};
+                my $wrec = $self->{state}{uids}{$wuid};
+                $self->send_output(
+                    {
+                        prefix  => $server,
+                        command => '600',
+                        params  => [
+                             $wrec->{nick},
+                             $record->{nick},
+                             $record->{auth}{ident},
+                             $record->{auth}{hostname},
+                             $record->{ts},
+                            'logged online',
+                        ],
+                    },
+                    $wrec->{route_id},
+                );
+            }
+        }
+
         $self->send_output(
              {
                  prefix  => $prefix,
@@ -7270,9 +7623,55 @@ sub _daemon_peer_nick {
             $record->{ts} = $ts;
         }
         else {
+            my $nick = $record->{nick};
             $record->{nick} = $new;
             $record->{ts} = $ts;
             # Remove from peoples accept lists
+            # WATCH OFF
+            if ( defined $self->{state}{watches}{$unick} ) {
+                foreach my $wuid ( keys %{ $self->{state}{watches}{$unick}{uids} } ) {
+                    next if !defined $self->{state}{uids}{$wuid};
+                    my $wrec = $self->{state}{uids}{$wuid};
+                    my $laston = time();
+                    $self->{state}{watches}{$unick}{laston} = $laston;
+                    $self->send_output(
+                        {
+                            prefix  => $record->{server},
+                            command => '605',
+                            params  => [
+                                $wrec->{nick},
+                                $nick,
+                                $record->{auth}{ident},
+                                $record->{auth}{hostname},
+                                $laston,
+                                'is offline',
+                            ],
+                        },
+                        $wrec->{route_id},
+                    );
+                }
+            }
+            if ( defined $self->{state}{watches}{$unew} ) {
+                foreach my $wuid ( keys %{ $self->{state}{watches}{$unew}{uids} } ) {
+                    next if !defined $self->{state}{uids}{$wuid};
+                    my $wrec = $self->{state}{uids}{$wuid};
+                    $self->send_output(
+                        {
+                            prefix  => $record->{server},
+                            command => '604',
+                            params  => [
+                                $wrec->{nick},
+                                $record->{nick},
+                                $record->{auth}{ident},
+                                $record->{auth}{hostname},
+                                $record->{ts},
+                                'is online',
+                            ],
+                        },
+                        $wrec->{route_id},
+                    );
+                }
+            }
             delete $self->{state}{users}{$_}{accepts}{$unick}
                 for keys %{ $record->{accepts} };
             delete $record->{accepts};
@@ -9115,7 +9514,6 @@ sub _daemon_peer_svsmode {
             if ($action eq '+' && $char eq 'd') {
                 if ($extra_arg) {
                     $rec->{account} = $extra_arg;
-                    # TODO: account-notify
                     foreach my $chan ( keys %{ $rec->{chans} } ) {
                         $self->_send_output_channel_local(
                             $chan,
@@ -9281,9 +9679,11 @@ sub _daemon_peer_svsnick {
             $rec->{nick} = $newnick;
             $rec->{ts}   = time;
         }
+        # Check for existing NEWNICK here
         else {
             $rec->{nick} = $newnick;
             $rec->{ts}   = time;
+            # TODO: WATCH ON/OFF
             # Remove from peoples accept lists
             for (keys %{ $rec->{accepts} }) {
                 delete $self->{state}{users}{$_}{accepts}{$unick};
@@ -10694,10 +11094,12 @@ sub _state_register_client {
     $record->{ipaddress} = $record->{socket}[0]; # Needed later for UID command
     $record->{ipaddress} = '0' if $record->{ipaddress} =~ m!^:!;
 
-    $self->{state}{users}{uc_irc($record->{nick})} = $record;
+    my $unick = uc_irc $record->{nick};
+    my $ucserver = uc $record->{server};
+    $self->{state}{users}{$unick} = $record;
     $self->{state}{uids}{ $record->{uid} } = $record if $record->{uid};
-    $self->{state}{peers}{uc $record->{server}}{users}{uc_irc($record->{nick})} = $record;
-    $self->{state}{peers}{uc $record->{server}}{uids}{ $record->{uid} } = $record if $record->{uid};
+    $self->{state}{peers}{$ucserver}{users}{$unick} = $record;
+    $self->{state}{peers}{$ucserver}{uids}{ $record->{uid} } = $record if $record->{uid};
 
     $record->{full} = sub {
         return sprintf('%s!%s@%s',
@@ -10762,6 +11164,28 @@ sub _state_register_client {
     $self->send_event('daemon_uid', @$arrayref);
     $self->send_event('daemon_nick', @{ $arrayref }[0..5], $record->{server}, ( $arrayref->[9] || '' ) );
     $self->_state_update_stats();
+
+    if ( defined $self->{state}{watches}{$unick} ) {
+        foreach my $wuid ( keys %{ $self->{state}{watches}{$unick}{uids} } ) {
+            next if !defined $self->{state}{uids}{$wuid};
+            my $wrec = $self->{state}{uids}{$wuid};
+            $self->send_output(
+                {
+                    prefix  => $record->{server},
+                    command => '600',
+                    params  => [
+                         $wrec->{nick},
+                         $record->{nick},
+                         $record->{auth}{ident},
+                         $record->{auth}{hostname},
+                         $record->{ts},
+                         'logged online',
+                    ],
+                },
+                $wrec->{route_id},
+            );
+        }
+    }
     return $record->{uid};
 }
 
@@ -11419,6 +11843,7 @@ sub configure {
         knock_client_time   => 5 * 60,
         knock_delay_channel => 60,
         pace_wait     => 10,
+        max_watch     => 50,
     );
     $self->{config}{$_} = $defaults{$_} for keys %defaults;
 
@@ -11438,7 +11863,7 @@ sub configure {
     }
 
     for my $opt (keys %$opts) {
-      next if $opt !~ m!^(knock_|pace_)!i;
+      next if $opt !~ m!^(knock_|pace_|max_watch)!i;
       $self->{config}{lc $opt} = delete $opts->{$opt}
         if defined $opts->{$opt};
     }
@@ -11550,6 +11975,7 @@ EOF
         491 => [0, "No O-lines for your host"],
         501 => [0, "Unknown MODE flag"],
         502 => [0, "Cannot change mode for other users"],
+        512 => [0, "Maximum size for WATCH-list is %s entries"],
         521 => [0, "Bad list syntax"],
         710 => [2, "has asked for an invite."],
         711 => [1, "Your KNOCK has been delivered."],
