@@ -9607,15 +9607,6 @@ sub _daemon_peer_svsnick {
     my $args    = [ @_ ];
     my $count   = @$args;
 
-     #      - parv[0] = old nickname or uid
-     #      - parv[1] = old timestamp
-     #      - parv[2] = new nickname
-     #      - parv[3] = new timestamp
-
-     #        parv[0] = old nickname
-     #        parv[1] = new nickname
-     #        parv[2] = timestamp
-
     SWITCH: {
         if (!$self->_state_sid_serv($prefix) && $prefix ne $sid) {
             last SWITCH;
@@ -9661,7 +9652,36 @@ sub _daemon_peer_svsnick {
             );
             last SWITCH;
         }
-        # Deal with a local nick change
+
+        my $full  = $rec->{full}->();
+        my $nick  = $rec->{nick};
+        my $unick = uc_irc $nick;
+        my $unew  = uc_irc $newnick;
+        my $server = uc $self->server_name();
+
+        if ( $self->state_nick_exists($newnick) ) {
+            if ( defined $self->{state}{users}{$unew} ) {
+               my $exist = $self->{state}{users}{$unew};
+               if ( $rec eq $exist ) {
+                  $rec->{nick} = $newnick;
+                  $rec->{ts}   = $newts;
+                  last SWITCH;
+               }
+               # SVSNICK Collide methinks
+                $self->_terminate_conn_error(
+                    $rec->{route_id},
+                    'SVSNICK Collide',
+                );
+                last SWITCH;
+            }
+            if ( defined $self->{state}{pending}{$unew} ) {
+                $self->_terminate_conn_error(
+                    $self->{state}{pending}{$unew},
+                    'SVSNICK Override',
+                );
+            }
+        }
+
         my $common;
         for my $chan (keys %{ $rec->{chans} }) {
             for my $user ( keys %{ $self->{state}{chans}{$chan}{users} } ) {
@@ -9670,19 +9690,13 @@ sub _daemon_peer_svsnick {
             }
         }
 
-        my $full  = $rec->{full}->();
-        my $unick = uc_irc $rec->{nick};
-        my $unew  = uc_irc $newnick;
-        my $server = uc $self->server_name();
-
         if ($unick eq $unew) {
             $rec->{nick} = $newnick;
-            $rec->{ts}   = time;
+            $rec->{ts}   = $newts;
         }
-        # Check for existing NEWNICK here
         else {
             $rec->{nick} = $newnick;
-            $rec->{ts}   = time;
+            $rec->{ts}   = $newts;
             # TODO: WATCH ON/OFF
             # Remove from peoples accept lists
             for (keys %{ $rec->{accepts} }) {
@@ -9726,7 +9740,7 @@ sub _daemon_peer_svsnick {
                 command => 'NICK',
                 params  => [$newnick],
             },
-            values %$common,
+            $rec->{route_id}, values %$common,
         );
     }
 
