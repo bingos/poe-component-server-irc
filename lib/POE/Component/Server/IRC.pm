@@ -46,7 +46,7 @@ sub spawn {
 sub IRCD_connection {
     my ($self, $ircd) = splice @_, 0, 2;
     pop @_;
-    my ($conn_id, $peeraddr, $peerport, $sockaddr, $sockport, $needs_auth)
+    my ($conn_id, $peeraddr, $peerport, $sockaddr, $sockport, $needs_auth, $secured)
         = map { ${ $_ } } @_;
 
     if ($self->_connection_exists($conn_id)) {
@@ -56,6 +56,7 @@ sub IRCD_connection {
     $self->{state}{conns}{$conn_id}{registered} = 0;
     $self->{state}{conns}{$conn_id}{type}       = 'u';
     $self->{state}{conns}{$conn_id}{seen}       = time();
+    $self->{state}{conns}{$conn_id}{secured}    = $secured;
     $self->{state}{conns}{$conn_id}{socket}
         = [$peeraddr, $peerport, $sockaddr, $sockport];
 
@@ -275,6 +276,7 @@ sub _client_register {
 
     # Add new nick
     my $uid       = $self->_state_register_client($conn_id);
+    my $umode     = $self->{state}{conns}{$conn_id}{umode};
     my $server    = $self->server_name();
     my $nick      = $self->_client_nickname($conn_id);
     my $port      = $self->{state}{conns}{$conn_id}{socket}[3];
@@ -361,12 +363,23 @@ sub _client_register {
       map { $_->{prefix} = $server; $_->{params}[0] = $nick; $_ }
         @{ $self->_daemon_do_motd($uid) };
 
+    if ( $umode ) {
+        $self->send_output(
+            {
+                prefix  => $self->{state}{uids}{$uid}{full}->(),
+                command => 'MODE',
+                params => [ $nick, "+$umode" ],
+            },
+            $conn_id,
+        );
+    }
+
     $self->send_event(
         'cmd_mode',
         $conn_id,
         {
             command => 'MODE',
-            params  => [$nick, '+i'],
+            params  => [$nick, "+i"],
         },
     );
 
@@ -1349,6 +1362,16 @@ sub _daemon_cmd_message {
                 push @$ref, ['404', $channel];
                 next LOOP;
             }
+            if ($channel && $self->state_chan_mode_set($channel, 'T')
+                    && $type eq 'NOTICE' && !$self->state_user_chan_mode($nick, $channel)) {
+                push @$ref, ['404', $channel];
+                next LOOP;
+            }
+            if ($channel && $self->state_chan_mode_set($channel, 'M')
+                    && $self->state_user_umode($nick) !~ /r/) {
+                push @$ref, ['477', $channel];
+                next LOOP;
+            }
             if ($channel && $self->_state_user_banned($nick, $channel)
                     && !$self->state_user_chan_mode($nick, $channel)) {
                 push @$ref, ['404', $channel];
@@ -1357,6 +1380,11 @@ sub _daemon_cmd_message {
             if ($channel && $self->state_chan_mode_set($channel, 'c')
                     && ( has_color($args->[1]) || has_formatting($args->[1]) ) ){
                 push @$ref, ['408', $channel];
+                next LOOP;
+            }
+            if ($channel && $self->state_chan_mode_set($channel, 'C')
+                    && $args->[1] =~ m!^\001! && $args->[1] !~ m!^\001ACTION! ){
+                push @$ref, ['492', $channel];
                 next LOOP;
             }
             if ($channel) {
@@ -1844,6 +1872,11 @@ sub _daemon_cmd_oper {
             );
         }
 
+        my $umode = $self->{config}{ops}{$opuser}{umode} || $self->{config}{oper_umode};
+        $record->{umode} .= $umode;
+        $umode .= 'o';
+        $umode = join '', sort split //, $umode;
+
         my $uid  = $record->{uid};
         my $full = $record->{full}->();
 
@@ -1863,7 +1896,7 @@ sub _daemon_cmd_oper {
         my $reply = {
             prefix  => $uid,
             command => 'MODE',
-            params  => [$uid, '+o'],
+            params  => [$uid, "+$umode"],
         };
 
         $self->send_output(
@@ -1873,12 +1906,15 @@ sub _daemon_cmd_oper {
         $self->send_event(
             "daemon_umode",
             $full,
-            '+o',
+            "+$umode",
         );
+
 
         my $route_id = $record->{route_id};
         $self->{state}{localops}{$route_id} = time;
         $self->antiflood($route_id, 0);
+        $reply->{prefix} = $full;
+        $reply->{params}[0] = $record->{nick};
         push @$ref, $reply;
     }
 
@@ -3269,11 +3305,24 @@ sub _daemon_cmd_nick {
         my $full   = $record->{full}->();
         my $common = { $record->{uid} => $record->{route_id} };
 
-        for my $chan (keys %{ $record->{chans} }) {
-            for my $user ( keys %{ $self->{state}{chans}{$chan}{users} } ) {
-                next if $user !~ m!^$sid!;
+        my $nonickchange = '';
+        CHANS: for my $chan (keys %{ $record->{chans} }) {
+            my $chanrec = $self->{state}{chans}{$chan};
+            if ( $chanrec->{mode} =~ /N/ ) {
+                if ( $record->{chans} !~ /[oh]/ ) {
+                    $nonickchange = $chanrec->{name};
+                    last CHANS;
+                }
+            }
+            USER: for my $user ( keys %{ $chanrec->{users} } ) {
+                next USER if $user !~ m!^$sid!;
                 $common->{$user} = $self->_state_uid_route($user);
             }
+        }
+
+        if ($nonickchange) {
+            push @$ref,['447',$nonickchange];
+            last SWITCH;
         }
 
         if ($unick eq $unew) {
@@ -4872,16 +4921,20 @@ sub _daemon_cmd_mode {
         }
 
         my $unknown = 0;
-        my $notop = 0;
-        my $nick_is_op = $self->state_is_chan_op($nick, $chan);
-        my $nick_is_hop = $self->state_is_chan_hop($nick, $chan);
+        my $notop   = 0;
+        my $notoper = 0;
+        my $nick_is_op   = $self->state_is_chan_op($nick, $chan);
+        my $nick_is_hop  = $self->state_is_chan_hop($nick, $chan);
+        my $nick_is_oper = $self->state_user_is_operator($nick);
+        my $no_see_bans  = ( $record->{mode} =~ /u/ && !( $nick_is_op || $nick_is_hop ) );
+        my $mode_u_set   = ( $record->{mode} =~ /u/ );
         my $reply;
         my @reply_args; my %subs;
         my $parsed_mode = parse_mode_line(@$args);
         my $mode_count = 0;
 
         while (my $mode = shift @{ $parsed_mode->{modes} }) {
-            if ($mode !~ /[ceIbklimnpstohv]/) {
+            if ($mode !~ /[CceIbkMNRSTLOlimnpstohuv]/) {
                 push @$ref, [
                     '472',
                     (split //, $mode)[1],
@@ -4904,7 +4957,7 @@ sub _daemon_cmd_mode {
                         $chan,
                         @{ $record->{bans}{$_} },
                     ]
-                } for keys %{ $record->{bans} };
+                } for grep { !$no_see_bans } keys %{ $record->{bans} };
                 push @$ref, {
                     prefix  => $server,
                     command => '368',
@@ -4912,7 +4965,12 @@ sub _daemon_cmd_mode {
                 };
                 next;
             }
-            if (!$nick_is_op && !$nick_is_hop) {
+            if ($mode =~ m![OL]! && !$nick_is_oper) {
+                push @$ref, ['481'] if !$notoper;
+                $notoper++;
+                next;
+            }
+            if (!$nick_is_op && !$nick_is_hop && $mode !~ m![OL]!) {
                 push @$ref, ['482', $chan] if !$notop;
                 $notop++;
                 next;
@@ -4926,7 +4984,7 @@ sub _daemon_cmd_mode {
                         $chan,
                         @{ $record->{invex}{$_} },
                     ],
-                } for keys %{ $record->{invex} };
+                } for grep { !$no_see_bans } keys %{ $record->{invex} };
                 push @$ref, {
                     prefix  => $server,
                     command => '347',
@@ -4939,7 +4997,7 @@ sub _daemon_cmd_mode {
                     prefix  => $server,
                     command => '348',
                     params  => [$nick, $chan, @{ $record->{excepts}{$_} } ]
-                } for keys %{ $record->{excepts} };
+                } for grep { !$no_see_bans } keys %{ $record->{excepts} };
                 push @$ref, {
                     prefix  => $server,
                     command => '349',
@@ -5044,11 +5102,16 @@ sub _daemon_cmd_mode {
             next;
         }
         # Bans
+        my $maxbans = ( $record->{mode} =~ m!L! ? $self->{config}{max_bans_large} : $self->{config}{MAXBANS} );
         if (my ($flag) = $mode =~ /([-+])b/) {
             next if ++$mode_count > $maxmodes;
             my $mask = normalize_mask($arg);
             my $umask = uc_irc $mask;
             if ($flag eq '+' && !$record->{bans}{$umask}) {
+                if ( keys %{ $record->{bans} } >= $maxbans ) {
+                    push @$ref, [ '478', $record->{name}, 'b' ];
+                    next;
+                }
                 $record->{bans}{$umask}
                     = [$mask, $self->state_user_full($nick), time];
                 $reply .= $mode;
@@ -5068,6 +5131,10 @@ sub _daemon_cmd_mode {
             my $umask = uc_irc $mask;
 
             if ($flag eq '+' && !$record->{invex}{$umask}) {
+                if ( keys %{ $record->{invex} } >= $maxbans ) {
+                    push @$ref, [ '478', $record->{name}, 'I' ];
+                    next;
+                }
                 $record->{invex}{$umask}
                     = [$mask, $self->state_user_full($nick), time];
                 $reply .= $mode;
@@ -5087,6 +5154,10 @@ sub _daemon_cmd_mode {
             my $umask = uc_irc($mask);
 
                 if ($flag eq '+' && !$record->{excepts}{$umask}) {
+                    if ( keys %{ $record->{excepts} } >= $maxbans ) {
+                        push @$ref, [ '478', $record->{name}, 'e' ];
+                        next;
+                    }
                     $record->{excepts}{$umask}
                         = [$mask, $self->state_user_full($nick), time];
                     $reply .= $mode;
@@ -5102,13 +5173,13 @@ sub _daemon_cmd_mode {
             # The rest should be argumentless.
             my ($flag, $char) = split //, $mode;
             if ($flag eq '+' && $record->{mode} !~ /$char/) {
-                $reply .= $mode;
+                $reply  .= $mode;
                 $record->{mode} = join('', sort
                     split //, $record->{mode} . $char);
                 next;
             }
             if ($flag eq '-' && $record->{mode} =~ /$char/) {
-                $reply .= $mode;
+                $reply  .= $mode;
                 $record->{mode} =~ s/$char//g;
                 next;
             }
@@ -5128,13 +5199,50 @@ sub _daemon_cmd_mode {
                },
                $self->_state_connected_peers(),
             );
-            my $output = {
-                prefix   => $self->state_user_full($nick),
-                command  => 'MODE',
-                params   => [$chan, $reply, @reply_args],
-                colonify => 0,
-            };
-            $self->_send_output_channel_local( $chan, $output );
+            my $full = $self->state_user_full($nick);
+            $self->_send_output_channel_local(
+                $record->{name},
+                {
+                    prefix   => $full,
+                    command  => 'MODE',
+                    colonify => 0,
+                    params   => [
+                        $record->{name},
+                        $reply,
+                        @reply_args,
+                    ],
+                },
+                '', ( $mode_u_set ? 'oh' : '' ),
+            );
+            if ($mode_u_set) {
+                my $bparse = parse_mode_line( $reply, @reply_args );
+                my $breply; my @breply_args;
+                while (my $bmode = shift (@{ $bparse->{modes} })) {
+                    my $arg;
+                    $arg = shift @{ $bparse->{args} }
+                      if $bmode =~ /^(\+[ohvklbIe]|-[ohvbIe])/;
+                      next if $bmode =~ m!^[+-][beI]$!;
+                      $breply .= $bmode;
+                      push @breply_args, $arg if $arg;
+                }
+                if ($breply) {
+                   my $parsed_line = unparse_mode_line($breply);
+                   $self->_send_output_channel_local(
+                      $record->{name},
+                      {
+                          prefix   => $full,
+                          command  => 'MODE',
+                          colonify => 0,
+                          params   => [
+                              $record->{name},
+                              $parsed_line,
+                              @breply_args,
+                          ],
+                      },
+                      '','-oh',
+                   );
+                }
+            }
         }
     } # SWITCH
 
@@ -5164,6 +5272,7 @@ sub _daemon_cmd_join {
         @channels = split /,/, $args->[0];
         @chankeys = split /,/, $args->[1] if $args->[1];
         my $channel_length = $self->server_config('CHANNELLEN');
+        my $nick_is_oper = $self->state_user_is_operator($nick);
 
         LOOP: for my $channel (@channels) {
             my $uchannel = uc_irc($channel);
@@ -5188,7 +5297,7 @@ sub _daemon_cmd_join {
             # Too many channels
             if ($self->state_user_chans($nick)
                 >= $self->server_config('MAXCHANNELS')
-                && !$self->state_user_is_operator($nick)) {
+                && !$nick_is_oper) {
                 $self->_send_output_to_client(
                     $route_id,
                     '405',
@@ -5198,7 +5307,7 @@ sub _daemon_cmd_join {
             }
             # Channel is RESV
             if (my $reason = $self->_state_is_resv($channel)) {
-                if ( !$self->state_user_is_operator($nick) ) {
+                if ( !$nick_is_oper ) {
                     $self->_send_output_to_client(
                         $route_id,
                         '485',
@@ -5263,9 +5372,24 @@ sub _daemon_cmd_join {
             }
             my $chanrec = $self->{state}{chans}{$uchannel};
             my $bypass;
-            if ($self->state_user_is_operator($nick)
-                && $self->{config}{OPHACKS}) {
+            if ($nick_is_oper && $self->{config}{OPHACKS}) {
                 $bypass = 1;
+            }
+            # OPER only channel +O
+            if ($chanrec->{mode} =~ /O/ && !$nick_is_oper) {
+                push @$ref, ['520',$chanrec->{name}];
+                next LOOP;
+            }
+            my $umode = $self->state_user_umode($nick);
+            # SSL only channel +S
+            if ($chanrec->{mode} =~ /S/ && $umode !~ /S/) {
+                push @$ref, ['489',$chanrec->{name}];
+                next LOOP;
+            }
+            # Registered users only +R
+            if($chanrec->{mode} =~ /R/ && $umode !~ /r/) {
+                push @$ref, ['477',$chanrec->{name}];
+                next LOOP;
             }
             # Channel is full
             if (!$bypass && $chanrec->{mode} =~ /l/
@@ -8368,6 +8492,7 @@ sub _daemon_peer_tmode {
             last SWITCH;
         }
         $chan = $record->{name};
+        my $mode_u_set = ( $record->{mode} =~ /u/ );
         my $full;
         $full = $self->state_uid_full($uid)
             if $self->state_uid_exists($uid);
@@ -8379,7 +8504,7 @@ sub _daemon_peer_tmode {
             my $arg;
             $arg = shift @{ $parsed_mode->{args} }
                 if $mode =~ /^(\+[ohvklbIe]|-[ohvbIe])/;
-                    if (my ($flag,$char) = $mode =~ /^(\+|-)([ohv])/) {
+                if (my ($flag,$char) = $mode =~ /^(\+|-)([ohv])/) {
                     if ($flag eq '+'
                         && $record->{users}{uc_irc($arg)} !~ /$char/) {
                         # Update user and chan record
@@ -8499,46 +8624,77 @@ sub _daemon_peer_tmode {
 
             unshift @$args, $record->{name};
             if ($reply) {
-            my $parsed_line = unparse_mode_line($reply);
-            $self->send_output(
-                {
-                    prefix   => $uid,
-                    command  => 'TMODE',
-                    colonify => 0,
-                    params   => [
-                        $record->{name},
-                        $parsed_line,
-                        @reply_args,
-                    ],
-                },
-                grep { $_ ne $peer_id } $self->_state_connected_peers(),
-            );
-            my @reply_args_chan = map {
-              ( defined $subs{$_} ? $subs{$_} : $_ )
-            } @reply_args;
-            $self->send_output(
-                {
-                    prefix   => ($full || $server),
-                    command  => 'MODE',
-                    colonify => 0,
-                    params   => [
-                        $record->{name},
-                        $parsed_line,
-                        @reply_args_chan,
-                    ],
-                },
-                map { $self->_state_uid_route($_) }
-                    grep { m!^$sid! }
-                    keys %{ $record->{users} },
-            );
-            $self->send_event(
-                "daemon_mode",
-                ($full || $server),
-                $record->{name},
-                $parsed_line,
-                @reply_args_chan,
-            );
-        }
+                my $parsed_line = unparse_mode_line($reply);
+                $self->send_output(
+                    {
+                        prefix   => $uid,
+                        command  => 'TMODE',
+                        colonify => 0,
+                        params   => [
+                            $record->{name},
+                            $parsed_line,
+                            @reply_args,
+                        ],
+                    },
+                    grep { $_ ne $peer_id } $self->_state_connected_peers(),
+                );
+                my @reply_args_chan = map {
+                  ( defined $subs{$_} ? $subs{$_} : $_ )
+                } @reply_args;
+
+                $self->send_event(
+                    "daemon_mode",
+                    ($full || $server),
+                    $record->{name},
+                    $parsed_line,
+                    @reply_args_chan,
+                );
+
+                $self->_send_output_channel_local(
+                    $record->{name},
+                    {
+                        prefix   => ($full || $server),
+                        command  => 'MODE',
+                        colonify => 0,
+                        params   => [
+                            $record->{name},
+                            $parsed_line,
+                            @reply_args_chan,
+                        ],
+                    },
+                    '',
+                    ( $mode_u_set ? 'oh' : '' ),
+                );
+                if ($mode_u_set) {
+                    my $bparse = parse_mode_line( join ' ', $parsed_line, @reply_args_chan );
+                    my $breply; my @breply_args;
+                    while (my $bmode = shift (@{ $bparse->{modes} })) {
+                        my $arg;
+                        $arg = shift @{ $bparse->{args} }
+                          if $bmode =~ /^(\+[ohvklbIe]|-[ohvbIe])/;
+                        next if $bmode =~ m!^[+-][beI]$!;
+                        $breply .= $bmode;
+                        push @breply_args, $arg;
+                    }
+                    if ($breply) {
+                       $parsed_line = unparse_mode_line($breply);
+                       $self->_send_output_channel_local(
+                          $record->{name},
+                          {
+                              prefix   => ($full || $server),
+                              command  => 'MODE',
+                              colonify => 0,
+                              params   => [
+                                  $record->{name},
+                                  $parsed_line,
+                                  @breply_args,
+                              ],
+                          },
+                          '','-oh',
+                       );
+                    }
+                }
+            }
     } # SWITCH
 
     return @$ref if wantarray;
@@ -8553,6 +8709,7 @@ sub _daemon_peer_bmask {
     my $ref     = [ ];
     my $args    = [ @_ ];
     my $count   = scalar @$args;
+    my %map     = qw(b bans e excepts I invex);
 
     SWITCH: {
         if ( !$count || $count < 4 ) {
@@ -8576,18 +8733,26 @@ sub _daemon_peer_bmask {
           },
           grep { $_ ne $peer_id } $self->_state_connected_peers(),
         );
-        # Only bother with the next bit if we have local users on the channel
+        my $mode_u_set = ( $chanrec->{mode} =~ /u/ );
         my $sid = $self->server_sid();
+        my $server = $self->server_name();
         my @local_users = map { $self->_state_uid_route( $_ ) }
+                           grep { !$mode_u_set || $chanrec->{users}{$_} =~ /[oh]/ }
                            grep { $_ =~ m!^$sid! } keys %{ $chanrec->{users} };
+        my @mask_list = split m!\s+!, $masks;
+        foreach my $marsk ( @mask_list ) {
+            my $mask = normalize_mask($marsk);
+            my $umask = uc_irc($mask);
+            $chanrec->{ $map{ $trype } }{$umask} =
+              [ $mask, $server, time() ];
+        }
+        # Only bother with the next bit if we have local users on the channel
         if ( !@local_users ) {
           last SWITCH;
         }
-        my @mask_list = split m!\s+!, $masks;
         my @types;
         push @types, "+$trype" for @mask_list;
         my @output_modes;
-        my $server = $self->server_name();
         my $length = length($server) + 4
                      + length($chan) + 4;
         my @buffer = ('', '');
@@ -9003,9 +9168,29 @@ sub _daemon_peer_message {
                     push @$ref, ['404', $channel];
                     next LOOP;
                 }
+                if ($channel && $self->state_chan_mode_set($channel, 'T')
+                        && $type eq 'NOTICE' && !$self->state_user_chan_mode($nick, $channel)) {
+                    push @$ref, ['404', $channel];
+                    next LOOP;
+                }
+                if ($channel && $self->state_chan_mode_set($channel, 'M')
+                        && $self->state_user_umode($nick) !~ /r/) {
+                    push @$ref, ['477', $channel];
+                    next LOOP;
+                }
                 if ($channel && $self->_state_user_banned($nick, $channel)
                         && !$self->state_user_chan_mode($nick, $channel)) {
                     push @$ref, ['404', $channel];
+                    next LOOP;
+                }
+                if ($channel && $self->state_chan_mode_set($channel, 'c')
+                        && ( has_color($args->[1]) || has_formatting($args->[1]) ) ){
+                    push @$ref, ['408', $channel];
+                    next LOOP;
+                }
+                if ($channel && $self->state_chan_mode_set($channel, 'C')
+                        && $args->[1] =~ m!^\001! && $args->[1] !~ m!^\001ACTION! ){
+                    push @$ref, ['492', $channel];
                     next LOOP;
                 }
                 if ($channel) {
@@ -11123,7 +11308,10 @@ sub _state_register_client {
     };
 
     my $umode = '+i';
-    $umode .= 'S' if $record->{secured};
+    if ( $record->{secured} ) {
+        $umode .= 'S';
+        $record->{umode} = 'S';
+    }
 
     my $arrayref = [
         $record->{nick},
@@ -11856,8 +12044,10 @@ sub configure {
         knock_client_count  => 1,
         knock_client_time   => 5 * 60,
         knock_delay_channel => 60,
-        pace_wait     => 10,
-        max_watch     => 50,
+        pace_wait           => 10,
+        max_watch           => 50,
+        max_bans_large      => 500,
+        oper_umode          => 'aceklnswy',
     );
     $self->{config}{$_} = $defaults{$_} for keys %defaults;
 
@@ -11877,10 +12067,13 @@ sub configure {
     }
 
     for my $opt (keys %$opts) {
-      next if $opt !~ m!^(knock_|pace_|max_watch)!i;
+      next if $opt !~ m!^(knock_|pace_|max_watch|max_bans_|oper_umode)!i;
       $self->{config}{lc $opt} = delete $opts->{$opt}
         if defined $opts->{$opt};
     }
+
+    $self->{config}{oper_umode} =~ s/[^DFGHRSWabcdefgijklnopqrsuwy]+//g;
+    $self->{config}{oper_umode} =~ s/[SWori]+//g;
 
     for my $opt (keys %$opts) {
         $self->{config}{$opt} = $opts->{$opt} if defined $opts->{$opt};
@@ -11965,6 +12158,7 @@ EOF
         444 => [1, "User not logged in"],
         445 => [0, "SUMMON has been disabled"],
         446 => [0, "USERS has been disabled"],
+        447 => [0, "Cannot change nickname while on %s (+N)"],
         451 => [0, "You have not registered"],
         461 => [1, "Not enough parameters"],
         462 => [0, "Unauthorised command (already registered)"],
@@ -11979,17 +12173,20 @@ EOF
         474 => [1, "Cannot join channel (+b)"],
         475 => [1, "Cannot join channel (+k)"],
         476 => [1, "Bad Channel Mask"],
-        477 => [1, "Channel doesn\'t support modes"],
+        477 => [1, "You need to identify to a registered nick to join or speak in that channel."],
         478 => [2, "Channel list is full"],
         481 => [0, "Permission Denied- You\'re not an IRC operator"],
         482 => [1, "You\'re not channel operator"],
         483 => [0, "You can\'t kill a server!"],
         484 => [0, "Your connection is restricted!"],
         485 => [1, "Cannot join channel (%s)"],
+        489 => [1, "Cannot join channel (+S) - SSL/TLS required"],
         491 => [0, "No O-lines for your host"],
+        492 => [1, "You cannot send CTCPs to this channel."],
         501 => [0, "Unknown MODE flag"],
         502 => [0, "Cannot change mode for other users"],
         512 => [0, "Maximum size for WATCH-list is %s entries"],
+        520 => [1, "Cannot join channel (+O)"],
         521 => [0, "Bad list syntax"],
         710 => [2, "has asked for an invite."],
         711 => [1, "Your KNOCK has been delivered."],
@@ -12056,7 +12253,11 @@ sub _send_output_to_client {
     my $self     = shift;
     my $wheel_id = shift || return 0;
     my $nick     = $self->_client_nickname($wheel_id);
-    $nick        = shift if $self->_connection_is_peer($wheel_id);
+    my $prefix   = $self->server_name();
+    if ( $self->_connection_is_peer($wheel_id) ) {
+        $nick   = shift;
+        $prefix = $self->server_sid();
+    }
     my $err      = shift || return 0;
     return if !$self->_connection_exists($wheel_id);
 
@@ -12081,7 +12282,7 @@ sub _send_output_to_client {
                     sprintf($self->{Error_Codes}{$err}[1], @_);
             }
             else {
-            push @{ $input->{params} }, $self->{Error_Codes}{$err}[1];
+                push @{ $input->{params} }, $self->{Error_Codes}{$err}[1];
             }
             $self->send_output($input, $wheel_id);
         }
@@ -12089,6 +12290,21 @@ sub _send_output_to_client {
 
     return 1;
 }
+
+=for comment
+
+  _send_output_channel_local()
+
+  Args:
+
+  0 channel
+  1 hashref to be sent
+  2 (opt) a connection id to not send to
+  3 (opt) only send to people with this status (ohv) or prefixed with - not to those
+  4 positive CAP, we will send to people with this CAP (can be an ARRAYREF)
+  5 negative CAP, we won't send to people with this CAP (can be an ARRAYREF)
+
+=cut
 
 sub _send_output_channel_local {
     my $self    = shift;
@@ -12101,6 +12317,7 @@ sub _send_output_channel_local {
     my $is_msg = ( $output->{command} =~ m!^(PRIVMSG|NOTICE)$! ? 1 : 0 );
     my $chanrec = $self->{state}{chans}{uc_irc($channel)};
     my @targs;
+    my $negative = ( $status ? $status =~ s!^\-!! : '' );
     UID: foreach my $uid ( keys %{ $chanrec->{users} } ) {
       next if $uid !~ m!^$sid!;
       my $route_id = $self->_state_uid_route( $uid );
@@ -12109,10 +12326,10 @@ sub _send_output_channel_local {
       }
       if ( $status ) {
         my $matched;
-        foreach my $stat ( split //, $status ) {
+        STATUS: foreach my $stat ( split //, $status ) {
           $matched++ if $chanrec->{users}{$uid} =~ m!$stat!;
         }
-        next UID if !$matched;
+        next UID if ( $negative && $matched ) || ( !$negative && !$matched );
       }
       if ( $poscap ) {
         foreach my $cap ( @{ ref $poscap eq 'ARRAY' ? $poscap : [ $poscap ] } ) {
@@ -12210,6 +12427,11 @@ sub add_operator {
         push @validated, $valid if $valid;
       }
       $ref->{ipmask} = \@validated;
+    }
+
+    if ( $ref->{umode} ) {
+        $ref->{umode} =~ s/[^DFGHRSWabcdefgijklnopqrsuwy]+//g;
+        $ref->{umode} =~ s/[SWori]+//g;
     }
 
     my $record = $self->{state}{peers}{uc $self->server_name()};

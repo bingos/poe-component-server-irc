@@ -204,10 +204,10 @@ sub _accept_connection {
         my $cb = $_[SESSION]->callback('_sock_ssl',$context);
         eval {
             $socket = POE::Component::SSLify::Server_SSLify($socket,undef,$cb);
+            $secured = 1;
         };
         chomp $@;
         die "Failed to SSLify server socket: $@" if $@;
-        $secured = 1;
     }
 
     my $wheel = POE::Wheel::ReadWrite->new(
@@ -348,6 +348,7 @@ sub _add_listener {
             $port,
             $id,
             $bindaddr,
+            $usessl,
         );
     }
     return;
@@ -1390,6 +1391,8 @@ I<Inherited from L<POE::Component::Syndicator|POE::Component::Syndicator/syndica
 
 =item * C<ARG5>: a boolean indicating whether the client needs to be authed
 
+=item * C<ARG6>: a boolean indicating whether the client is securely connected
+
 =back
 
 =back
@@ -1432,6 +1435,8 @@ hostname and ident;
 =item * C<ARG1>, the listener id;
 
 =item * C<ARG2>, the listening address;
+
+=item * C<ARG3>, whether SSL is in use;
 
 =back
 
