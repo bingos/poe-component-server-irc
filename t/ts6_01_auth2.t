@@ -114,7 +114,7 @@ sub testc_connected2 {
 
 sub testc_input {
   my ($heap,$input) = @_[HEAP,ARG0];
-  diag($input->{raw_line}, "\n");
+  #diag($input->{raw_line}, "\n");
   is($input->{command}, 'ERROR', 'ERROR! ERROR! ERROR!');
   is($input->{params}[0], 'Closing Link: 127.0.0.1 (Unauthorised server.)', 'Closing Link: 127.0.0.1 (Unauthorised server.)');
   return;

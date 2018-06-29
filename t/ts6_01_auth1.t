@@ -123,7 +123,7 @@ sub client_input {
   my $prefix = $in->{prefix};
   my $cmd    = $in->{command};
   my $params = $in->{params};
-  diag($in->{raw_line}, "\n");
+  #diag($in->{raw_line}, "\n");
   is( $cmd, 'ERROR', 'ERROR ERROR!' );
   is( $params->[0], 'Closing Link: 127.0.0.1 (You are not authorized to use this server)', 'Not authorised' );
   return;
@@ -135,7 +135,7 @@ sub client_input4 {
   my $cmd    = $in->{command};
   my $params = $in->{params};
   if ( $cmd eq 'MODE' ) {
-    diag($in->{raw_line}, "\n");
+    #diag($in->{raw_line}, "\n");
     pass($cmd);
     is( $prefix, 'bobbins!teapot@funny.host.name', 'Username got no tilde and spoofed host' );
     $poe_kernel->post( $sender, 'send_to_server', { command => 'QUIT' } );

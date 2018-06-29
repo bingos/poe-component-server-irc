@@ -133,7 +133,7 @@ sub testc_input {
       return;
     }
     else {
-      diag("Delay JOIN for $nick\n");
+      #diag("Delay JOIN for $nick\n");
       $poe_kernel->delay_add( '_join', int(rand(10)), $sender->ID(), $nick );
       return;
     }
@@ -160,7 +160,7 @@ sub _join {
   my ($kernel,$heap,$sess,$nick) = @_[KERNEL,HEAP,ARG0,ARG1];
   my $sender = $kernel->alias_resolve( $sess );
   if ( !$heap->{mode} ) {
-    diag("Delay JOIN for $nick\n");
+    #diag("Delay JOIN for $nick\n");
     $poe_kernel->delay_add( '_join', int(rand(10)), $sess, $nick );
   }
   else {

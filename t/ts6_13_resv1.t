@@ -150,7 +150,7 @@ sub client_input {
   my $prefix = $in->{prefix};
   my $cmd    = $in->{command};
   my $params = $in->{params};
-  diag($in->{raw_line}, "\n");
+  #diag($in->{raw_line}, "\n");
   # :listen.server.irc 432 bobbins :Banhammer
   is( $cmd, '432', 'Erroneous' );
   is( $params->[0], '*', 'No NICK because we were denied' );

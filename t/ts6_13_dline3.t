@@ -208,7 +208,7 @@ sub client_input {
   my $prefix = $in->{prefix};
   my $cmd    = $in->{command};
   my $params = $in->{params};
-  diag($in->{raw_line}, "\n");
+  #diag($in->{raw_line}, "\n");
   is( $cmd, 'ERROR', 'ERROR ERROR!' );
   is( $params->[0], 'You have been D-lined.', 'You have been D-lined.' );
   return;

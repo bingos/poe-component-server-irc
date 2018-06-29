@@ -239,7 +239,7 @@ sub client_input {
   my $prefix = $in->{prefix};
   my $cmd    = $in->{command};
   my $params = $in->{params};
-  diag($in->{raw_line}, "\n");
+  #diag($in->{raw_line}, "\n");
   is( $cmd, '432', 'Erroneous' );
   is( $params->[1], 'bobbins', 'But we wants it, yes' );
   is( $params->[2], 'Banhammer', 'Banhammer' );

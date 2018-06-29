@@ -205,7 +205,7 @@ sub client_input {
   my $prefix = $in->{prefix};
   my $cmd    = $in->{command};
   my $params = $in->{params};
-  diag($in->{raw_line}, "\n");
+  #diag($in->{raw_line}, "\n");
   if ( $cmd eq 'ERROR' ) {
     is( $cmd, 'ERROR', 'ERROR ERROR!' );
     is( $params->[0], 'Closing Link: 127.0.0.1 (X-Lined: [Banhammer])', 'I want to be your Banhammer' );

@@ -172,7 +172,7 @@ sub client_input {
   }
   if ( $cmd eq 'ERROR' ) {
     pass($cmd);
-    diag($in->{raw_line}, "\n");
+    #diag($in->{raw_line}, "\n");
     return;
   }
   return;

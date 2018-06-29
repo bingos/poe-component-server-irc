@@ -99,7 +99,7 @@ sub testc_connected {
 
 sub testc_input {
   my ($heap,$input) = @_[HEAP,ARG0];
-  diag($input->{raw_line}, "\n");
+  #diag($input->{raw_line}, "\n");
   return unless $input->{command} eq 'EOB';
   pass($input->{command});
   $poe_kernel->delay( _terminate => 5 );

@@ -196,7 +196,7 @@ sub client_input {
   }
   if ( $cmd eq 'ERROR' ) {
     pass($cmd);
-    diag($in->{raw_line}, "\n");
+    #diag($in->{raw_line}, "\n");
     my $state = $heap->{ircd}{state};
     is( scalar keys %{ $state->{chans} }, 0, 'nOne channel' );
     is( scalar keys %{ $state->{conns} }, 2, 'Should only be 2 connections' );
