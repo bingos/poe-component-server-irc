@@ -56,6 +56,7 @@ sub IRCD_connection {
     $self->{state}{conns}{$conn_id}{registered} = 0;
     $self->{state}{conns}{$conn_id}{type}       = 'u';
     $self->{state}{conns}{$conn_id}{seen}       = time();
+    $self->{state}{conns}{$conn_id}{conn_time}  = time();
     $self->{state}{conns}{$conn_id}{secured}    = $secured;
     $self->{state}{conns}{$conn_id}{socket}
         = [$peeraddr, $peerport, $sockaddr, $sockport];
@@ -88,6 +89,7 @@ sub IRCD_connected {
     $self->{state}{conns}{$conn_id}{cntr}       = 1;
     $self->{state}{conns}{$conn_id}{type}       = 'u';
     $self->{state}{conns}{$conn_id}{seen}       = time();
+    $self->{state}{conns}{$conn_id}{conn_time}  = time();
     $self->{state}{conns}{$conn_id}{socket}
         = [$peeraddr, $peerport, $sockaddr, $sockport];
 
@@ -682,6 +684,12 @@ sub _cmd_from_peer {
             last SWITCH;
         }
 
+        if ( $cmd =~ m!^E?TRACE$!i ) {
+            $self->send_output( $_, $conn_id ) for
+              $self->_daemon_peer_tracing($cmd, $conn_id, $prefix, @$params);
+            last SWITCH;
+        }
+
         # Chanmode and umode have distinct commands now
         # No need for check, MODE is always umode
         if ($cmd eq 'MODE') {
@@ -773,6 +781,14 @@ sub _cmd_from_client {
                 $wheel_id,
                 (ref $_ eq 'ARRAY' ? @{ $_ } : $_),
             ) for $self->_daemon_client_miscell($cmd, $nick, @$params);
+            last SWITCH;
+        }
+
+        if ( $cmd =~ m!^E?TRACE$!i ) {
+            $self->_send_output_to_client(
+                $wheel_id,
+                (ref $_ eq 'ARRAY' ? @{ $_ } : $_),
+            ) for $self->_daemon_client_tracing($cmd, $nick, @$params);
             last SWITCH;
         }
 
@@ -3257,6 +3273,551 @@ sub _daemon_cmd_kill {
         }
     }
 
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _daemon_peer_tracing {
+    my $self    = shift;
+    my $cmd     = shift;
+    my $peer_id = shift || return;
+    my $uid     = shift || return;
+    my $server  = $self->server_name();
+    my $sid     = $self->server_sid();
+    my $args    = [@_];
+    my $count   = @$args;
+    my $ref     = [ ];
+    $cmd        = uc $cmd;
+
+    SWITCH: {
+        if ($count > 1) {
+           my $targ = ( $self->state_user_uid($args->[1]) || $self->_state_peer_sid($args->[1] ) );
+           if (!$targ) {
+              push @$ref, {
+                  prefix  => $sid,
+                  command => '402',
+                  params  => [
+                      $uid,
+                      $args->[1],
+                  ],
+              };
+              last SWITCH;
+           }
+           if ($targ !~ m!^$sid!) {
+              my $psid = substr $targ, 0, 3;
+              $self->send_output(
+                  {
+                      prefix  => $uid,
+                      command => $cmd,
+                      params  => [
+                          $args->[0],
+                          $targ,
+                      ],
+                  },
+                  $self->_state_sid_route($psid),
+              );
+              last SWITCH;
+           }
+        }
+        if ($args->[0]) {
+           my $targ = ( $self->state_user_uid($args->[0]) || $self->_state_peer_sid($args->[0] ) );
+           if (!$targ) {
+              push @$ref, {
+                  prefix  => $sid,
+                  command => '402',
+                  params  => [
+                      $uid,
+                      $args->[0],
+                  ],
+              };
+              last SWITCH;
+           }
+           if ($targ !~ m!^$sid!) {
+              my $name;
+              my $route_id;
+              if ( length $targ == 3 ) {
+                  $name     = $self->{state}{sids}{$targ}{name};
+                  $route_id = $self->{state}{sids}{$targ}{route_id};
+              }
+              else {
+                  $name     = $self->{state}{uids}{$targ}{nick};
+                  $route_id = $self->{state}{uids}{$targ}{route_id};
+              }
+              push @$ref, {
+                  prefix  => $sid,
+                  command => '200',
+                  params  => [
+                      $uid,
+                      'Link',
+                      $self->server_version(),
+                      $name,
+                      $self->{state}{conns}{$route_id}{name},
+                  ],
+              };
+              $self->send_output(
+                  {
+                      prefix  => $uid,
+                      command => $cmd,
+                      params  => [
+                          $targ,
+                      ],
+                  },
+                  $route_id,
+              );
+              last SWITCH;
+           }
+        }
+        my $method = ( $cmd eq 'ETRACE' ? '_daemon_do_etrace' : '_daemon_do_trace' );
+        push @$ref, $_ for @{ $self->$method($uid, @$args) };
+    }
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _state_find_peer {
+    my $self   = shift;
+    my $targ   = shift || return;
+    my $connid = shift;
+    my $server = $self->server_name();
+    my $sid    = $self->server_sid();
+    my $ume    = uc $server;
+    my $result;
+
+    if ($self->state_nick_exists($targ)) {
+       $result = $self->state_user_uid($targ);
+    }
+    if (!$result && $self->state_peer_exists($targ)) {
+       $result = $self->_state_peer_sid($targ);
+    }
+    if (!$result && $targ =~ m![\x2A\x3F]!) {
+       PEERS: foreach my $peer ( sort keys %{ $self->{state}{peers} } ) {
+          if ( matches_mask($targ,$peer,'ascii') ) {
+             return $sid if $ume eq $peer;
+             my $peerrec = $self->{state}{peers}{$peer};
+             next PEERS if $connid && $connid eq $peerrec->{route_id}
+                  && $peerrec->{type} eq 'r';
+             $result = $peerrec->{sid};
+             last PEERS;
+          }
+       }
+       if (!$result) {
+          USERS: foreach my $user ( sort keys %{ $self->{state}{users} } ) {
+             if ( matches_mask($targ,$user) ) {
+                my $rec = $self->{state}{users}{$user};
+                return $sid if $rec->{uid} =~ m!^$sid!;
+                next USERS if $connid && $connid eq $rec->{route_id}
+                     && $self->{state}{sids}{ $rec->{sid} }{type} eq 'r';
+                $result = $rec->{uid};
+                last USERS
+             }
+          }
+       }
+    }
+    return $result if $result;
+    return;
+}
+
+sub _daemon_client_tracing {
+    my $self   = shift;
+    my $cmd    = shift;
+    my $nick   = shift || return;
+    my $server = $self->server_name();
+    my $sid    = $self->server_sid();
+    my $args   = [@_];
+    my $count  = @$args;
+    my $ref    = [ ];
+    $cmd       = uc $cmd;
+
+    SWITCH: {
+        if (!$self->state_user_is_operator($nick)) {
+            if ( $cmd eq 'ETRACE' ) {
+                push @$ref, ['481'];
+                last SWITCH;
+            }
+            push @$ref, {
+                prefix  => $server,
+                command => '262',
+                params  => [
+                    $nick, $server, 'End of TRACE',
+                ],
+            };
+            last SWITCH;
+        }
+        if ($count > 1) {
+           my $targ = $self->_state_find_peer($args->[1]);
+           if (!$targ) {
+              push @$ref, [ '402', $args->[1] ];
+              last SWITCH;
+           }
+           if ($targ !~ m!^$sid!) {
+              my $psid = substr $targ, 0, 3;
+              $self->send_output(
+                  {
+                      prefix  => $self->state_user_uid($nick),
+                      command => $cmd,
+                      params  => [
+                          $args->[0],
+                          $targ,
+                      ],
+                  },
+                  $self->_state_sid_route($psid),
+              );
+              last SWITCH;
+           }
+        }
+        my $uid = $self->state_user_uid($nick);
+        if ($args->[0]) {
+           my $targ = $self->_state_find_peer($args->[0]);
+           if (!$targ) {
+              push @$ref, [ '402', $args->[0] ];
+              last SWITCH;
+           }
+           if ($targ !~ m!^$sid!) {
+              my $name;
+              my $route_id;
+              if ( length $targ == 3 ) {
+                  $name     = $self->{state}{sids}{$targ}{name};
+                  $route_id = $self->{state}{sids}{$targ}{route_id};
+              }
+              else {
+                  $name     = $self->{state}{uids}{$targ}{nick};
+                  $route_id = $self->{state}{uids}{$targ}{route_id};
+              }
+              push @$ref, {
+                  prefix  => $server,
+                  command => '200',
+                  params  => [
+                      $nick,
+                      'Link',
+                      $self->server_version(),
+                      $name,
+                      $self->{state}{conns}{$route_id}{name},
+                  ],
+              };
+              $self->send_output(
+                  {
+                      prefix  => $uid,
+                      command => $cmd,
+                      params  => [
+                          $targ,
+                      ],
+                  },
+                  $route_id,
+              );
+              last SWITCH;
+           }
+        }
+        my $method = ( $cmd eq 'ETRACE' ? '_daemon_do_etrace' : '_daemon_do_trace' );
+        push @$ref, $_ for map { $_->{prefix} = $server; $_->{params}[0] = $nick; $_ }
+                       @{ $self->$method($uid, @$args) };
+    }
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _daemon_do_etrace {
+    my $self   = shift;
+    my $uid    = shift || return;
+    my $server = $self->server_name();
+    my $sid    = $self->server_sid();
+    my $args   = [@_];
+    my $count  = @$args;
+    my $ref    = [ ];
+
+    SWITCH: {
+        my $rec = $self->{state}{uids}{$uid};
+        $self->_send_to_realops(
+          sprintf(
+            'ETRACE requested by %s (%s@%s) [%s]',
+            $rec->{nick},
+            $rec->{auth}{ident},
+            $rec->{auth}{hostname},
+            $rec->{server},
+          ),
+          'Notice',
+          'y',
+        );
+        my $doall = 0;
+        if (!$args->[0]) {
+          $doall = 1;
+        }
+        elsif (uc $args->[0] eq uc $server) {
+          $doall = 1;
+        }
+        elsif ($args->[0] eq $sid) {
+          $doall = 1;
+        }
+        my $name = $args->[0];
+        if ($name && $name =~ m!^[0-9]!) {
+            $name = $self->state_user_nick($name);
+        }
+        $name = uc_irc $name if $name;
+        # Local clients
+        my @connects;
+        my $conns = $self->{state}{conns};
+        foreach my $conn_id ( keys %$conns ) {
+            next if $conns->{$conn_id}{type} ne 'c';
+            next if defined $self->{state}{localops}{ $conn_id };
+            push @connects, $conn_id;
+        }
+        foreach my $conn_id ( sort { $conns->{$a}{nick} cmp $conns->{$b}{nick} }
+                                @connects ) {
+            next if !$doall || ( $name && $name ne uc_irc $conns->{$conn_id}{nick} );
+            my $connrec = $conns->{$conn_id};
+            push @$ref, {
+                prefix  => $sid,
+                command => '709',
+                params  => [
+                    $uid,
+                    'User', 'users',
+                    $connrec->{nick},
+                    $connrec->{auth}{ident},
+                    $connrec->{auth}{hostname},
+                    $connrec->{socket}[0],
+                    $connrec->{ircname},
+                ],
+            };
+        }
+        foreach my $conn_id ( sort { $conns->{$a}{nick} cmp $conns->{$b}{nick} }
+                                keys %{ $self->{state}{localops} } ) {
+            next if !$doall || ( $name && $name ne uc_irc $conns->{$conn_id}{nick} );
+            my $connrec = $conns->{$conn_id};
+            push @$ref, {
+                prefix  => $sid,
+                command => '709',
+                params  => [
+                    $uid,
+                    'Oper', 'opers',
+                    $connrec->{nick},
+                    $connrec->{auth}{ident},
+                    $connrec->{auth}{hostname},
+                    $connrec->{socket}[0],
+                    $connrec->{ircname},
+                ],
+            };
+        }
+        # End of ETRACE
+        push @$ref, {
+            prefix  => $sid,
+            command => '759',
+            params  => [
+                $uid, $server, 'End of ETRACE',
+            ],
+        };
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _daemon_do_trace {
+    my $self   = shift;
+    my $uid    = shift || return;
+    my $server = $self->server_name();
+    my $sid    = $self->server_sid();
+    my $args   = [@_];
+    my $count  = @$args;
+    my $ref    = [ ];
+
+    SWITCH: {
+        my $rec = $self->{state}{uids}{$uid};
+        $self->_send_to_realops(
+          sprintf(
+            'TRACE requested by %s (%s@%s) [%s]',
+            $rec->{nick},
+            $rec->{auth}{ident},
+            $rec->{auth}{hostname},
+            $rec->{server},
+          ),
+          'Notice',
+          'y',
+        );
+        my $doall = 0;
+        if (!$args->[0]) {
+          $doall = 1;
+        }
+        elsif (uc $args->[0] eq uc $server) {
+          $doall = 1;
+        }
+        elsif ($args->[0] eq $sid) {
+          $doall = 1;
+        }
+        my $name = $args->[0];
+        if ($name && $name =~ m!^[0-9]!) {
+            $name = $self->state_user_nick($name);
+        }
+        $name = uc_irc $name if $name;
+        # Local clients
+        my $conns = $self->{state}{conns};
+        my %connects;
+        foreach my $conn_id ( keys %$conns ) {
+            next if defined $self->{state}{localops}{ $conn_id };
+            push @{ $connects{ $conns->{$conn_id}{type} } }, $conn_id;
+        }
+        foreach my $conn_id ( sort { $conns->{$a}{nick} cmp $conns->{$b}{nick} }
+                                @{ $connects{c} } ) {
+            next if !$doall || ( $name && $name ne uc_irc $conns->{$conn_id}{nick} );
+            my $connrec = $conns->{$conn_id};
+            push @$ref, {
+                prefix  => $sid,
+                command => '205',
+                params  => [
+                    $uid,
+                    'User', 'users',
+                    $connrec->{nick},
+                    sprintf('[%s@%s]',$connrec->{auth}{ident},$connrec->{auth}{hostname}),
+                    sprintf('(%s)',$connrec->{socket}[0]),
+                    time - $connrec->{seen},
+                    time - $connrec->{idle_time},
+                ],
+                colonify => 0,
+            };
+        }
+        foreach my $conn_id ( sort { $conns->{$a}{nick} cmp $conns->{$b}{nick} }
+                                keys %{ $self->{state}{localops} } ) {
+            next if !$doall || ( $name && $name ne uc_irc $conns->{$conn_id}{nick} );
+            my $connrec = $conns->{$conn_id};
+            push @$ref, {
+                prefix  => $sid,
+                command => '204',
+                params  => [
+                    $uid,
+                    'Oper', 'opers',
+                    $connrec->{nick},
+                    sprintf('[%s@%s]',$connrec->{auth}{ident},$connrec->{auth}{hostname}),
+                    sprintf('(%s)',$connrec->{socket}[0]),
+                    time - $connrec->{seen},
+                    time - $connrec->{idle_time},
+                ],
+                colonify => 0,
+            };
+        }
+        # Servers
+        foreach my $conn_id ( sort { $conns->{$a}{name} cmp $conns->{$b}{name} }
+                                @{ $connects{p} } ) {
+            next if !$doall || ( $name && $name ne uc_irc $conns->{$conn_id}{name} );
+            my $connrec = $conns->{$conn_id};
+            my $srvcnt = 0; my $clicnt = 0;
+            $self->_state_peer_dependents( $connrec->{sid}, \$srvcnt, \$clicnt );
+            push @$ref, {
+                prefix  => $sid,
+                command => '206',
+                params  => [
+                    $uid,
+                    'Serv', 'server',
+                    "${srvcnt}S", "${clicnt}C",
+                    sprintf(
+                      '%s[%s@%s]', $connrec->{name},
+                      ( $connrec->{auth}{ident} || 'unknown' ),
+                      ( $connrec->{auth}{hostname} || $connrec->{socket}[0] ) ),
+                    sprintf('%s!%s@%s','*','*',$connrec->{name}),
+                    time - $connrec->{conn_time},
+                ],
+                colonify => 0,
+            };
+        }
+        # Unknowns
+        foreach my $conn_id ( sort { $conns->{$a}{nick} <=> $conns->{$b}{nick} }
+                                @{ $connects{u} } ) {
+            next if !$doall;
+            my $connrec = $conns->{$conn_id};
+            push @$ref, {
+                prefix  => $sid,
+                command => '203',
+                params  => [
+                    $uid,
+                    '????', 'default',
+                    sprintf(
+                      '[%s@%s]', ( $connrec->{auth}{ident} || 'unknown' ),
+                      ( $connrec->{auth}{hostname} || $connrec->{socket}[0] ) ),
+                    sprintf('(%s)',$connrec->{socket}[0]),
+                    time - $connrec->{conn_time},
+                ],
+                colonify => 0,
+            };
+        }
+        if ($doall) {
+            my $users   = ( defined $connects{c} ? @{ $connects{c} } : 0 );
+            my $opers   = ( defined $self->{state}{localops} ? keys %{ $self->{state}{localops} } : 0 );
+            my $servers = ( defined $connects{p} ? @{ $connects{p} } : 0 );;
+            $users -= $opers;
+            # 209
+            if ($servers) {
+                push @$ref, {
+                    prefix  => $sid,
+                    command => '209',
+                    params  => [
+                        $uid,
+                        'Class', 'server', $servers,
+                    ],
+                    colonify => 0,
+                };
+            }
+            if ($opers) {
+                push @$ref, {
+                    prefix  => $sid,
+                    command => '209',
+                    params  => [
+                        $uid,
+                        'Class', 'opers', $opers,
+                    ],
+                    colonify => 0,
+                };
+            }
+            if ($users) {
+                push @$ref, {
+                    prefix  => $sid,
+                    command => '209',
+                    params  => [
+                        $uid,
+                        'Class', 'users', $users,
+                    ],
+                    colonify => 0,
+                };
+            }
+        }
+        # End of TRACE
+        push @$ref, {
+            prefix  => $sid,
+            command => '262',
+            params  => [
+                $uid, $server, 'End of TRACE',
+            ],
+        };
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _state_peer_dependents {
+    my $self   = shift;
+    my $sid    = shift || return;
+    my $srvcnt = shift;
+    my $clicnt = shift;
+
+    $$srvcnt++;
+    $$clicnt += keys %{ $self->{state}{sids}{$sid}{uids} };
+    foreach my $psid ( keys %{ $self->{state}{sids}{$sid}{sids} } ) {
+        $self->_state_peer_dependents($psid,$srvcnt,$clicnt);
+    }
+    return;
+}
+sub _daemon_cmd_etrace {
+    my $self   = shift;
+    my $nick   = shift || return;
+    my $server = $self->server_name();
+    my $args   = [@_];
+    my $count  = @$args;
+    my $ref    = [ ];
+
+    SWITCH: {
+        if (!$self->state_user_is_operator($nick)) {
+            push @$ref, ['481'];
+            last SWITCH;
+        }
+        # Call _daemon_do_etrace
+    }
     return @$ref if wantarray;
     return $ref;
 }
@@ -11216,6 +11777,7 @@ sub _state_register_peer {
     }
 
     $record->{burst} = $record->{registered} = 1;
+    $record->{conn_time} = time;
     $record->{type} = 'p';
     $record->{route_id} = $conn_id;
     $record->{peer}     = $server;
@@ -11466,8 +12028,14 @@ sub _state_peer_name {
 sub _state_peer_sid {
     my $self = shift;
     my $peer = shift || return;
-    return if !$self->state_peer_exists($peer);
-    return $self->{state}{peers}{uc $peer}{sid};
+    if ( $peer =~ m!^\d! ) {
+        return if !$self->state_sid_exists($peer);
+        return $self->{state}{sids}{$peer}{sid};
+    }
+    else {
+        return if !$self->state_peer_exists($peer);
+        return $self->{state}{peers}{uc $peer}{sid};
+    }
 }
 
 sub _state_sid_name {
@@ -12232,6 +12800,7 @@ sub _send_to_realops {
     my $type     = shift || 'Notice';
     my $flags    = shift; # Future use
     my $server   = $self->server_name();
+    $flags =~ s/[^a-zA-Z]+//g if $flags;
 
     my %types = (
       NOTICE => 'Notice',
@@ -12242,6 +12811,16 @@ sub _send_to_realops {
     my $notice =
       sprintf('*** %s -- %s', ( $types{uc $type} || 'Notice' ), $msg );
 
+    my @locops;
+
+    if ( $flags ) {
+      @locops = grep { $self->{state}{conns}{$_}{umode} =~ m![$flags]! }
+                  keys %{ $self->{state}{localops} };
+    }
+    else {
+      @locops = keys %{ $self->{state}{localops} };
+    }
+
     $self->send_output(
          {
             prefix  => $server,
@@ -12251,7 +12830,7 @@ sub _send_to_realops {
                 $notice,
             ],
          },
-         keys %{ $self->{state}{locops} },
+         @locops,
     );
     return 1;
 }
