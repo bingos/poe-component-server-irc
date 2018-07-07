@@ -1,5 +1,5 @@
 use strict;
-use Test::More tests => 15;
+use Test::More tests => 17;
 use POE::Component::Server::IRC;
 use POE::Component::IRC;
 use POE;
@@ -22,6 +22,7 @@ POE::Session->create(
             ircd_daemon_rehash
             ircd_daemon_die
             ircd_listener_add
+            ircd_daemon_snotice
         )],
     ],
     heap => {
@@ -82,6 +83,10 @@ sub ircd_daemon_rehash {
 sub ircd_daemon_die {
     pass($_[STATE]);
     $poe_kernel->yield('_shutdown');
+}
+
+sub ircd_daemon_snotice {
+    pass($_[STATE]);
 }
 
 sub _default {

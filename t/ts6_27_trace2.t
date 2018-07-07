@@ -111,7 +111,7 @@ sub ircd_listener_add {
         {
             username => 'moo',
             password => '$2a$06$Z.NhM/6/Upqfn2WcECk0Y./rpDmNLD2nUeETfKUPWSGNoNtQq9BVO',
-            umode    => 'acy',
+            umode    => 'ay',
         }
     );
     $heap->{ircd}->add_service('fake.server.irc');
@@ -251,7 +251,7 @@ sub client_input {
   }
   if ( $cmd eq 'MODE' && $params->[0] !~ m!^#! ) {
     pass($cmd);
-    is($params->[1],'+acoy','Correct OPER umodes set');
+    is($params->[1],'+aoy','Correct OPER umodes set');
     $poe_kernel->yield('_launch_client2');
     return;
   }

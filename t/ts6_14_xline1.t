@@ -6,6 +6,15 @@ use POE::Component::Server::IRC;
 use Test::POE::Client::TCP;
 use IRC::Utils qw[BOLD YELLOW NORMAL];
 
+my @notices = (
+'*** Notice -- OperServ!OperServ@listen.server.irc{OperServ} is now an operator',
+'*** Notice -- OperServ!OperServ@listen.server.irc added X-Line for [*NastyBot*] [Banhammer]',
+'*** Notice -- X-line Rejecting [This is NastyBot v1.2] [Banhammer], user bobbins!bobbins@127.0.0.1 [127.0.0.1]',
+'*** Notice -- OperServ!OperServ@listen.server.irc has removed the X-Line for: [*NastyBot*]',
+'*** Notice -- Client connecting: bobbins (~bobbins@listen.server.irc) [127.0.0.1] {users} [This is NastyBot v1.2] <1FUAAAAAB>',
+'*** Notice -- Client exiting: bobbins (~bobbins@listen.server.irc) [127.0.0.1] [Client Quit]',
+);
+
 my $pocosi = POE::Component::Server::IRC->spawn(
     auth         => 0,
     antiflood    => 0,
@@ -23,6 +32,7 @@ POE::Session->create(
             ircd_daemon_nick
             ircd_daemon_xline
             ircd_daemon_unxline
+            ircd_daemon_snotice
             client_connected
             client_input
             client_disconnected
@@ -81,6 +91,13 @@ sub ircd_listener_add {
             umode => 'o',
         },
     );
+    return;
+}
+
+sub ircd_daemon_snotice {
+    my ($heap,$notice) = @_[HEAP,ARG0];
+    my $should = shift @notices;
+    is($notice,$should,'Server NOTICE is correct');
     return;
 }
 

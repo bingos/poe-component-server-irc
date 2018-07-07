@@ -32,7 +32,6 @@ POE::Session->create(
             _launch_client
             _launch_client2
             _launch_client3
-            _launch_client4
             _clients_quit
             ircd_listener_add
             ircd_daemon_eob
@@ -51,9 +50,6 @@ POE::Session->create(
             client3_connected
             client3_input
             client3_disconnected
-            client4_connected
-            client4_input
-            client4_disconnected
         )],
         'main' => {
             groucho_registered => 'testc_registered',
@@ -61,7 +57,6 @@ POE::Session->create(
             client_registered  => 'testc_registered',
             client2_registered  => 'testc_registered',
             client3_registered  => 'testc_registered',
-            client4_registered  => 'testc_registered',
         },
     ],
     heap => {
@@ -111,7 +106,7 @@ sub ircd_listener_add {
         {
             username => 'moo',
             password => '$2a$06$Z.NhM/6/Upqfn2WcECk0Y./rpDmNLD2nUeETfKUPWSGNoNtQq9BVO',
-            umode    => 'ay',
+            umode    => 'aecy',
         }
     );
     $heap->{ircd}->add_service('fake.server.irc');
@@ -154,16 +149,6 @@ sub _launch_client3 {
   return;
 }
 
-sub _launch_client4 {
-  my ($kernel,$heap) = @_[KERNEL,HEAP];
-  my $filter = POE::Filter::Stackable->new();
-  $filter->push( POE::Filter::Line->new( InputRegexp => '\015?\012', OutputLiteral => "\015\012" ),
-             POE::Filter::IRCD->new( debug => 0 ), );
-  my $tag = 'client4';
-  $heap->{client} = Test::POE::Client::TCP->spawn( alias => $tag, filter => $filter, address => '127.0.0.1', port => $heap->{port}, prefix => $tag );
-  return;
-}
-
 sub testc_registered {
   my ($kernel,$sender) = @_[KERNEL,SENDER];
   pass($_[STATE]);
@@ -195,14 +180,6 @@ sub client3_connected {
   return;
 }
 
-sub client4_connected {
-  my ($kernel,$heap,$sender) = @_[KERNEL,HEAP,SENDER];
-  pass($_[STATE]);
-  #$poe_kernel->post( 'client', 'send_to_server', { command => 'TRACE' } );
-  $poe_kernel->post( 'groucho', 'send_to_server', { prefix => '7UPAAAAAA', command => 'TRACE', params => [ '9T9' ] } );
-  return;
-}
-
 sub groucho_connected {
   my ($kernel,$heap,$sender) = @_[KERNEL,HEAP,SENDER];
   pass($_[STATE]);
@@ -214,6 +191,7 @@ sub groucho_connected {
   $kernel->post( $sender, 'send_to_server', { prefix => '7UP', command => 'SID', params => [ 'fake.server.irc', 2, '4AK', 'This is a fake server' ] } );
   $kernel->post( $sender, 'send_to_server', { prefix => '7UP', command => 'UID', params => [ 'groucho', '1', $uidts, '+aiow', 'groucho', 'groucho.marx', '0', '7UPAAAAAA', '0', 'Groucho Marx' ], colonify => 1 } );
   $kernel->post( $sender, 'send_to_server', { prefix => '4AK', command => 'UID', params => [ 'NickServ', '2', ($uidts - 50), '+iow', 'nickserv', 'nickserv.server.irc', '0', '4AKAAAAAA', '0', 'NickServ' ], colonify => 1 } );
+  $kernel->post( $sender, 'send_to_server', { prefix => '7UP', command => 'SJOIN', params => [ ( $uidts - 40 ), '#floobar', '+nt', '@4AKAAAAAA' ], colonify => 1 } );
   $kernel->post( $sender, 'send_to_server', { command => 'EOB', prefix => '7UP' } );
   $kernel->post( $sender, 'send_to_server', { command => 'EOB', prefix => '4AK' } );
   $kernel->post( $sender, 'send_to_server', { command => 'PING', params => [ '7UP' ], colonify => 1 } );
@@ -248,19 +226,24 @@ sub client_input {
   }
   if ( $cmd eq '381' ) {
     pass("IRC$cmd");
+    $poe_kernel->post( $sender, 'send_to_server', { command => 'JOIN', params => [ '#floobar' ], colonify => 0 } );
+    $poe_kernel->yield('_launch_client2');
+    return;
+  }
+  if ( $cmd eq '366' ) {
+    pass("IRC$cmd");
     return;
   }
   if ( $cmd eq 'MODE' && $params->[0] !~ m!^#! ) {
     pass($cmd);
-    is($params->[1],'+aoy','Correct OPER umodes set');
-    $poe_kernel->yield('_launch_client2');
+    is($params->[1],'+aceoy','Correct OPER umodes set');
     return;
   }
-  if ( $cmd eq 'NOTICE' ) {
+  # :NickServ!nickserv@nickserv.server.irc QUIT :groucho.server.irc fake.server.irc
+  if ( $cmd eq 'QUIT' ) {
     pass($cmd);
-    is($params->[0],'*','To all OPERS');
-    is($params->[1],'*** Notice -- TRACE requested by groucho (groucho@groucho.marx) [groucho.server.irc]',
-      '*** Notice -- TRACE requested by groucho (groucho@groucho.marx) [groucho.server.irc]');
+    is($prefix,'NickServ!nickserv@nickserv.server.irc','NickServ has gone');
+    is($params->[0],'groucho.server.irc fake.server.irc','groucho.server.irc fake.server.irc');
     return;
   }
   return;
@@ -274,7 +257,18 @@ sub client2_input {
   my $params = $in->{params};
   if ( $cmd eq 'MODE' && $prefix =~ m'^rubbarb' && $params->[1] eq '+i' ) {
     pass($cmd);
+    $poe_kernel->post( $sender, 'send_to_server', { command => 'JOIN', params => [ '#floobar' ], colonify => 0 } );
+    return;
+  }
+  if ( $cmd eq '366' ) {
+    pass("IRC$cmd");
     $poe_kernel->yield('_launch_client3');
+    return;
+  }
+  if ( $cmd eq 'QUIT' ) {
+    pass($cmd);
+    is($prefix,'NickServ!nickserv@nickserv.server.irc','NickServ has gone');
+    is($params->[0],'groucho.server.irc fake.server.irc','groucho.server.irc fake.server.irc');
     return;
   }
   return;
@@ -288,18 +282,21 @@ sub client3_input {
   my $params = $in->{params};
   if ( $cmd eq 'MODE' && $prefix =~ m'^custard' && $params->[1] eq '+i' ) {
     pass($cmd);
-    $poe_kernel->yield('_launch_client4');
+    $poe_kernel->post( $sender, 'send_to_server', { command => 'JOIN', params => [ '#floobar' ], colonify => 0 } );
     return;
   }
-  return;
-}
-
-sub client4_input {
-  my ($heap,$sender,$in) = @_[HEAP,SENDER,ARG0];
-  #diag($in->{raw_line}, "\n");
-  my $prefix = $in->{prefix};
-  my $cmd    = $in->{command};
-  my $params = $in->{params};
+  if ( $cmd eq '366' ) {
+    pass("IRC$cmd");
+    $poe_kernel->post('groucho', 'send_to_server', { command => 'SQUIT', params => [ '4AK', 'Remote host closed the connection' ], colonify => 1 } );
+    return;
+  }
+  if ( $cmd eq 'QUIT' ) {
+    pass($cmd);
+    is($prefix,'NickServ!nickserv@nickserv.server.irc','NickServ has gone');
+    is($params->[0],'groucho.server.irc fake.server.irc','groucho.server.irc fake.server.irc');
+    $poe_kernel->delay('_clients_quit',3);
+    return;
+  }
   return;
 }
 
@@ -322,50 +319,6 @@ sub groucho_input {
     $poe_kernel->post( $sender, 'terminate' );
     return;
   }
-  if ( $cmd eq '200' ) {
-    pass("IRC$cmd");
-    is($in->{raw_line},':1FU 200 7UPAAAAAA Link POE::Component::Server::IRC-dev-git harpo.server.irc :harpo.server.irc',
-      'Link message okay' );
-    return;
-  }
-  if ( $cmd eq '205' ) {
-    pass("IRC$cmd");
-    $heap->{$cmd}++;
-    return;
-  }
-  if ( $cmd eq '204' ) {
-    pass("IRC$cmd");
-    $heap->{$cmd}++;
-    return;
-  }
-  if ( $cmd eq '206' ) {
-    pass("IRC$cmd");
-    $heap->{$cmd}++;
-    return;
-  }
-  if ( $cmd eq '203' ) {
-    pass("IRC$cmd");
-    $heap->{$cmd}++;
-    return;
-  }
-  if ( $cmd eq '209' ) {
-    pass("IRC$cmd");
-    $heap->{$cmd}++;
-    return;
-  }
-  if ( $cmd eq '262' ) {
-    pass("IRC$cmd");
-    is($params->[0],'7UPAAAAAA','Got the UID right');
-    is($params->[1],'listen.server.irc','listen.server.irc');
-    is($params->[2],'End of TRACE','End of TRACE');
-    is($heap->{205},2,'Correct number of USERS');
-    is($heap->{204},1,'Correct number of OPERS');
-    is($heap->{206},2,'Correct number of SERVERS');
-    is($heap->{203},1,'Correct number of UNKNOWN');
-    is($heap->{209},3,'Correct number of STATS');
-    $poe_kernel->yield('_clients_quit');
-    return;
-  }
   return;
 }
 
@@ -375,13 +328,6 @@ sub harpo_input {
   my $prefix = $in->{prefix};
   my $cmd    = $in->{command};
   my $params = $in->{params};
-  if ( $cmd eq 'TRACE' ) {
-    pass($cmd);
-    is($prefix,'7UPAAAAAA','7UPAAAAAA');
-    is($params->[0],'9T9','Harpo requested');
-    $poe_kernel->post( 'groucho', 'send_to_server', { prefix => '7UPAAAAAA', command => 'TRACE', params => [ '1FU' ] } );
-    return;
-  }
   return;
 }
 

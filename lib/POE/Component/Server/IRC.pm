@@ -18,6 +18,7 @@ my $sid_re  = qr/^[0-9][A-Z0-9][A-Z0-9]$/;
 my $id_re   = qr/^[A-Z][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9]$/;
 my $uid_re  = qr/^[0-9][A-Z0-9][A-Z0-9][A-Z][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9]$/;
 my $host_re = qr/^[^.:][A-Za-z0-9.:-]+$/;
+my $user_re = qr/^[^\x2D][\x24\x2D-\x39\x41-\x7E]+$/;
 
 sub spawn {
     my ($package, %args) = @_;
@@ -254,6 +255,15 @@ sub _client_register {
     return if !$auth;
     # pass required for link
     if (!$self->_state_auth_client_conn($conn_id)) {
+        my $crec = $self->{state}{conns}{$conn_id};
+        $self->_send_to_realops(
+            sprintf(
+                'Unauthorized client connection from %s!%s@%s on [%s/%u].',
+                $crec->{nick}, $crec->{user}, $crec->{socket}[0],
+                $crec->{socket}[2], $crec->{socket}[3],
+            ),
+            'Notice', 'u',
+        );
         $self->_terminate_conn_error(
             $conn_id,
             'You are not authorized to use this server',
@@ -261,6 +271,18 @@ sub _client_register {
         return;
     }
     if (my $reason = $self->_state_user_matches_xline($conn_id)) {
+        my $crec = $self->{state}{conns}{$conn_id};
+        $self->_send_to_realops(
+            sprintf(
+                'X-line Rejecting [%s] [%s], user %s!%s@%s [%s]',
+                $crec->{ircname}, $reason,
+                $crec->{nick}, $crec->{user},
+                ( $crec->{auth}{hostname} || $crec->{socket}[0] ),
+                $crec->{socket}[0],
+            ),
+            'Notice',
+            'j',
+        );
         $self->_send_output_to_client( $conn_id, '465' );
         $self->_terminate_conn_error($conn_id, "X-Lined: [$reason]");
         return;
@@ -273,6 +295,27 @@ sub _client_register {
     if (my $reason = $self->_state_user_matches_rkline($conn_id)) {
         $self->_send_output_to_client( $conn_id, '465' );
         $self->_terminate_conn_error($conn_id, "K-Lined: [$reason]");
+        return;
+    }
+
+    if ( !$self->{state}{conns}{$conn_id}{auth}{ident} &&
+         $self->{state}{conns}{$conn_id}{user} !~ $user_re ) {
+        my $crec = $self->{state}{conns}{$conn_id};
+        $self->_send_to_realops(
+            sprintf(
+                'Invalid username: %s (%s@%s)',
+                $crec->{nick}, $crec->{user},
+                ( $crec->{auth}{hostname} || $crec->{socket}[0] ),
+            ),
+            'Notice',
+            'j',
+        );
+        $self->_terminate_conn_error(
+            $conn_id,
+            sprintf(
+                'Invalid username [%s]', $crec->{user},
+            ),
+        );
         return;
     }
 
@@ -728,6 +771,7 @@ sub _cmd_from_client {
     SWITCH: {
         my $method = '_daemon_cmd_' . lc $cmd;
         if ($cmd eq 'QUIT') {
+            delete $self->{state}{localops}{ $wheel_id };
             $self->_terminate_conn_error(
                 $wheel_id,
                 ($pcount ? qq{Quit: "$params->[0]"} : 'Client Quit'),
@@ -1996,7 +2040,7 @@ sub _daemon_cmd_locops {
             last SWITCH;
         }
         my $full = $self->state_user_full($nick,1);
-        $self->_send_to_realops( "from $full: " . $args->[0], 'locops' );
+        $self->_send_to_realops( "from $nick: " . $args->[0], 'locops', 'l' );
         $self->send_event("daemon_locops", $full, $args->[0]);
     }
 
@@ -2069,28 +2113,24 @@ sub _daemon_cmd_globops {
             last SWITCH;
         }
 
-        my $full = $self->state_user_full($nick,1);
-        my $msg  = "*** Global -- from $full: " . $args->[0];
-
         $self->send_output(
             {
-                prefix  => $sid,
+                prefix  => $self->state_user_uid($nick),
                 command => 'GLOBOPS',
-                params  => [ $msg ],
+                params  => [ $args->[0] ],
             },
             $self->_state_connected_peers(),
         );
 
-        $self->send_output(
-            {
-                prefix  => $server,
-                command => 'GLOBOPS',
-                params  => [ $msg ],
-            },
-            keys %{ $self->{state}{wallops} },
+        my $msg  = "from $nick: " . $args->[0];
+
+        $self->_send_to_realops(
+            $msg,
+            'Globops',
+            's',
         );
 
-        $self->send_event("daemon_globops", $full, $args->[0]);
+        $self->send_event("daemon_globops", $nick, $args->[0]);
     }
     return @$ref if wantarray;
     return $ref;
@@ -2289,7 +2329,7 @@ sub _daemon_cmd_rkline {
                 params  => [ $nick, $reply_notice ],
             };
 
-            $self->_send_to_realops( $locop_notice );
+            $self->_send_to_realops( $locop_notice, 'Notice', 's' );
 
             $self->_state_do_local_users_match_rkline($user, $host, $reason);
         }
@@ -2340,7 +2380,7 @@ sub _daemon_cmd_unrkline {
             params  => [ $nick, "RK-Line for [$user\@$host] is removed" ],
         };
 
-        $self->_send_to_realops( "$full has removed the RK-Line for: [$user\@$host]" );
+        $self->_send_to_realops( "$full has removed the RK-Line for: [$user\@$host]", 'Notice', 's' );
     }
 
     return @$ref if wantarray;
@@ -2463,7 +2503,7 @@ sub _daemon_cmd_kline {
                 params  => [ $nick, $reply_notice ],
             };
 
-            $self->_send_to_realops( $locop_notice );
+            $self->_send_to_realops( $locop_notice, 'Notice', 's' );
 
             $self->_state_do_local_users_match_kline($user, $host, $reason);
         }
@@ -2561,7 +2601,7 @@ sub _daemon_cmd_unkline {
             params  => [ $nick, "K-Line for [$user\@$host] is removed" ],
         };
 
-        $self->_send_to_realops( "$full has removed the K-Line for: [$user\@$host]" );
+        $self->_send_to_realops( "$full has removed the K-Line for: [$user\@$host]", 'Notice', 's' );
     }
 
     return @$ref if wantarray;
@@ -2674,7 +2714,7 @@ sub _daemon_cmd_resv {
             params  => [ $nick, $reply_notice ],
         };
 
-        $self->_send_to_realops( $locop_notice );
+        $self->_send_to_realops( $locop_notice, 'Notice', 's' );
 
     }
 
@@ -2760,7 +2800,7 @@ sub _daemon_cmd_unresv {
             params  => [ $nick, "RESV for [$unmask] is removed" ],
         };
 
-        $self->_send_to_realops( "$full has removed the RESV for: [$unmask]" );
+        $self->_send_to_realops( "$full has removed the RESV for: [$unmask]", 'Notice', 's' );
     }
 
     return @$ref if wantarray;
@@ -2864,7 +2904,7 @@ sub _daemon_cmd_xline {
             params  => [ $nick, $reply_notice ],
         };
 
-        $self->_send_to_realops( $locop_notice );
+        $self->_send_to_realops( $locop_notice, 'Notice', 's' );
 
         $self->_state_do_local_users_match_xline($mask,$reason);
     }
@@ -2951,7 +2991,7 @@ sub _daemon_cmd_unxline {
             params  => [ $nick, "X-Line for [$unmask] is removed" ],
         };
 
-        $self->_send_to_realops( "$full has removed the X-Line for: [$unmask]" );
+        $self->_send_to_realops( "$full has removed the X-Line for: [$unmask]", 'Notice', 's' );
     }
 
     return @$ref if wantarray;
@@ -3085,7 +3125,7 @@ sub _daemon_cmd_dline {
             params  => [ $nick, $reply_notice ],
         };
 
-        $self->_send_to_realops( $locop_notice );
+        $self->_send_to_realops( $locop_notice, 'Notice', 's' );
 
         $self->_state_do_local_users_match_dline($netmask,$reason);
     }
@@ -3174,18 +3214,11 @@ sub _daemon_cmd_undline {
             params  => [ $nick, "D-Line for [$unmask] is removed" ],
         };
 
-        $self->send_output(
-            {
-                prefix  => $server,
-                command => 'NOTICE',
-                params  => [
-                    '*',
-                    "*** Notice -- $full has removed the D-Line for: [$unmask]",
-                ],
-            },
-            keys %{ $self->{state}{locops} },
+        $self->_send_to_realops(
+            "$full has removed the D-Line for: [$unmask]",
+            'Notice',
+            's',
         );
-
     }
 
     return @$ref if wantarray;
@@ -3845,6 +3878,15 @@ sub _daemon_cmd_nick {
             last SWITCH;
         }
         if ( my $reason = $self->_state_is_resv( $new ) ) {
+            $self->_send_to_realops(
+                sprintf(
+                    'Forbidding reserved nick %s from user %s',
+                    $new,
+                    $self->state_user_full($nick),
+                ),
+                'Notice',
+                'j',
+            );
             push @$ref, {
                prefix  => $self->server_name(),
                command => '432',
@@ -3962,6 +4004,15 @@ sub _daemon_cmd_nick {
                 );
             }
         }
+
+        $self->_send_to_realops(
+            sprintf(
+                'Nick change: From %s to %s [%s]',
+                $nick, $new, (split /!/, $full)[1],
+            ),
+            'Notice',
+            'n',
+        );
 
         $self->send_output(
             {
@@ -5869,6 +5920,15 @@ sub _daemon_cmd_join {
             # Channel is RESV
             if (my $reason = $self->_state_is_resv($channel)) {
                 if ( !$nick_is_oper ) {
+                    $self->_send_to_realops(
+                        sprintf(
+                            'Forbidding reserved channel %s from user %s',
+                            $channel,
+                            $self->state_user_full($nick),
+                        ),
+                        'Notice',
+                        'j',
+                    );
                     $self->_send_output_to_client(
                         $route_id,
                         '485',
@@ -6550,13 +6610,22 @@ sub _daemon_cmd_map {
     my $ref    = [ ];
 
     SWITCH: {
-        my $lastuse = $self->{state}{lastuse}{map};
-        my $pacewait = $self->{config}{pace_wait};
-        if ( $lastuse && $pacewait && ( $lastuse + $pacewait ) > time() ) {
-            push @$ref, ['263', 'MAP'];
-            last SWITCH;
+        if (!$self->state_user_is_operator($nick)) {
+            my $lastuse = $self->{state}{lastuse}{map};
+            my $pacewait = $self->{config}{pace_wait};
+            if ( $lastuse && $pacewait && ( $lastuse + $pacewait ) > time() ) {
+                push @$ref, ['263', 'MAP'];
+                last SWITCH;
+            }
+            $self->{state}{lastuse}{map} = time();
         }
-        $self->{state}{lastuse}{map} = time();
+
+        my $full = $self->state_user_full($nick);
+        my $msg = sprintf('MAP requested by %s (%s) [%s]',
+            $nick, (split /!/,$full)[1], $server,
+        );
+
+        $self->_send_to_realops( $msg, 'Notice', 'y' );
 
         push @$ref, $_ for
             $self->_state_do_map( $nick, $sid, 0 );
@@ -6827,6 +6896,13 @@ sub _daemon_peer_squit {
             my $quit_msg = join ' ',
                 $self->{state}{sids}{$qsid}{peer}, $qpeer;
 
+            $self->_send_to_realops(
+                sprintf(
+                    'Server %s split from %s',
+                    $qpeer, $self->{state}{sids}{$qsid}{peer},
+                ),
+                'Notice', 'e',
+            );
             for my $uid ($self->_state_server_squit($qsid)) {
                 my $output = {
                     prefix  => $self->state_user_full($uid),
@@ -6978,7 +7054,7 @@ sub _daemon_peer_resv {
             params  => [ $uid, $reply_notice ],
         };
 
-        $self->_send_to_realops( $locop_notice );
+        $self->_send_to_realops( $locop_notice, 'Notice', 's' );
     }
 
     return @$ref if wantarray;
@@ -7053,7 +7129,7 @@ sub _daemon_peer_unresv {
             params  => [ $uid, "RESV for [$unmask] is removed" ],
         };
 
-        $self->_send_to_realops( "$full has removed the RESV for: [$unmask]" );
+        $self->_send_to_realops( "$full has removed the RESV for: [$unmask]", 'Notice', 's' );
 
     }
 
@@ -7138,7 +7214,7 @@ sub _daemon_peer_xline {
             params  => [ $uid, $reply_notice ],
         };
 
-        $self->_send_to_realops( $locop_notice );
+        $self->_send_to_realops( $locop_notice, 'Notice', 's' );
 
         $self->_state_do_local_users_match_xline($mask,$reason);
     }
@@ -7215,7 +7291,7 @@ sub _daemon_peer_unxline {
             params  => [ $uid, "X-Line for [$unmask] is removed" ],
         };
 
-        $self->_send_to_realops( "$full has removed the X-Line for: [$unmask]" );
+        $self->_send_to_realops( "$full has removed the X-Line for: [$unmask]", 'Notice', 's' );
 
     }
 
@@ -7304,7 +7380,7 @@ sub _daemon_peer_dline {
             params  => [ $uid, $reply_notice ],
         };
 
-        $self->_send_to_realops( $locop_notice );
+        $self->_send_to_realops( $locop_notice, 'Notice', 's' );
 
         $self->_state_do_local_users_match_dline($netmask,$reason);
     }
@@ -7383,7 +7459,7 @@ sub _daemon_peer_undline {
             params  => [ $uid, "D-Line for [$unmask] is removed" ],
         };
 
-        $self->_send_to_realops( "$full has removed the D-Line for: [$unmask]" );
+        $self->_send_to_realops( "$full has removed the D-Line for: [$unmask]", 'Notice', 's' );
 
     }
 
@@ -7506,7 +7582,7 @@ sub _daemon_peer_kline {
             params  => [ $uid, $reply_notice ],
         };
 
-        $self->_send_to_realops( $locop_notice );
+        $self->_send_to_realops( $locop_notice, 'Notice', 's' );
 
         $self->_state_do_local_users_match_kline($args->[2], $args->[3], $args->[4]);
     }
@@ -7577,7 +7653,7 @@ sub _daemon_peer_unkline {
             params  => [ $uid, "K-Line for [$unmask] is removed" ],
         };
 
-        $self->_send_to_realops( "$full has removed the K-Line for: [$unmask]" );
+        $self->_send_to_realops( "$full has removed the K-Line for: [$unmask]", 'Notice', 's' );
     }
 
     return @$ref if wantarray;
@@ -7640,17 +7716,15 @@ sub _daemon_peer_globops {
         );
         # Prefix can either be SID or UID
         my $full = $self->_state_sid_name( $prefix );
-        $full = $self->state_user_full( $prefix ) if !$full;
+        $full = $self->state_user_nick( $prefix ) if !$full;
 
-        $self->send_output(
-            {
-                prefix  => $full,
-                command => 'GLOBOPS',
-                params  => [$args->[0]],
-            },
-            keys %{ $self->{state}{wallops} },
-         );
-         $self->send_event("daemon_globops", $full, $args->[0]);
+        my $msg  = "from $full: " . $args->[0];
+
+        $self->_send_to_realops(
+            $msg, 'globops', 's',
+        );
+
+        $self->send_event("daemon_globops", $full, $args->[0]);
     }
 
     return @$ref if wantarray;
@@ -7939,6 +8013,14 @@ sub _daemon_peer_sid {
             },
             grep { $_ ne $peer_id } $self->_state_connected_peers(),
         );
+        $self->_send_to_realops(
+            sprintf(
+                'Server %s being introduced by %s',
+                $record->{name}, $record->{peer},
+            ),
+            'Notice',
+            'e',
+        );
         $self->send_event(
             'daemon_sid',
             $record->{name},
@@ -7989,6 +8071,15 @@ sub _daemon_peer_quit {
         command => 'QUIT',
         params  => [$qmsg],
     };
+
+    $self->_send_to_realops(
+        sprintf(
+            'Client exiting at %s: %s (%s@%s) [%s] [%s]',
+            $record->{server}, $record->{nick}, $record->{auth}{ident},
+            $record->{auth}{realhost}, $record->{ipaddress}, $qmsg,
+        ),
+        'Notice', 'F',
+    );
 
     $self->send_event("daemon_quit", $full, $qmsg);
 
@@ -8206,6 +8297,15 @@ sub _daemon_peer_uid {
              grep { $_ ne $peer_id } $self->_state_connected_peers(),
         );
 
+        $self->_send_to_realops(
+             sprintf(
+                 'Client connecting at %s: %s (%s@%s) [%s] [%s] <%s>',
+                 $record->{server}, $record->{nick}, $record->{auth}{ident},
+                 $record->{auth}{realhost}, $record->{ipaddress},
+                 $record->{ircname}, $record->{uid},
+             ),
+             'Notice', 'F',
+        );
 
         $self->send_event('daemon_uid', $prefix, @$args);
         $self->send_event('daemon_nick', @{ $args }[0..5], $record->{server}, ( $args->[9] || '' ) );
@@ -8381,6 +8481,17 @@ sub _daemon_peer_nick {
                 next if $user !~ m!^$mysid!;
                 $common->{$user} = $self->_state_uid_route($user);
             }
+        }
+        {
+            my ($nick,$userhost) = split /!/, $full;
+            $self->_send_to_realops(
+                sprintf(
+                    'Nick change: From %s to %s [%s]',
+                    $nick, $new, $userhost,
+                ),
+                'Notice',
+                'n',
+            );
         }
         $self->send_output(
              {
@@ -10476,6 +10587,15 @@ sub _daemon_peer_svsnick {
             }
         }
 
+        $self->_send_to_realops(
+            sprintf(
+                'Nick change: From %s to %s [%s]',
+                $nick, $newnick, (split /!/,$full)[1],
+            ),
+            'Notice',
+            'n',
+        );
+
         $self->send_output(
             {
                 prefix  => $rec->{uid},
@@ -10907,7 +11027,7 @@ sub _state_del_drkx_line {
       my $locops = sprintf 'Temporary %s for [%s] expired', $fancy, $mask;
       $self->del_denial( $res->{mask} ) if $type eq 'dlines';
       $self->send_event( "daemon_expired", lc($fancy), $mask );
-      $self->_send_to_realops( $locops );
+      $self->_send_to_realops( $locops, 'Notice', 's' );
       return;
   }
 
@@ -11932,6 +12052,16 @@ sub _state_register_client {
         }
     }
 
+    $self->_send_to_realops(
+        sprintf(
+            'Client connecting: %s (%s@%s) [%s] {%s} [%s] <%s>',
+            @{ $rhostref }[0,4,6], $record->{socket}[0],
+            'users', $record->{ircname}, $record->{uid},
+        ),
+        'Notice',
+        'c',
+    );
+
     $self->send_event('daemon_uid', @$arrayref);
     $self->send_event('daemon_nick', @{ $arrayref }[0..5], $record->{server}, ( $arrayref->[9] || '' ) );
     $self->_state_update_stats();
@@ -12803,9 +12933,9 @@ sub _send_to_realops {
     $flags =~ s/[^a-zA-Z]+//g if $flags;
 
     my %types = (
-      NOTICE => 'Notice',
+      NOTICE  => 'Notice',
       LOCOPS  => 'LocOps',
-      GLOBOPS => 'Globops',
+      GLOBOPS => 'Global',
     );
 
     my $notice =
@@ -12820,6 +12950,8 @@ sub _send_to_realops {
     else {
       @locops = keys %{ $self->{state}{localops} };
     }
+
+    $self->send_event( 'daemon_snotice', $notice );
 
     $self->send_output(
          {
@@ -13155,6 +13287,21 @@ sub _terminate_conn_error {
 
     $self->disconnect($conn_id, $msg);
     $self->{state}{conns}{$conn_id}{terminated} = 1;
+    if ( $self->{state}{conns}{$conn_id}{type} eq 'c' ) {
+        my $conn = $self->{state}{conns}{$conn_id};
+        $self->_send_to_realops(
+            sprintf(
+                'Client exiting: %s (%s@%s) [%s] [%s]',
+                $conn->{nick},
+                $conn->{auth}{ident},
+                $conn->{auth}{realhost},
+                $conn->{socket}[0],
+                $msg,
+            ),
+            'Notice',
+            'c',
+        );
+    }
     $self->send_output(
         {
             command => 'ERROR',
@@ -13693,6 +13840,10 @@ sub add_spoofed_nick {
 
     $self->send_event('daemon_uid', @$arrayref);
     $self->send_event('daemon_nick', @{ $arrayref }[0..5], $record->{server}, ( $arrayref->[9] || '' ) );
+    if ( $record->{umode} =~ /o/ ) {
+        my $notice = sprintf("%s{%s} is now an operator",$record->{full}->(),$record->{nick});
+        $self->_send_to_realops($notice);
+    }
     $self->_state_update_stats();
     return;
 }
@@ -14713,6 +14864,22 @@ the channel)
 =item * C<ARG1>, the spoofed nick targeted or channel spoofed nick is in;
 
 =item * C<ARG2>, the message;
+
+=back
+
+=head2 C<ircd_daemon_snotice>
+
+=over
+
+=item Emitted: when the server issues a notice for various reasons
+
+=item Target: all plugins and registered sessions;
+
+=item Args:
+
+=over 4
+
+=item * C<ARG0>, the message;
 
 =back
 

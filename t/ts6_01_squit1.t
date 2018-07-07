@@ -30,9 +30,6 @@ POE::Session->create(
             _start
             _shutdown
             _launch_client
-            _launch_client2
-            _launch_client3
-            _launch_client4
             _clients_quit
             ircd_listener_add
             ircd_daemon_eob
@@ -45,23 +42,11 @@ POE::Session->create(
             client_connected
             client_input
             client_disconnected
-            client2_connected
-            client2_input
-            client2_disconnected
-            client3_connected
-            client3_input
-            client3_disconnected
-            client4_connected
-            client4_input
-            client4_disconnected
         )],
         'main' => {
             groucho_registered => 'testc_registered',
             harpo_registered   => 'testc_registered',
             client_registered  => 'testc_registered',
-            client2_registered  => 'testc_registered',
-            client3_registered  => 'testc_registered',
-            client4_registered  => 'testc_registered',
         },
     ],
     heap => {
@@ -111,7 +96,7 @@ sub ircd_listener_add {
         {
             username => 'moo',
             password => '$2a$06$Z.NhM/6/Upqfn2WcECk0Y./rpDmNLD2nUeETfKUPWSGNoNtQq9BVO',
-            umode    => 'ay',
+            umode    => 'aecy',
         }
     );
     $heap->{ircd}->add_service('fake.server.irc');
@@ -134,36 +119,6 @@ sub _launch_client {
   return;
 }
 
-sub _launch_client2 {
-  my ($kernel,$heap) = @_[KERNEL,HEAP];
-  my $filter = POE::Filter::Stackable->new();
-  $filter->push( POE::Filter::Line->new( InputRegexp => '\015?\012', OutputLiteral => "\015\012" ),
-             POE::Filter::IRCD->new( debug => 0 ), );
-  my $tag = 'client2';
-  $heap->{client} = Test::POE::Client::TCP->spawn( alias => $tag, filter => $filter, address => '127.0.0.1', port => $heap->{port}, prefix => $tag );
-  return;
-}
-
-sub _launch_client3 {
-  my ($kernel,$heap) = @_[KERNEL,HEAP];
-  my $filter = POE::Filter::Stackable->new();
-  $filter->push( POE::Filter::Line->new( InputRegexp => '\015?\012', OutputLiteral => "\015\012" ),
-             POE::Filter::IRCD->new( debug => 0 ), );
-  my $tag = 'client3';
-  $heap->{client} = Test::POE::Client::TCP->spawn( alias => $tag, filter => $filter, address => '127.0.0.1', port => $heap->{port}, prefix => $tag );
-  return;
-}
-
-sub _launch_client4 {
-  my ($kernel,$heap) = @_[KERNEL,HEAP];
-  my $filter = POE::Filter::Stackable->new();
-  $filter->push( POE::Filter::Line->new( InputRegexp => '\015?\012', OutputLiteral => "\015\012" ),
-             POE::Filter::IRCD->new( debug => 0 ), );
-  my $tag = 'client4';
-  $heap->{client} = Test::POE::Client::TCP->spawn( alias => $tag, filter => $filter, address => '127.0.0.1', port => $heap->{port}, prefix => $tag );
-  return;
-}
-
 sub testc_registered {
   my ($kernel,$sender) = @_[KERNEL,SENDER];
   pass($_[STATE]);
@@ -176,30 +131,6 @@ sub client_connected {
   pass($_[STATE]);
   $kernel->post( $sender, 'send_to_server', { command => 'NICK', params => [ 'bobbins' ], colonify => 0 } );
   $kernel->post( $sender, 'send_to_server', { command => 'USER', params => [ 'bobbins', '*', '*', 'bobbins along' ], colonify => 1 } );
-  return;
-}
-
-sub client2_connected {
-  my ($kernel,$heap,$sender) = @_[KERNEL,HEAP,SENDER];
-  pass($_[STATE]);
-  $kernel->post( $sender, 'send_to_server', { command => 'NICK', params => [ 'rubbarb' ], colonify => 0 } );
-  $kernel->post( $sender, 'send_to_server', { command => 'USER', params => [ 'rubbarb', '*', '*', 'rubbarb rubbarb' ], colonify => 1 } );
-  return;
-}
-
-sub client3_connected {
-  my ($kernel,$heap,$sender) = @_[KERNEL,HEAP,SENDER];
-  pass($_[STATE]);
-  $kernel->post( $sender, 'send_to_server', { command => 'NICK', params => [ 'custard' ], colonify => 0 } );
-  $kernel->post( $sender, 'send_to_server', { command => 'USER', params => [ 'custard', '*', '*', 'custard cream' ], colonify => 1 } );
-  return;
-}
-
-sub client4_connected {
-  my ($kernel,$heap,$sender) = @_[KERNEL,HEAP,SENDER];
-  pass($_[STATE]);
-  #$poe_kernel->post( 'client', 'send_to_server', { command => 'TRACE' } );
-  $poe_kernel->post( 'groucho', 'send_to_server', { prefix => '7UPAAAAAA', command => 'TRACE', params => [ '9T9' ] } );
   return;
 }
 
@@ -252,60 +183,24 @@ sub client_input {
   }
   if ( $cmd eq 'MODE' && $params->[0] !~ m!^#! ) {
     pass($cmd);
-    is($params->[1],'+aoy','Correct OPER umodes set');
-    $poe_kernel->yield('_launch_client2');
+    is($params->[1],'+aceoy','Correct OPER umodes set');
+    $poe_kernel->post('harpo','terminate');
     return;
   }
   if ( $cmd eq 'NOTICE' ) {
     pass($cmd);
-    is($params->[0],'*','To all OPERS');
-    is($params->[1],'*** Notice -- TRACE requested by groucho (groucho@groucho.marx) [groucho.server.irc]',
-      '*** Notice -- TRACE requested by groucho (groucho@groucho.marx) [groucho.server.irc]');
+    is($in->{raw_line},':listen.server.irc NOTICE * :*** Notice -- Server harpo.server.irc split from listen.server.irc',
+      ':listen.server.irc NOTICE * :*** Notice -- Server harpo.server.irc split from listen.server.irc');
+    $poe_kernel->state('client_input');
+    $poe_kernel->yield('_clients_quit');
     return;
   }
-  return;
-}
-
-sub client2_input {
-  my ($heap,$sender,$in) = @_[HEAP,SENDER,ARG0];
-  #diag($in->{raw_line}, "\n");
-  my $prefix = $in->{prefix};
-  my $cmd    = $in->{command};
-  my $params = $in->{params};
-  if ( $cmd eq 'MODE' && $prefix =~ m'^rubbarb' && $params->[1] eq '+i' ) {
-    pass($cmd);
-    $poe_kernel->yield('_launch_client3');
-    return;
-  }
-  return;
-}
-
-sub client3_input {
-  my ($heap,$sender,$in) = @_[HEAP,SENDER,ARG0];
-  #diag($in->{raw_line}, "\n");
-  my $prefix = $in->{prefix};
-  my $cmd    = $in->{command};
-  my $params = $in->{params};
-  if ( $cmd eq 'MODE' && $prefix =~ m'^custard' && $params->[1] eq '+i' ) {
-    pass($cmd);
-    $poe_kernel->yield('_launch_client4');
-    return;
-  }
-  return;
-}
-
-sub client4_input {
-  my ($heap,$sender,$in) = @_[HEAP,SENDER,ARG0];
-  #diag($in->{raw_line}, "\n");
-  my $prefix = $in->{prefix};
-  my $cmd    = $in->{command};
-  my $params = $in->{params};
   return;
 }
 
 sub _clients_quit {
     $poe_kernel->post($_, 'send_to_server', { command => 'QUIT', params => [ 'Connection reset by fear' ] } )
-      for qw[client4 client3 client2 client];
+      for qw[client];
     return;
 }
 
@@ -319,51 +214,11 @@ sub groucho_input {
     pass($cmd);
     is( $params->[0], '9T9', 'Correct SID: 9T9' );
     is( $params->[1], 'Remote host closed the connection', 'Remote host closed the connection' );
+    return;
+  }
+  if ( $cmd eq 'QUIT' ) {
+    pass($cmd);
     $poe_kernel->post( $sender, 'terminate' );
-    return;
-  }
-  if ( $cmd eq '200' ) {
-    pass("IRC$cmd");
-    is($in->{raw_line},':1FU 200 7UPAAAAAA Link POE::Component::Server::IRC-dev-git harpo.server.irc :harpo.server.irc',
-      'Link message okay' );
-    return;
-  }
-  if ( $cmd eq '205' ) {
-    pass("IRC$cmd");
-    $heap->{$cmd}++;
-    return;
-  }
-  if ( $cmd eq '204' ) {
-    pass("IRC$cmd");
-    $heap->{$cmd}++;
-    return;
-  }
-  if ( $cmd eq '206' ) {
-    pass("IRC$cmd");
-    $heap->{$cmd}++;
-    return;
-  }
-  if ( $cmd eq '203' ) {
-    pass("IRC$cmd");
-    $heap->{$cmd}++;
-    return;
-  }
-  if ( $cmd eq '209' ) {
-    pass("IRC$cmd");
-    $heap->{$cmd}++;
-    return;
-  }
-  if ( $cmd eq '262' ) {
-    pass("IRC$cmd");
-    is($params->[0],'7UPAAAAAA','Got the UID right');
-    is($params->[1],'listen.server.irc','listen.server.irc');
-    is($params->[2],'End of TRACE','End of TRACE');
-    is($heap->{205},2,'Correct number of USERS');
-    is($heap->{204},1,'Correct number of OPERS');
-    is($heap->{206},2,'Correct number of SERVERS');
-    is($heap->{203},1,'Correct number of UNKNOWN');
-    is($heap->{209},3,'Correct number of STATS');
-    $poe_kernel->yield('_clients_quit');
     return;
   }
   return;
@@ -375,13 +230,6 @@ sub harpo_input {
   my $prefix = $in->{prefix};
   my $cmd    = $in->{command};
   my $params = $in->{params};
-  if ( $cmd eq 'TRACE' ) {
-    pass($cmd);
-    is($prefix,'7UPAAAAAA','7UPAAAAAA');
-    is($params->[0],'9T9','Harpo requested');
-    $poe_kernel->post( 'groucho', 'send_to_server', { prefix => '7UPAAAAAA', command => 'TRACE', params => [ '1FU' ] } );
-    return;
-  }
   return;
 }
 
@@ -390,28 +238,6 @@ sub client_disconnected {
   pass($state);
   $poe_kernel->call( $sender, 'shutdown' );
   $poe_kernel->post( 'harpo', 'terminate' );
-  return;
-}
-
-sub client2_disconnected {
-  my ($heap,$state,$sender) = @_[HEAP,STATE,SENDER];
-  pass($state);
-  $poe_kernel->call( $sender, 'shutdown' );
-  $poe_kernel->post( 'client', 'send_to_server', { command => 'QUIT' } );
-  return;
-}
-
-sub client3_disconnected {
-  my ($heap,$state,$sender) = @_[HEAP,STATE,SENDER];
-  pass($state);
-  $poe_kernel->call( $sender, 'shutdown' );
-  return;
-}
-
-sub client4_disconnected {
-  my ($heap,$state,$sender) = @_[HEAP,STATE,SENDER];
-  pass($state);
-  $poe_kernel->call( $sender, 'shutdown' );
   return;
 }
 
@@ -428,7 +254,6 @@ sub harpo_disconnected {
   my ($heap,$state,$sender) = @_[HEAP,STATE,SENDER];
   pass($state);
   $poe_kernel->call( $sender, 'shutdown' );
-  #$poe_kernel->post( 'groucho', 'terminate' );
   return;
 }
 
