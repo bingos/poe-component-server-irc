@@ -699,8 +699,7 @@ sub _cmd_from_peer {
             last SWITCH;
         }
 
-        # TODO: SQUIT needs its own handler
-        if ($cmd =~ /^(VERSION|TIME|LINKS|ADMIN|INFO|MOTD)$/i ) {
+        if ($cmd =~ /^(VERSION|TIME|LINKS|ADMIN|INFO|MOTD|STATS)$/i ) {
             my $client_method = '_daemon_peer_miscell';
             $client_method = '_daemon_peer_links' if $cmd eq 'LINKS';
             $self->_send_output_to_client(
@@ -4561,90 +4560,371 @@ sub _daemon_cmd_stats {
             );
             last SWITCH;
         }
-
-        SWITCH2: {
-            if ($char eq 'u') {
-                my $uptime = time - $self->server_config('created');
-                my $days   = int $uptime / 86400;
-                my $remain = $uptime % 86400;
-                my $hours  = int $remain / 3600;
-                $remain   %= 3600;
-                my $mins   = int $remain / 60;
-                $remain   %= 60;
-
-                push @$ref, {
-                    prefix  => $server,
-                    command => '242',
-                    params  => [
-                        $nick,
-                        sprintf("Server Up %d days, %2.2d:%2.2d:%2.2d",
-                            $days, $hours, $mins, $remain),
-                    ],
-                };
-
-                my $totalconns = $self->{state}{stats}{conns_cumlative};
-                my $local = $self->{state}{stats}{maxlocal};
-                my $conns = $self->{state}{stats}{maxconns};
-
-                push @$ref, {
-                    prefix  => $server,
-                    command => '250',
-                    params  => [
-                        $nick,
-                        "Highest connection count: $conns ($local "
-                            ."clients) ($totalconns connections received)",
-                    ],
-                };
-                last SWITCH2;
-            }
-            if ($char eq 'm') {
-                my $cmds = $self->{state}{stats}{cmds};
-                push @$ref, {
-                    prefix  => $server,
-                    command => '212',
-                    params  => [
-                        $nick,
-                        $_,
-                        $cmds->{$_}{local},
-                        $cmds->{$_}{bytes},
-                        $cmds->{$_}{remote},
-                    ],
-                } for sort keys %$cmds;
-                last SWITCH2;
-            }
-            if ($char eq 'p') {
-                my @ops = map { $self->_client_nickname( $_ ) }
-                    keys %{ $self->{state}{localops} };
-                for my $op (sort @ops) {
-                    my $record = $self->{state}{users}{uc_irc($op)};
-                    push @$ref, {
-                        prefix  => $server,
-                        command => '249',
-                        params  => [
-                            $nick,
-                            sprintf("[O] %s (%s\@%s) Idle: %u",
-                                $record->{nick}, $record->{auth}{ident},
-                                $record->{auth}{hostname},
-                                time - $record->{idle_time}),
-                        ],
-                    };
-                }
-
-                push @$ref, {
-                    prefix  => $server,
-                    command => '249',
-                    params  => [$nick, scalar @ops . " OPER(s)"],
-                };
-                last SWITCH2;
-            }
-        }
-
-        push @$ref, {
-            prefix  => $server,
-            command => '219',
-            params  => [$nick, $char, 'End of /STATS report'],
-        };
+        my $uid = $self->state_user_uid($nick);
+        push @$ref, $_ for map { $_->{prefix} = $server; $_->{params}[0] = $nick; $_ }
+                       @{ $self->_daemon_do_stats($uid, $char) };
     }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _daemon_do_stats {
+    my $self   = shift;
+    my $uid    = shift || return;
+    my $char   = shift;
+    my $server = $self->server_name();
+    my $sid    = $self->server_sid();
+    my $ref    = [ ];
+
+    my $rec      = $self->{state}{uids}{$uid};
+    my $is_oper  = ( $rec->{umode} =~ /o/ );
+    my $is_admin = ( $rec->{umode} =~ /a/ );
+
+    my %perms = (
+        admin => qr/[AaEFfi]/,
+        oper  => qr/[OoCcDdeHhKkLlQqSsTtUvXxYyz?]/,
+    );
+
+    $self->_send_to_realops(
+        sprintf(
+            'STATS %s requested by %s (%s@%s) [%s]',
+            $char, $rec->{nick}, $rec->{auth}{ident},
+            $rec->{ident}{hostname}, $rec->{peer},
+        ),
+        'Notice', 'y',
+    );
+
+    SWITCH: {
+        if (($char =~ $perms{admin} && !$is_admin) ||
+            ($char =~ $perms{oper} && !$is_oper)) {
+            push @$ref, {
+                prefix  => $sid,
+                command => '481',
+                params  => [
+                    $uid,
+                    'Permission denied - You are not an IRC operator',
+                ],
+            };
+            last SWITCH;
+        }
+        if ($char =~ /^[aA]$/) {
+            require Net::DNS::Resolver;
+            foreach my $ns ( Net::DNS::Resolver->new()->nameservers ) {
+                push @$ref, {
+                    prefix  => $sid,
+                    command => '226',
+                    params  => [
+                        $uid,
+                        $ns,
+                    ],
+                };
+            }
+            last SWITCH;
+        }
+        if ($char =~ /^[cC]$/) {
+            foreach my $peer ( sort keys %{ $self->{config}{peers} } ) {
+                my $cblk = $self->{config}{peers}{$peer};
+                my $feat;
+                $feat .= 'A' if $cblk->{auto};
+                $feat .= 'S' if $cblk->{ssl};
+                $feat  = '*' if !length $feat;
+                push @$ref, {
+                    prefix  => $sid,
+                    command => '213',
+                    params  => [
+                        $uid, 'C',
+                        ( $cblk->{raddress} || $cblk->{sockaddr} ),
+                        $feat,
+                        $cblk->{name},
+                        ( $cblk->{rport} || $cblk->{sockport} ),
+                        'server',
+                    ],
+                    colonify => 0,
+                };
+            }
+            last SWITCH;
+        }
+        if ($char eq 's') {
+            foreach my $pseudo ( sort keys %{ $self->{config}{pseudo} } ) {
+                my $prec = $self->{config}{pseudo}{$pseudo};
+                push @$ref, {
+                    prefix  => $sid,
+                    command => '227',
+                    params  => [
+                        $uid, 's',
+                        $prec->{cmd},
+                        $prec->{name},
+                        join( '@', $prec->{nick},
+                        $prec->{host}),
+                        ( $prec->{prepend} || '*' ),
+                    ],
+                };
+            }
+            last SWITCH;
+        }
+        if ($char eq 'S') {
+            foreach my $service ( sort keys %{ $self->{state}{services} } ) {
+                my $srec = $self->{state}{services}{$service};
+                push @$ref, {
+                    prefix  => $sid,
+                    command => '246',
+                    params  => [
+                        $uid, 'S', '*', '*',
+                        $srec->{name}, 0, 0,
+                    ],
+                    colonify => 0,
+                };
+            }
+            last SWITCH;
+        }
+        if ($char =~ /^[Dd]$/) {
+            my $tdline = ( $char eq 'd' );
+            foreach my $dline ( @{ $self->{state}{dlines} } ) {
+                next if  $tdline && !$dline->{duration};
+                next if !$tdline && $dline->{duration};
+                push @$ref, {
+                    prefix  => $sid,
+                    command => '225',
+                    params  => [
+                        $uid, $char,
+                        $dline->{mask}, $dline->{reason},
+                    ],
+                };
+            }
+            last SWITCH;
+        }
+        if ($char eq 'e') {
+            foreach my $mask ( sort keys %{ $self->{exemptions} } ) {
+                push @$ref, {
+                    prefix  => $sid,
+                    command => '225',
+                    params  => [
+                        $uid, $char,
+                        $mask, '',
+                    ],
+                };
+            }
+            last SWITCH;
+        }
+        if ($char =~ /^[Xx]$/) {
+            my $txline = ( $char eq 'x' );
+            foreach my $xline ( @{ $self->{state}{xlines} } ) {
+                next if  $txline && !$xline->{duration};
+                next if !$txline && $xline->{duration};
+                push @$ref, {
+                    prefix  => $sid,
+                    command => '247',
+                    params  => [
+                        $uid, $char,
+                        $xline->{mask}, $xline->{reason},
+                    ],
+                };
+            }
+            last SWITCH;
+        }
+        if ($char =~ /^[Kk]$/) {
+            my $tkline = ( $char eq 'k' );
+            foreach my $kline ( @{ $self->{state}{klines} } ) {
+                next if  $tkline && !$kline->{duration};
+                next if !$tkline && $kline->{duration};
+                push @$ref, {
+                    prefix  => $sid,
+                    command => '216',
+                    params  => [
+                        $uid, $char,
+                        $kline->{host}, '*',
+                        $kline->{user}, $kline->{reason},
+                    ],
+                };
+            }
+            last SWITCH;
+        }
+        if ($char eq 'v') {
+            my $srec = $self->{state}{sids}{$sid};
+            my $count = 0;
+            foreach my $psid ( sort { $srec->{sids}{$_}{name} cmp $srec->{sids}{$_}{name} }
+                  keys %{ $srec->{sids} } ) {
+                my $prec = $srec->{sids}{$psid};
+                my $peer = $self->{config}{peers}{uc $prec->{name}};
+                my $type = '*';
+                $type = 'AutoConn.' if $peer->{auto};
+                $type = 'Remote.' if $peer->{type} ne 'r';
+                push @$ref, {
+                    prefix  => $sid,
+                    command => '249',
+                    params  => [
+                        $uid, 'v',
+                        $prec->{name},
+                        sprintf('(%s!%s@%s)', $type, '*', '*'),
+                        'Idle:',
+                        ( time() - $prec->{seen} ),
+                    ],
+                    colonify => 0,
+                };
+                $count++;
+            }
+            push @$ref, {
+                    prefix  => $sid,
+                    command => '249',
+                    params  => [
+                        $uid, 'v',
+                        "$count Server(s)",
+                    ],
+            };
+            last SWITCH;
+        }
+        if ($char eq 'P') {
+            foreach my $listener ( keys %{ $self->{listeners} } ) {
+                my $lrec = $self->{listeners}{$listener};
+                push @$ref, {
+                    prefix  => $sid,
+                    command => '220',
+                    params  => [
+                        $uid, 'P',
+                        $lrec->{port},
+                        ( $is_admin ?
+                          ( $lrec->{bindaddr} || '*' ) : $server ),
+                        '*',
+                        ( $lrec->{usessl} ? 's' : 'S' ),
+                        'active',
+                    ],
+                };
+            }
+            last SWITCH;
+        }
+        if ($char eq 'u') {
+            my $uptime = time - $self->server_config('created');
+            my $days   = int $uptime / 86400;
+            my $remain = $uptime % 86400;
+            my $hours  = int $remain / 3600;
+            $remain   %= 3600;
+            my $mins   = int $remain / 60;
+            $remain   %= 60;
+
+            push @$ref, {
+                prefix  => $sid,
+                command => '242',
+                params  => [
+                    $uid,
+                    sprintf("Server Up %d days, %2.2d:%2.2d:%2.2d",
+                        $days, $hours, $mins, $remain),
+                ],
+            };
+
+            my $totalconns = $self->{state}{stats}{conns_cumlative};
+            my $local = $self->{state}{stats}{maxlocal};
+            my $conns = $self->{state}{stats}{maxconns};
+
+            push @$ref, {
+                prefix  => $sid,
+                command => '250',
+                params  => [
+                    $uid, 'u',
+                    "Highest connection count: $conns ($local "
+                        ."clients) ($totalconns connections received)",
+                ],
+            };
+            last SWITCH;
+        }
+        if ($char =~ /^[mM]$/) {
+            my $cmds = $self->{state}{stats}{cmds};
+            push @$ref, {
+                prefix  => $sid,
+                command => '212',
+                params  => [
+                    $uid, 'M',
+                    $_,
+                    $cmds->{$_}{local},
+                    $cmds->{$_}{bytes},
+                    $cmds->{$_}{remote},
+                ],
+            } for sort keys %$cmds;
+            last SWITCH;
+        }
+        if ($char eq 'p') {
+            my @ops = map { $self->_client_nickname( $_ ) }
+                keys %{ $self->{state}{localops} };
+            for my $op (sort @ops) {
+                my $record = $self->{state}{users}{uc_irc($op)};
+                next if $record->{umode} =~ /H/ && !$is_oper;
+                push @$ref, {
+                    prefix  => $sid,
+                    command => '249',
+                    params  => [
+                        $uid, 'p',
+                        sprintf("[O] %s (%s\@%s) Idle: %u",
+                            $record->{nick}, $record->{auth}{ident},
+                            $record->{auth}{hostname},
+                            time - $record->{idle_time}),
+                    ],
+                    colonify => 0,
+                };
+            }
+
+            push @$ref, {
+                prefix  => $sid,
+                command => '249',
+                params  => [$uid, scalar @ops . " OPER(s)"],
+            };
+            last SWITCH;
+        }
+        if ($char =~ /^[Oo]$/) {
+            foreach my $op ( keys %{ $self->{config}{ops} } ) {
+                my $orec = $self->{config}{ops}{$op};
+                my $mask = 'localhost';
+                if ( $orec->{ipmask} ) {
+                    if (ref $orec->{ipmask} eq 'ARRAY') {
+                        $mask = '<masks>';
+                    }
+                    else {
+                        $mask = $orec->{ipmask};
+                    }
+                }
+                push @$ref, {
+                    prefix  => $sid,
+                    command => '243',
+                    params  => [
+                        $uid, 'O',
+                        sprintf('%s@%s','*', $mask ),
+                        '*', $orec->{username},
+                        $orec->{umode}, 'opers',
+                    ],
+                };
+            }
+            last SWITCH;
+        }
+        if ($char =~ /^[Qq]$/) {
+            my @chans; my @nicks;
+            foreach my $mask ( sort keys %{ $self->{state}{resvs} } ) {
+                if ($mask =~ m!^\#!) {
+                    push @chans, $mask;
+                }
+                else {
+                    push @nicks, $mask;
+                }
+            }
+            foreach my $mask (@chans,@nicks) {
+                my $resv = $self->{state}{resvs}{$mask};
+                push @$ref, {
+                    prefix  => $sid,
+                    command => '217',
+                    params  => [
+                        $uid,
+                        ( $resv->{duration} ? 'q' : 'Q' ),
+                        $resv->{mask}, $resv->{reason},
+                    ],
+                };
+            }
+            last SWITCH;
+        }
+    }
+
+    push @$ref, {
+        prefix  => $sid,
+        command => '219',
+        params  => [$uid, $char, 'End of /STATS report'],
+    };
 
     return @$ref if wantarray;
     return $ref;
@@ -13241,6 +13521,7 @@ sub add_peer {
 
     $parms->{ipmask} = $parms->{raddress} if $parms->{raddress};
     $parms->{zip} = 0 if !$parms->{zip};
+    $parms->{ssl} = 0 if !$parms->{ssl};
 
     if ( $parms->{ipmask} && $parms->{ipmask} eq 'ARRAY' ) {
       my @validated;
@@ -13266,6 +13547,7 @@ sub add_peer {
         remoteaddress => $parms->{raddress},
         remoteport    => $parms->{rport},
         name          => $name,
+        usessl        => $parms->{ssl},
     ) if $parms->{type} eq 'r' && $parms->{auto};
 
     return 1;
@@ -14190,6 +14472,9 @@ L<POE::Filter::Zlib::Stream|POE::Filter::Zlib::Stream>;
 
 =item * B<'service'>, set to a true value to enable the peer to be
 accepted as a services peer.
+
+=item * B<'ssl'>, set to a true value to enable SSL/TLS support. This must
+be done on both ends of the connection. Requires L<POE::Component::SSLify>.
 
 =back
 
