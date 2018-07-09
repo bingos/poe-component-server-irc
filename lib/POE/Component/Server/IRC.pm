@@ -5,7 +5,7 @@ use warnings;
 use Carp qw(carp croak);
 use IRC::Utils qw(uc_irc parse_mode_line unparse_mode_line normalize_mask
                   matches_mask matches_mask_array gen_mode_change is_valid_nick_name
-                  is_valid_chan_name has_color has_formatting);
+                  is_valid_chan_name has_color has_formatting parse_user);
 use List::Util qw(sum);
 use POE;
 use POE::Component::Server::IRC::Common qw(chkpasswd);
@@ -766,6 +766,7 @@ sub _cmd_from_client {
     my $nick = $self->_client_nickname($wheel_id);
     my $uid  = $self->_client_uid($wheel_id);
     my $invalid = 0;
+    my $pseudo  = 0;
 
     SWITCH: {
         my $method = '_daemon_cmd_' . lc $cmd;
@@ -843,11 +844,39 @@ sub _cmd_from_client {
             last SWITCH;
         }
 
+        if (defined $self->{config}{pseudo}{$cmd}) {
+            $pseudo = 1;
+            my $pseudo = $self->{config}{pseudo}{$cmd};
+            if (!$params->[0]) {
+                $self->_send_output_to_client($wheel_id, '412');
+                last SWITCH;
+            }
+            my $targ = $self->state_user_nick($pseudo->{nick});
+            my $serv = $self->_state_peer_name($pseudo->{host});
+            if ( !$targ || !$serv ) {
+                $self->_send_output_to_client($wheel_id, '440', $pseudo->{name});
+                last SWITCH;
+            }
+            my $msg;
+            if ($pseudo->{prepend}) {
+                my $join = ($pseudo->{prepend} =~ m! $! ? '' : ' ');
+                $msg = join $join, $pseudo->{prepend}, $params->[0];
+            }
+            else {
+                $msg = $params->[0];
+            }
+            $self->_send_output_to_client(
+                $wheel_id,
+                (ref $_ eq 'ARRAY' ? @{ $_ } : $_),
+            ) for $self->_daemon_cmd_message($nick, 'PRIVMSG', $pseudo->{nick}, $msg);
+            last SWITCH;
+        }
+
         $invalid = 1;
         $self->_send_output_to_client($wheel_id, '421', $cmd);
     }
 
-    return 1 if $invalid;
+    return 1 if $invalid || $pseudo;
     $self->_state_cmd_stat($cmd, $input->{raw_line});
     return 1;
 }
@@ -13137,6 +13166,7 @@ EOF
         433 => [1, "Nickname is already in use"],
         436 => [1, "Nickname collision KILL from %s\@%s"],
         437 => [1, "Nick/channel is temporarily unavailable"],
+        440 => [1, "Services are currently unavailable."],
         441 => [1, "They aren\'t on that channel"],
         442 => [1, "You\'re not on that channel"],
         443 => [2, "is already on channel"],
@@ -13200,6 +13230,12 @@ EOF
     };
 
     $self->{config}{capab} = [qw(ENCAP KNOCK CLUSTER QS DLN UNDLN EX IE HOPS UNKLN KLN GLN EOB RHOST)];
+
+    $self->{config}{cmds}{uc $_}++ for
+        qw[accept admin away bmask cap connect die dline encap eob etrace globops info invite ison isupport join kick kill],
+        qw[kline knock links list locops lusers map message mode motd names nick oper part pass ping pong quit rehash remove],
+        qw[resv rkline sid sjoin squit stats summon svinfo svshost svsjoin svskill svsmode svsnick svspart svstag tburst time],
+        qw[tmode topic trace uid umode undline unkline unresv unrkline unxline user userhost users version wallops watch who whois whowas xline];
 
     return 1;
 }
@@ -13559,6 +13595,53 @@ sub del_peer {
     return if !defined $self->{config}{peers}{uc $name};
     delete $self->{config}{peers}{uc $name};
     return;
+}
+
+sub add_pseudo {
+    my $self = shift;
+    my $parms;
+    if (ref $_[0] eq 'HASH') {
+        $parms = $_[0];
+    }
+    else {
+        $parms = { @_ };
+    }
+    $parms->{lc $_} = delete $parms->{$_} for keys %$parms;
+
+    if (!defined $parms->{cmd} || !defined $parms->{name}
+           || !defined $parms->{target}) {
+        croak((caller(0))[3].": Not enough parameters specified\n");
+        return;
+    }
+
+    my ($nick,$user,$host) = parse_user( $parms->{target} );
+
+    if (!$nick || !$user || !$host) {
+        croak((caller(0))[3].": target is invalid\n");
+        return;
+    }
+
+    $parms->{nick} = $nick;
+    $parms->{user} = $user;
+    $parms->{host} = $host;
+
+    my $cmd = delete $parms->{cmd};
+    $cmd = uc $cmd;
+
+    if (defined $self->{config}{cmds}{$cmd} || defined $self->{config}{pseudo}{$cmd}) {
+        croak((caller(0))[3].": That command already exists\n");
+        return;
+    }
+
+    $self->{config}{pseudo}{$cmd} = $parms;
+    return 1;
+}
+
+sub del_pseudo {
+    my $self = shift;
+    my $cmd  = shift || return;
+    delete $self->{config}{pseudo}{uc $cmd};
+    return 1;
 }
 
 sub _terminate_conn_error {
@@ -14493,6 +14576,32 @@ This does not have to be a directly connected peer as defined with C<add_peer>.
 
 Takes a single argument, the service peer to remove. This does not disconnect
 the said service peer, but it will deny the peer access to service commands.
+
+=head3 C<add_pseudo>
+
+Adds a pseudo command, also known as a service alias. The command is transformed
+by the server into a C<PRIVMSG> and sent to the given target.
+
+Takes several arguments:
+
+=over 4
+
+=item * B<'cmd'>, (mandatory) command/alias to be added.
+
+=item * B<'name'>, (mandatory) the service name, eg. NickServ, this is
+used in error messages reported to users.
+
+=item *B<'target'>, (mandatory) the target for the command in nick!user@host
+format.
+
+=item * B<'prepend'>, (optional) text that will prepended to the user's
+message.
+
+=back
+
+=head3 C<del_pseudo>
+
+Removes a previously defined pseudo command/alias.
 
 =head2 State queries
 

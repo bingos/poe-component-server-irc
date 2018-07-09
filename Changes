@@ -30,6 +30,7 @@ Revision history for POE-Component-Server-IRC
     - Added account and nick registration support
     - LIST command now supports SAFELIST and ELIST filters
     - Implemented TRACE and ETRACE commands
+    - Implemented pseudo commands/service aliases
 
 1.54  Fri Nov 25 15:36:51 UTC 2011
     - Resolve problem with remote (versus localhost) clients
