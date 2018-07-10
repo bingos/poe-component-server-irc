@@ -319,6 +319,16 @@ sub _client_register {
         return;
     }
 
+    my $clients = keys %{ $self->{state}{sids}{$self->server_sid()}{uids} };
+    if ( $self->{config}{MAXCLIENTS} < $clients + 1 ) {
+        my $crec = $self->{state}{conns}{$conn_id};
+        if (!$crec->{exceed_limit}) {
+            $self->_terminate_conn_error($conn_id,
+                  'Sorry, server is full - try later');
+            return;
+        }
+    }
+
     # Add new nick
     my $uid       = $self->_state_register_client($conn_id);
     my $umode     = $self->{state}{conns}{$conn_id}{umode};
@@ -4611,8 +4621,8 @@ sub _daemon_do_stats {
     my $is_admin = ( $rec->{umode} =~ /a/ );
 
     my %perms = (
-        admin => qr/[AaEFfi]/,
-        oper  => qr/[OoCcDdeHhKkLlQqSsTtUvXxYyz?]/,
+        admin => qr/[AaEFf]/,
+        oper  => qr/[OoCcDdeHhIiKkLlQqSsTtUvXxYyz?]/,
     );
 
     $self->_send_to_realops(
@@ -11616,6 +11626,7 @@ sub _state_auth_client_conn {
                 return 0;
             }
             $record->{auth}{hostname} = $auth->{spoof} if $auth->{spoof};
+            $record->{exceed_limit} = 1 if $auth->{exceed_limit};
 
             if (!$record->{auth}{ident} && $auth->{no_tilde}) {
                 $record->{auth}{ident} = $record->{user};
@@ -13049,6 +13060,7 @@ sub configure {
         MAXACCEPT     => 20,
         MODES         => 4,
         MAXTARGETS    => 4,
+        MAXCLIENTS    => 512,
         MAXBANS       => 50,
         MAXBANLENGTH  => 1024,
         AUTH          => 1,
@@ -14481,6 +14493,9 @@ their hostname changed to this;
 
 =item * B<'no_tilde'>, if specified, the '~' prefix is removed from their
 username;
+
+=item * B<'exceed_limit'>, if specified, any client matching the mask will not
+have their connection limited, if the server is full;
 
 =back
 
