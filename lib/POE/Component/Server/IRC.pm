@@ -250,6 +250,7 @@ sub _client_register {
     return if !$self->{state}{conns}{$conn_id}{nick};
     return if !$self->{state}{conns}{$conn_id}{user};
     return if $self->{state}{conns}{$conn_id}{capneg};
+    my $server    = $self->server_name();
 
     my $auth = $self->_auth_finished($conn_id);
     return if !$auth;
@@ -269,6 +270,27 @@ sub _client_register {
             'You are not authorized to use this server',
         );
         return;
+    }
+    if ($self->{auth}) {
+        if ( $self->{state}{conns}{$conn_id}{need_ident} &&
+             !$self->{state}{conns}{$conn_id}{auth}{ident} ) {
+            $self->_send_output_to_client(
+                $conn_id,
+                {
+                    prefix  => $server,
+                    command => 'NOTICE',
+                    params  => [
+                        '*',
+                        '*** Notice -- You need to install identd to use this server',
+                    ],
+                },
+            );
+            $self->_terminate_conn_error(
+                $conn_id,
+                'Install identd',
+            );
+            return;
+        }
     }
     if (my $reason = $self->_state_user_matches_xline($conn_id)) {
         my $crec = $self->{state}{conns}{$conn_id};
@@ -332,7 +354,6 @@ sub _client_register {
     # Add new nick
     my $uid       = $self->_state_register_client($conn_id);
     my $umode     = $self->{state}{conns}{$conn_id}{umode};
-    my $server    = $self->server_name();
     my $nick      = $self->_client_nickname($conn_id);
     my $port      = $self->{state}{conns}{$conn_id}{socket}[3];
     my $version   = $self->server_version();
@@ -352,6 +373,8 @@ sub _client_register {
             },
         );
     }
+
+    $self->_state_auth_flags_notices($conn_id);
 
     $self->_send_output_to_client(
         $conn_id,
@@ -607,7 +630,7 @@ sub _cmd_from_unknown {
                 last SWITCH;
             }
 
-            if ( my $reason = $self->_state_is_resv( $params->[0] ) ) {
+            if ( my $reason = $self->_state_is_resv( $params->[0], $wheel_id ) ) {
                 $self->_send_output_to_client(
                     $wheel_id, {
                         prefix  => $self->server_name(),
@@ -3915,7 +3938,9 @@ sub _daemon_cmd_nick {
             push @$ref, ['432', $new];
             last SWITCH;
         }
-        if ( my $reason = $self->_state_is_resv( $new ) ) {
+        my $unick = uc_irc($nick);
+        my $record = $self->{state}{users}{$unick};
+        if ( my $reason = $self->_state_is_resv( $new, $record->{route_id} ) ) {
             $self->_send_to_realops(
                 sprintf(
                     'Forbidding reserved nick %s from user %s',
@@ -3936,13 +3961,11 @@ sub _daemon_cmd_nick {
             };
             last SWITCH;
         }
-        my $unick = uc_irc($nick);
         my $unew = uc_irc($new);
         if ($self->state_nick_exists($new) && $unick ne $unew) {
             push @$ref, ['433', $new];
             last SWITCH;
         }
-        my $record = $self->{state}{users}{$unick};
         my $full   = $record->{full}->();
         my $common = { $record->{uid} => $record->{route_id} };
 
@@ -6237,7 +6260,7 @@ sub _daemon_cmd_join {
                 next LOOP;
             }
             # Channel is RESV
-            if (my $reason = $self->_state_is_resv($channel)) {
+            if (my $reason = $self->_state_is_resv($channel,$route_id)) {
                 if ( !$nick_is_oper ) {
                     $self->_send_to_realops(
                         sprintf(
@@ -11353,8 +11376,15 @@ sub _state_del_drkx_line {
 }
 
 sub _state_is_resv {
-    my $self  = shift;
-    my $thing = shift || return;
+    my $self    = shift;
+    my $thing   = shift || return;
+    my $conn_id = shift;
+    if ($conn_id && !$self->_connection_exists($conn_id)) {
+        $conn_id = '';
+    }
+    if ($conn_id && $self->{state}{conns}{$conn_id}{resv_exempt}) {
+        return 0;
+    }
     foreach my $mask ( keys %{ $self->{state}{resvs} } ) {
       if ( matches_mask( $mask, $thing ) ) {
         return $self->{state}{resvs}{$mask}{reason};
@@ -11556,6 +11586,8 @@ sub _state_user_matches_rkline {
     my $user    = $record->{auth}{ident} || "~" . $record->{user};
     my $ip      = $record->{socket}[0];
 
+    return 0 if $record->{kline_exempt};
+
     for my $kline (@{ $self->{state}{rklines} }) {
         if (($host =~ /$kline->{host}/ || $ip =~ /$kline->{host}/)
                 && $user =~ /$kline->{user}/) {
@@ -11572,6 +11604,8 @@ sub _state_user_matches_kline {
     my $host    = $record->{auth}{hostname} || $record->{socket}[0];
     my $user    = $record->{auth}{ident} || "~" . $record->{user};
     my $ip      = $record->{socket}[0];
+
+    return 0 if $record->{kline_exempt};
 
     for my $kline (@{ $self->{state}{klines} }) {
         if (my $netmask = Net::CIDR::cidrvalidate($kline->{host})) {
@@ -11626,8 +11660,9 @@ sub _state_auth_client_conn {
                 return 0;
             }
             $record->{auth}{hostname} = $auth->{spoof} if $auth->{spoof};
-            $record->{exceed_limit} = 1 if $auth->{exceed_limit};
-
+            foreach my $feat ( qw(exceed_limit kline_exempt resv_exempt can_flood need_ident) ) {
+                $record->{$feat} = 1 if $auth->{$feat};
+            }
             if (!$record->{auth}{ident} && $auth->{no_tilde}) {
                 $record->{auth}{ident} = $record->{user};
             }
@@ -11675,6 +11710,40 @@ sub _state_auth_peer_conn {
     );
 
     return 0;
+}
+
+{
+
+  my %flag_notices = (
+    kline_exempt  => '*** You are exempt from K/RK lines',
+    resv_exempt   => '*** You are exempt from resvs',
+    exceed_limit  => '*** You are exempt from user limits',
+    can_flood     => '*** You are exempt from flood protection',
+  );
+
+  sub _state_auth_flags_notices {
+      my $self    = shift;
+      my $conn_id = shift || return;
+      return if !$self->_connection_exists($conn_id);
+      my $server = $self->server_name();
+      my $crec = $self->{state}{conns}{$conn_id};
+      my $nick = $crec->{nick};
+
+      foreach my $feat ( qw(kline_exempt resv_exempt exceed_limit can_flood) ) {
+          next if !$crec->{$feat};
+          $self->antiflood($conn_id, 0) if $feat eq 'can_flood';
+          $self->_send_output_to_client(
+              $conn_id,
+              {
+                  prefix  => $server,
+                  command => 'NOTICE',
+                  params  => [ $nick, $flag_notices{$feat} ],
+              },
+          );
+      }
+      return 1;
+  }
+
 }
 
 sub _state_send_credentials {
@@ -14496,6 +14565,18 @@ username;
 
 =item * B<'exceed_limit'>, if specified, any client matching the mask will not
 have their connection limited, if the server is full;
+
+=item * B<'kline_exempt'>, if true, any client matching the mask will be exempt
+from KLINEs and RKLINEs;
+
+=item * B<'resv_exempt'>, if true, any client matching the mask will be exempt
+from RESVs;
+
+=item * B<'can_flood'>, if true, any client matching the mask will be exempt
+from flood protection;
+
+=item * B<'need_ident'>, if true, any client matching the mask will be
+required to have a valid response to C<Ident> queries;
 
 =back
 

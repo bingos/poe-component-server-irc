@@ -1,6 +1,6 @@
 use strict;
 use warnings;
-use Test::More 'no_plan';
+use Test::More;
 use POE qw[Filter::Stackable Filter::Line Filter::IRCD];
 use POE::Component::Server::IRC;
 use Test::POE::Client::TCP;
@@ -18,6 +18,8 @@ BEGIN {
 if (!$GOT_SSL) {
     plan skip_all => "POE::Component::SSLify not available";
 }
+
+plan 'no_plan';
 
 my %servers = (
  'listen.server.irc'   => '1FU',

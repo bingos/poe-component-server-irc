@@ -95,7 +95,9 @@ sub create {
         require POE::Component::Server::IRC::Plugin::Auth;
         $self->plugin_add(
             'Auth_'.$self->session_id(),
-            POE::Component::Server::IRC::Plugin::Auth->new(),
+            POE::Component::Server::IRC::Plugin::Auth->new(
+                identport => $args{identport},
+            ),
         );
     }
 

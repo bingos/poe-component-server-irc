@@ -57,6 +57,7 @@ sub _start {
 
 sub IRCD_connection {
     my ($self, $ircd) = splice @_, 0, 2;
+    my $server = $ircd->server_name();
     pop @_;
     my ($conn_id, $peeraddr, $peerport, $sockaddr, $sockport, $needs_auth)
         = map { $$_ } @_;
@@ -72,16 +73,18 @@ sub IRCD_connection {
 
     $ircd->send_output(
         {
+            prefix  => $server,
             command => 'NOTICE',
-            params  => ['AUTH', '*** Checking Ident'],
+            params  => ['*', '*** Checking Ident'],
         },
         $conn_id,
     );
 
     $ircd->send_output(
         {
+            prefix  => $server,
             command => 'NOTICE',
-            params  => ['AUTH', '*** Checking Hostname'],
+            params  => ['*', '*** Checking Hostname'],
         },
         $conn_id,
     );
@@ -89,8 +92,9 @@ sub IRCD_connection {
     if ($peeraddr =~ /^127\./) {
         $ircd->send_output(
             {
+                prefix  => $server,
                 command => 'NOTICE',
-                params  => ['AUTH', '*** Found your hostname']
+                params  => ['*', '*** Found your hostname']
             },
             $conn_id,
         );
@@ -141,6 +145,7 @@ sub resolve_ident {
         BuggyIdentd => 1,
         TimeOut     => 10,
         Reference   => $conn_id,
+        IdentPort   => ( $self->{identport} || '' ),
     );
     return;
 }
@@ -159,9 +164,10 @@ sub got_hostname {
     my $fail = sub {
         $ircd->send_output(
             {
+                prefix  => $self->{ircd}->server_name(),
                 command => 'NOTICE',
                 params  => [
-                    'AUTH',
+                    '*',
                     "*** Couldn\'t look up your hostname",
                 ],
             },
@@ -198,6 +204,7 @@ sub got_ip {
     my ($kernel, $self, $response) = @_[KERNEL, OBJECT, ARG0];
     my $conn_id = $response->{context}{conn_id};
     my $ircd    = $self->{ircd};
+    my $server  = $ircd->server_name();
 
     if (!$ircd->connection_exists($conn_id)) {
         delete $self->{conns}{$conn_id};
@@ -207,9 +214,10 @@ sub got_ip {
     my $fail = sub {
         $ircd->send_output(
             {
+                prefix  => $server,
                 command => 'NOTICE',
                 params  => [
-                    'AUTH',
+                    '*',
                     "*** Couldn't look up your hostname",
                 ],
             },
@@ -228,8 +236,9 @@ sub got_ip {
         if ($answer->rdatastr() eq $peeraddr) {
             $ircd->send_output(
                 {
+                    prefix  => $server,
                     command => 'NOTICE',
-                    params  => ['AUTH', '*** Found your hostname'],
+                    params  => ['*', '*** Found your hostname'],
                 },
                 $conn_id,
             );
@@ -241,9 +250,10 @@ sub got_ip {
 
     $ircd->send_output(
         {
+            prefix  => $server,
             command => 'NOTICE',
             params  => [
-                'AUTH',
+                '*',
                 '*** Your forward and reverse DNS do not match',
             ],
         },
@@ -283,8 +293,9 @@ sub got_ident_error {
 
     $ircd->send_output(
         {
+            prefix  => $ircd->server_name(),
             command => 'NOTICE',
-            params  => ['AUTH', "*** No Ident response"],
+            params  => ['*', "*** No Ident response"],
         },
         $conn_id,
     );
@@ -307,8 +318,9 @@ sub got_ident {
     $ident = $other if uc $opsys ne 'OTHER';
     $ircd->send_output(
         {
+            prefix  => $ircd->server_name(),
             command => 'NOTICE',
-            params  => ['AUTH', "*** Got Ident response"],
+            params  => ['*', "*** Got Ident response"],
         },
         $conn_id,
     );
