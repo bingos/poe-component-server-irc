@@ -1954,14 +1954,31 @@ sub _daemon_cmd_oper {
             last SWITCH;
         }
 
+        my $record = $self->{state}{users}{uc_irc($nick)};
         my $result = $self->_state_o_line($nick, @$args);
         if (!$result || $result <= 0) {
+            my $omsg;
+            if (!defined $result) {
+                $omsg = 'no operator {} block';
+            }
+            elsif ($result < 0) {
+                $omsg = 'password mismatch';
+            }
+            else {
+                $omsg = 'host mismatch';
+            }
+            $self->_send_to_realops(
+                sprintf(
+                  'Failed OPER attempt as %s by %s (%s) - %s',
+                  $args->[0], $nick, (split /!/, $record->{full}->())[1], $omsg),
+                'Notice',
+                's',
+            );
             push @$ref, ['491'];
             last SWITCH;
         }
         my $opuser = $args->[0];
         $self->{stats}{ops}++;
-        my $record = $self->{state}{users}{uc_irc($nick)};
         $record->{umode} .= 'o';
         $record->{opuser} = $opuser;
         $self->{state}{stats}{ops_online}++;
@@ -13277,7 +13294,7 @@ EOF
         484 => [0, "Your connection is restricted!"],
         485 => [1, "Cannot join channel (%s)"],
         489 => [1, "Cannot join channel (+S) - SSL/TLS required"],
-        491 => [0, "No O-lines for your host"],
+        491 => [0, "Only few of mere mortals may try to enter the twilight zone"],
         492 => [1, "You cannot send CTCPs to this channel."],
         501 => [0, "Unknown MODE flag"],
         502 => [0, "Cannot change mode for other users"],
@@ -13299,7 +13316,7 @@ EOF
         CHANTYPES => '#&',
         KNOCK     => undef,
         PREFIX    => '(ohv)@%+',
-        CHANMODES => 'eIb,k,l,cimnpst',
+        CHANMODES => 'beI,k,l,cimnprstuCLMNORST',
         STATUSMSG => '@%+',
         DEAF      => 'D',
         MAXLIST   => 'beI:' . $self->{config}{MAXBANS},

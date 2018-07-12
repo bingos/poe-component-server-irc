@@ -1,5 +1,5 @@
 use strict;
-use Test::More tests => 17;
+use Test::More tests => 18;
 use POE::Component::Server::IRC;
 use POE::Component::IRC;
 use POE;
