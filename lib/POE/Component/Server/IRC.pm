@@ -7173,6 +7173,38 @@ sub _daemon_cmd_knock {
     return $ref;
 }
 
+sub _daemon_peer_certfp {
+    my $self       = shift;
+    my $peer_id    = shift || return;
+    my $prefix     = shift || return;
+    my $ref        = [ ];
+    my $args       = [@_];
+
+    SWITCH: {
+        if ($prefix !~ $uid_re) {
+            last SWITCH;
+        }
+        if(!$args->[0]) {
+            last SWITCH;
+        }
+        my $uid = $self->state_user_uid($prefix);
+        last SWITCH if !$uid;
+        $self->{state}{uids}{$uid}{certfp} = $args->[0];
+        $self->send_output(
+            {
+                prefix   => $prefix,,
+                command  => 'CERTFP',
+                colonify => 0,
+                params   => $args,
+            },
+            grep { $_ ne $peer_id } $self->_state_connected_peers(),
+        );
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
 sub _daemon_peer_knock {
     my $self    = shift;
     my $peer_id = shift || return;
@@ -11676,7 +11708,18 @@ sub _state_auth_client_conn {
                     || !chkpasswd($record->{pass}, $auth->{password}) )) {
                 return 0;
             }
-            $record->{auth}{hostname} = $auth->{spoof} if $auth->{spoof};
+            if ($auth->{spoof}) {
+                $self->_send_to_realops(
+                    sprintf(
+                        '%s spoofing: %s as %s',
+                        $record->{nick}, $record->{auth}{hostname},
+                        $auth->{spoof},
+                    ),
+                    'Notice',
+                    's',
+                );
+                $record->{auth}{hostname} = $auth->{spoof};
+            }
             foreach my $feat ( qw(exceed_limit kline_exempt resv_exempt can_flood need_ident) ) {
                 $record->{$feat} = 1 if $auth->{$feat};
             }
@@ -12406,6 +12449,9 @@ sub _state_register_client {
     if ( $record->{secured} ) {
         $umode .= 'S';
         $record->{umode} = 'S';
+        if (my $certfp = $self->connection_certfp($conn_id)) {
+            $record->{certfp} = $certfp;
+        }
     }
 
     my $arrayref = [
@@ -12452,6 +12498,17 @@ sub _state_register_client {
                   prefix  => $record->{sid},
                   command => 'UID',
                   params  => $arrayref,
+              },
+              $peer_id,
+            );
+        }
+        if ($record->{certfp}) {
+            $self->send_output(
+              {
+                  prefix   => $record->{uid},
+                  command  => 'CERTFP',
+                  params   => [ $record->{certfp} ],
+                  colonify => 0,
               },
               $peer_id,
             );

@@ -31,6 +31,8 @@ my $pocosi = POE::Component::Server::IRC->spawn(
 my $pocoirc = POE::Component::IRC->spawn(
     flood   => 1,
     UseSSL  => 1,
+    SSLCert => 'irc.crt',
+    SSLKey  => 'irc.key',
 );
 
 POE::Session->create(

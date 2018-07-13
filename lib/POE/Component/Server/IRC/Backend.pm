@@ -58,13 +58,18 @@ sub create {
         eval {
             require POE::Component::SSLify;
             POE::Component::SSLify->import(
-                qw(SSLify_Options Server_SSLify Client_SSLify)
+                qw(SSLify_GetCTX SSLify_Options Server_SSLify Client_SSLify)
             );
         };
         chomp $@;
         croak("Can't use ssl: $@") if $@;
 
-        eval { SSLify_Options(@{ $args{sslify_options} }); };
+        eval {
+          SSLify_Options(@{ $args{sslify_options} });
+          my $ctx = SSLify_GetCTX();
+          require Net::SSLeay;
+          Net::SSLeay::CTX_set_verify( $ctx, 0x01, sub { return 1; } );
+        };
         chomp $@;
         croak("Can't use ssl: $@") if $@;
         $self->{got_ssl} = 1;
@@ -779,6 +784,20 @@ sub connection_secured {
           if $sslinfo;
     }
     return $sslinfo;
+}
+
+sub connection_certfp {
+    my ($self, $wheel_id) = @_;
+    return if !$wheel_id || !defined $self->{wheels}{$wheel_id};
+    return if !$self->{wheels}{$wheel_id}{secured};
+    my $sock = $self->{wheels}{$wheel_id}{wheel}->get_input_handle();
+    my $fp = eval {
+       my $ssl = POE::Component::SSLify::SSLify_GetSSL($sock);
+       my $x509 = Net::SSLeay::get_peer_certificate($ssl);
+       return Net::SSLeay::X509_get_fingerprint($x509,'sha256');
+    };
+    $fp =~ s!:!!g if $fp;
+    return $fp;
 }
 
 sub _conn_flooded {
