@@ -58,7 +58,7 @@ sub create {
         eval {
             require POE::Component::SSLify;
             POE::Component::SSLify->import(
-                qw(SSLify_GetCTX SSLify_Options Server_SSLify Client_SSLify)
+                qw(SSLify_GetCTX SSLify_Options Server_SSLify Client_SSLify SSLify_ContextCreate)
             );
         };
         chomp $@;
@@ -471,7 +471,8 @@ sub _sock_up {
     my $cntr = delete $self->{connectors}{$connector_id};
     if ($self->{got_ssl} && $cntr->{usessl}) {
         eval {
-            $socket = POE::Component::SSLify::Client_SSLify($socket);
+            my $ctx = SSLify_ContextCreate( @{ $self->{sslify_options} } );
+            $socket = POE::Component::SSLify::Client_SSLify($socket,undef,undef,$ctx);
         };
         chomp $@;
         die "Failed to SSLify client socket: $@" if $@;
@@ -968,6 +969,10 @@ Default is false.
 =item * B<'raw_events'>, whether to send L<raw|/ircd_raw_input> events.
 False by default. Can be enabled later with L<C<raw_events>|/raw_events>;
 
+=item * B<'sslify_options'>, an array reference of items that are passed
+to L<POE::Component::SSLify> C<SSLify_Options>. Used to supply x509 certificate
+and key;
+
 =back
 
 If the component is created from within another session, that session will
@@ -1339,7 +1344,10 @@ Opens a TCP connection to specified address and port.
 =item * B<'bindaddress'>, a local address to bind from (optional);
 
 =item * B<'idle'>, the time, in seconds, after which a connection will be
-considered idle. Defaults is 180.
+considered idle. Defaults is 180;
+
+=item * B<'usessl'>, whether the connection should use SSL. Default is
+false;
 
 =back
 
