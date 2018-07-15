@@ -8134,6 +8134,17 @@ sub _daemon_peer_eob {
     my $peer_id = shift || return;
     my $peer    = shift || return;
     my $ref     = [ ];
+    if ($self->{state}{conns}{$peer_id}{sid} eq $peer) {
+        my $crec = $self->{state}{conns}{$peer_id};
+        $self->_send_to_realops(
+            sprintf(
+                'End of burst from %s (%ju seconds)',
+                $crec->{name}, ( time() - $crec->{conn_time} ),
+            ),
+            'Notice',
+            's',
+        );
+    }
     $self->send_event('daemon_eob', $self->{state}{sids}{$peer}{name}, $peer);
     return @$ref if wantarray;
     return $ref;
@@ -12368,6 +12379,28 @@ sub _state_register_peer {
     $self->{state}{sids}{ $mysid }{sids}{ $psid } = $record;
     $self->{state}{sids}{ $psid } = $record;
     $self->antiflood($conn_id, 0);
+
+    if (my $sslinfo = $self->connection_secured($conn_id)) {
+        $self->_send_to_realops(
+            sprintf(
+                'Link with %s[unknown@%s] established: [TLS: %s] (Capabilities: %s)',
+                $record->{name}, $record->{socket}[0], $sslinfo, join(' ', @{ $record->{capab} }),
+            ),
+            'Notice',
+            's',
+        );
+    }
+    else {
+        $self->_send_to_realops(
+            sprintf(
+                'Link with %s[unknown@%s] established: (Capabilities: %s)',
+                $record->{name}, $record->{socket}[0], join(' ', @{ $record->{capab} }),
+            ),
+            'Notice',
+            's',
+        );
+    }
+
     $self->send_output(
         {
             prefix  => $mysid,

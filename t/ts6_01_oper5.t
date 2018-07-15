@@ -142,8 +142,13 @@ sub ircd_listener_add {
 }
 
 sub ircd_daemon_snotice {
+    my $notice = $_[ARG0];
+    if ($notice =~ m!(Link with|End of)!) {
+        pass($notice);
+        return;
+    }
     my $resp = shift @notices;
-    is($_[ARG0],$resp,$resp);
+    is($notice,$resp,$resp);
     return;
 }
 
