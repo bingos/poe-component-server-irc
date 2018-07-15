@@ -46,7 +46,7 @@ my $pocosi = POE::Component::Server::IRC->spawn(
     auth         => 0,
     antiflood    => 0,
     plugin_debug => 1,
-    sslify_options => ['ircd.key', 'ircd.crt'],
+    sslify_options => ['certs/ircd.key', 'certs/ircd.crt'],
     config => { servername => 'listen.server.irc', sid => '1FU' },
 );
 
@@ -159,7 +159,7 @@ sub _launch_client {
              POE::Filter::IRCD->new( debug => 0 ), );
   my $tag = 'client';
   $heap->{client} = Test::POE::Client::TCP->spawn( alias => $tag, filter => $filter, address => '127.0.0.1',
-      port => $heap->{ssl}, prefix => $tag, usessl => 1, sslcert => 'irc.crt', sslkey => 'irc.key' );
+      port => $heap->{ssl}, prefix => $tag, usessl => 1, sslcert => 'certs/irc.crt', sslkey => 'certs/irc.key' );
   return;
 }
 
@@ -269,6 +269,12 @@ sub groucho_input {
     $poe_kernel->post( $sender, 'terminate' );
     return;
   }
+  if ( $cmd eq 'CERTFP' ) {
+    pass($cmd);
+    is($prefix,'1FUAAAAAA','Correct PREFIX');
+    is($params->[0],'F338C32EACDCF5D728AF19C62E2016A7EA8151361A011DFA3CD776196F06BD9D','Fingerprint good');
+    return;
+  }
   return;
 }
 
@@ -282,6 +288,12 @@ sub harpo_input {
     pass($cmd);
     is( $prefix, '1FUAAAAAA', 'Correct prefix: 1FUAAAAAAA' );
     is( $params->[0], q{Quit: "Connection reset by fear"}, 'Correct QUIT message' );
+    return;
+  }
+  if ( $cmd eq 'CERTFP' ) {
+    pass($cmd);
+    is($prefix,'1FUAAAAAA','Correct PREFIX');
+    is($params->[0],'F338C32EACDCF5D728AF19C62E2016A7EA8151361A011DFA3CD776196F06BD9D','Fingerprint good');
     return;
   }
   return;

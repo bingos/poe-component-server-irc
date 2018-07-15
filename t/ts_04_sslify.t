@@ -25,14 +25,14 @@ my $pocosi = POE::Component::Server::IRC->spawn(
     auth           => 0,
     antiflood      => 0,
     plugin_debug   => 1,
-    sslify_options => ['ircd.key', 'ircd.crt'],
+    sslify_options => ['certs/ircd.key', 'certs/ircd.crt'],
     config         => { sid => '2FA', },
 );
 my $pocoirc = POE::Component::IRC->spawn(
     flood   => 1,
     UseSSL  => 1,
-    SSLCert => 'irc.crt',
-    SSLKey  => 'irc.key',
+    SSLCert => 'certs/irc.crt',
+    SSLKey  => 'certs/irc.key',
 );
 
 POE::Session->create(

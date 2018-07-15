@@ -46,7 +46,7 @@ my $pocosi = POE::Component::Server::IRC->spawn(
     auth         => 0,
     antiflood    => 0,
     plugin_debug => 1,
-    sslify_options => ['ircd.key', 'ircd.crt'],
+    sslify_options => ['certs/ircd.key', 'certs/ircd.crt'],
     config => { servername => 'listen.server.irc', sid => '1FU' },
 );
 
@@ -160,7 +160,7 @@ sub _launch_client {
              POE::Filter::IRCD->new( debug => 0 ), );
   my $tag = 'client';
   $heap->{client} = Test::POE::Client::TCP->spawn( alias => $tag, filter => $filter, address => '127.0.0.1',
-      port => $heap->{ssl}, prefix => $tag, usessl => 1, sslcert => 'irc.crt', sslkey => 'irc.key' );
+      port => $heap->{ssl}, prefix => $tag, usessl => 1, sslcert => 'certs/irc.crt', sslkey => 'certs/irc.key' );
   return;
 }
 
