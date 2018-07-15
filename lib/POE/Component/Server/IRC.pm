@@ -1957,12 +1957,19 @@ sub _daemon_cmd_oper {
         my $record = $self->{state}{users}{uc_irc($nick)};
         my $result = $self->_state_o_line($nick, @$args);
         if (!$result || $result <= 0) {
-            my $omsg;
+            my $omsg; my $errcode = '491';
             if (!defined $result) {
                 $omsg = 'no operator {} block';
             }
-            elsif ($result < 0) {
+            elsif ($result == -1) {
                 $omsg = 'password mismatch';
+                $errcode = '464';
+            }
+            elsif ($result == -2) {
+                $omsg = 'requires SSL/TLS';
+            }
+            elsif ($result == -3) {
+                $omsg = 'client certificate fingerprint mismatch';
             }
             else {
                 $omsg = 'host mismatch';
@@ -1974,7 +1981,7 @@ sub _daemon_cmd_oper {
                 'Notice',
                 's',
             );
-            push @$ref, ['491'];
+            push @$ref, [$errcode];
             last SWITCH;
         }
         my $opuser = $args->[0];
@@ -13058,6 +13065,17 @@ sub _state_o_line {
     return if !$ops->{$user};
     return -1 if !chkpasswd ($pass, $ops->{$user}{password});
 
+    if ($ops->{$user}{ssl_required}) {
+        return -2 if $self->{state}{users}{uc_irc $nick}{umode} !~ /S/;
+    }
+
+    if ($ops->{$user}{certfp}) {
+        my $certfp = $self->{state}{users}{uc_irc $nick}{certfp};
+        if (!$certfp || uc($certfp) ne uc($ops->{$user}{certfp})) {
+            return -3;
+        }
+    }
+
     my $client_ip = $self->_state_user_ip($nick);
     return if !$client_ip;
     if (!$ops->{$user}{ipmask} && ($client_ip && $client_ip =~ /^(127\.|::1)/)) {
@@ -13333,7 +13351,7 @@ EOF
         461 => [1, "Not enough parameters"],
         462 => [0, "Unauthorised command (already registered)"],
         463 => [0, "Your host isn\'t among the privileged"],
-        464 => [0, "Password mismatch"],
+        464 => [0, "Password incorrect"],
         465 => [0, "You are banned from this server"],
         466 => [0, "You will be banned from this server"],
         467 => [1, "Channel key already set"],
@@ -13599,6 +13617,12 @@ sub add_operator {
     if (!defined $ref->{username} || !defined $ref->{password}) {
         warn "Not enough parameters\n";
         return;
+    }
+
+    if (($ref->{ssl_required} || $ref->{certfp}) && !$self->{got_ssl}) {
+        warn "SSL required, but it is not supported, ignoring\n";
+        delete $ref->{ssl_required};
+        delete $ref->{certfp};
     }
 
     if ( $ref->{ipmask} && $ref->{ipmask} eq 'ARRAY' ) {
@@ -14676,6 +14700,12 @@ This adds an O line to the IRCd. Takes a number of parameters:
 =item * B<'ipmask'>, either a scalar ipmask or an arrayref of addresses or CIDRs
 as understood by L<Net::CIDR>::cidrvalidate;
 
+=item * B<'ssl_required'>, set to true to require that the oper is connected
+securely using SSL/TLS;
+
+=item * B<'certfp'>, specify the fingerprint of the oper's client certificate
+to verify;
+
 =back
 
 A scalar ipmask can contain '*' to match any number of characters or '?' to
@@ -14686,6 +14716,17 @@ B<'password'> can be either plain-text, L<C<crypt>|crypt>'d or unix/apache
 md5. See the C<mkpasswd> function in
 L<POE::Component::Server::IRC::Common|POE::Component::Server::IRC::Common>
 for how to generate passwords.
+
+B<'ssl_required'> and B<'certfp'> obviously both require that the server
+supports SSL/TLS connections. B<'certfp'> is the SHA256 digest fingerprint
+of the client certificate. This can be obtained for the PEM formated cert
+using one of the following methods:
+
+  OpenSSL/LibreSSL:
+    openssl x509 -sha256 -noout -fingerprint -in cert.pem | sed -e 's/^.*=//;s/://g'
+
+  GnuTLS:
+    certtool -i < cert.pem | egrep -A 1 'SHA256 fingerprint'
 
 =head3 C<del_operator>
 
