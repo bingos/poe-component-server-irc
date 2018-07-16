@@ -11766,14 +11766,21 @@ sub _state_auth_peer_conn {
     }
 
     my $conn = $self->{state}{conns}{$conn_id};
-    if (!$peers->{uc $name}{ipmask} && $conn->{socket}[0] =~ /^(127\.|::1)/) {
+    my $peer = $peers->{uc $name};
+
+    if ($peer->{certfp} && $conn->{secured}) {
+        my $certfp = $self->connection_certfp($conn_id);
+        return 0 if !$certfp || $certfp ne $peer->{certfp};
+    }
+
+    if (!$peer->{ipmask} && $conn->{socket}[0] =~ /^(127\.|::1)/) {
         return 1;
     }
-    return 0 if !$peers->{uc $name}{ipmask};
+    return 0 if !$peer->{ipmask};
     my $client_ip = $conn->{socket}[0];
 
-    if (ref $peers->{uc $name}{ipmask} eq 'ARRAY') {
-        for my $block ( @{ $peers->{uc $name}{ipmask} }) {
+    if (ref $peer->{ipmask} eq 'ARRAY') {
+        for my $block ( @{ $peer->{ipmask} }) {
             if ( $block->isa('Net::Netmask') ) {
               return 1 if $block->match($client_ip);
               next;
@@ -11783,7 +11790,7 @@ sub _state_auth_peer_conn {
     }
 
     return 1 if matches_mask(
-        '*!*@'.$peers->{uc $name}{ipmask},
+        '*!*@'.$peer->{ipmask},
         "*!*\@$client_ip",
     );
 
@@ -13805,7 +13812,8 @@ sub del_peer {
     my $self = shift;
     my $name = shift || return;
     return if !defined $self->{config}{peers}{uc $name};
-    delete $self->{config}{peers}{uc $name};
+    my $rec = delete $self->{config}{peers}{uc $name};
+    $self->del_service( $rec->{name} ) if $rec->{service};
     return;
 }
 
@@ -14752,7 +14760,7 @@ for how to generate passwords.
 
 B<'ssl_required'> and B<'certfp'> obviously both require that the server
 supports SSL/TLS connections. B<'certfp'> is the SHA256 digest fingerprint
-of the client certificate. This can be obtained for the PEM formated cert
+of the client certificate. This can be obtained from the PEM formated cert
 using one of the following methods:
 
   OpenSSL/LibreSSL:
@@ -14803,7 +14811,20 @@ accepted as a services peer.
 =item * B<'ssl'>, set to a true value to enable SSL/TLS support. This must
 be done on both ends of the connection. Requires L<POE::Component::SSLify>.
 
+=item * B<'certfp'>, specify the fingerprint of the peer's client certificate
+to verify;
+
 =back
+
+B<'certfp'> is the SHA256 digest fingerprint of the client certificate.
+This can be obtained from the PEM formated cert using one of the following
+methods:
+
+  OpenSSL/LibreSSL:
+    openssl x509 -sha256 -noout -fingerprint -in cert.pem | sed -e 's/^.*=//;s/://g'
+
+  GnuTLS:
+    certtool -i < cert.pem | egrep -A 1 'SHA256 fingerprint'
 
 =head3 C<del_peer>
 
