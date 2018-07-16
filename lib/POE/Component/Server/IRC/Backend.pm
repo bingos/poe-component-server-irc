@@ -5,7 +5,7 @@ use warnings;
 use Carp qw(carp croak);
 use List::Util qw(first);
 use POE qw(Wheel::SocketFactory Wheel::ReadWrite Filter::Stackable
-           Filter::Line Filter::IRCD);
+           Filter::Line Filter::IRCD Filter::ConnStats);
 use Net::Netmask; # deprecated
 use Net::CIDR ();
 use Net::IP::Minimal qw[ip_is_ipv6];
@@ -217,12 +217,16 @@ sub _accept_connection {
         die "Failed to SSLify server socket: $@" if $@;
     }
 
+    my $stats_filter = POE::Filter::ConnStats->new();
+
     my $wheel = POE::Wheel::ReadWrite->new(
         Handle       => $socket,
-        Filter       => $self->{filter},
         InputEvent   => '_conn_input',
         ErrorEvent   => '_conn_error',
         FlushedEvent => '_conn_flushed',
+        Filter       => POE::Filter::Stackable->new(
+            Filters => [$stats_filter, $self->{filter}],
+        ),
     );
 
     if ($wheel) {
@@ -239,6 +243,7 @@ sub _accept_connection {
             antiflood => $listener->{antiflood},
             compress  => 0,
             secured   => $secured,
+            stats     => $stats_filter,
         };
 
         my $needs_auth = $listener->{auth} && $self->{auth} ? 1 : 0;
@@ -251,6 +256,7 @@ sub _accept_connection {
             $sockport,
             $needs_auth,
             $secured,
+            $stats_filter,
         );
 
         $ref->{alarm} = $kernel->delay_set(
@@ -478,13 +484,15 @@ sub _sock_up {
         die "Failed to SSLify client socket: $@" if $@;
     }
 
+    my $stats_filter = POE::Filter::ConnStats->new();
+
     my $wheel = POE::Wheel::ReadWrite->new(
         Handle       => $socket,
         InputEvent   => '_conn_input',
         ErrorEvent   => '_conn_error',
         FlushedEvent => '_conn_flushed',
         Filter       => POE::Filter::Stackable->new(
-            Filters => [$self->{filter}],
+            Filters => [$stats_filter, $self->{filter}],
         ),
     );
 
@@ -499,6 +507,7 @@ sub _sock_up {
         idle      => $cntr->{idle},
         antiflood => 0,
         compress  => 0,
+        stats     => $stats_filter,
     };
 
     $self->{wheels}{$wheel_id} = $ref;
@@ -509,7 +518,8 @@ sub _sock_up {
         $peerport,
         $sockaddr,
         $sockport,
-        $cntr->{name}
+        $cntr->{name},
+        $stats_filter,
     );
     return;
 }
@@ -799,6 +809,12 @@ sub connection_certfp {
     };
     $fp =~ s!:!!g if $fp;
     return $fp;
+}
+
+sub connection_stats {
+    my ($self, $wheel_id) = @_;
+    return if !$wheel_id || !defined $self->{wheels}{$wheel_id};
+    return $self->{wheels}{$wheel_id}{stats}->stats();
 }
 
 sub _conn_flooded {

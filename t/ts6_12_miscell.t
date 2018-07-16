@@ -39,6 +39,7 @@ POE::Session->create(
             _launch_client
             ircd_listener_add
             ircd_daemon_eob
+            ircd_daemon_snotice
             groucho_connected
             groucho_input
             groucho_disconnected
@@ -77,6 +78,11 @@ sub _shutdown {
       fail('We timed out');
     }
     exit;
+    return;
+}
+
+sub ircd_daemon_snotice {
+    pass($_[ARG0]);
     return;
 }
 

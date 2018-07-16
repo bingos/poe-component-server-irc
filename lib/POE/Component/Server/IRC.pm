@@ -47,7 +47,7 @@ sub spawn {
 sub IRCD_connection {
     my ($self, $ircd) = splice @_, 0, 2;
     pop @_;
-    my ($conn_id, $peeraddr, $peerport, $sockaddr, $sockport, $needs_auth, $secured)
+    my ($conn_id, $peeraddr, $peerport, $sockaddr, $sockport, $needs_auth, $secured, $filter)
         = map { ${ $_ } } @_;
 
     if ($self->_connection_exists($conn_id)) {
@@ -59,6 +59,7 @@ sub IRCD_connection {
     $self->{state}{conns}{$conn_id}{seen}       = time();
     $self->{state}{conns}{$conn_id}{conn_time}  = time();
     $self->{state}{conns}{$conn_id}{secured}    = $secured;
+    $self->{state}{conns}{$conn_id}{stats}      = $filter;
     $self->{state}{conns}{$conn_id}{socket}
         = [$peeraddr, $peerport, $sockaddr, $sockport];
 
@@ -78,7 +79,7 @@ sub IRCD_connection {
 sub IRCD_connected {
     my ($self, $ircd) = splice @_, 0, 2;
     pop @_;
-    my ($conn_id, $peeraddr, $peerport, $sockaddr, $sockport, $name)
+    my ($conn_id, $peeraddr, $peerport, $sockaddr, $sockport, $name, $filter)
         = map { ${ $_ } } @_;
 
     if ($self->_connection_exists($conn_id)) {
@@ -91,6 +92,7 @@ sub IRCD_connected {
     $self->{state}{conns}{$conn_id}{type}       = 'u';
     $self->{state}{conns}{$conn_id}{seen}       = time();
     $self->{state}{conns}{$conn_id}{conn_time}  = time();
+    $self->{state}{conns}{$conn_id}{stats}      = $filter;
     $self->{state}{conns}{$conn_id}{socket}
         = [$peeraddr, $peerport, $sockaddr, $sockport];
 
@@ -541,11 +543,29 @@ sub _cmd_from_unknown {
                   $self->{state}{conns}{$wheel_id}{ts_data} = [ @{$params}[2,3] ];
                   my $ts  = $params->[2];
                   my $sid = $params->[3];
-                  my $error;
-                  $error = 'Bogus server ID introduced' if $sid !~ $sid_re or $ts ne '6';
-                  $error = 'Server ID already exists'  if $self->state_sid_exists( $sid );
-                  if ( $error ) {
-                    $self->_terminate_conn_error($wheel_id, $error);
+                  my $errstr;
+                  if ($sid !~ $sid_re || $ts ne '6') {
+                      my $crec = $self->{state}{conns}{$wheel_id};
+                      $self->_send_to_realops(
+                          sprintf(
+                              'Link [unknown@%s] introduced server with bogus server ID %s',
+                              $crec->{socket}[0], $sid,
+                          ), qw[Notice s],
+                      );
+                      $errstr  = 'Bogus server ID introduced';
+                  }
+                  elsif ($self->state_sid_exists( $sid )) {
+                      my $crec = $self->{state}{conns}{$wheel_id};
+                      $self->_send_to_realops(
+                          sprintf(
+                              'Attempt to re-introduce server %s SID %s from [unknown@%s]',
+                              $self->_state_sid_name($sid), $sid, $crec->{socket}[0],
+                          ), qw[Notice s],
+                      );
+                      $errstr = 'Server ID already exists';
+                  }
+                  if ($errstr) {
+                    $self->_terminate_conn_error($wheel_id, $errstr);
                     last SWITCH;
                   }
               }
@@ -611,6 +631,12 @@ sub _cmd_from_unknown {
                 last SWITCH;
             }
             if ($self->state_peer_exists($conn->{name})) {
+                $self->_send_to_realops(
+                    sprintf(
+                        'Attempt to re-introduce server %s from [unknown@%s]',
+                        $conn->{name}, $conn->{socket}[0],
+                    ), qw[Notice s],
+                );
                 $self->_terminate_conn_error($wheel_id, 'Server exists.');
                 last SWITCH;
             }
@@ -4223,6 +4249,14 @@ sub _daemon_client_miscell {
             );
             last SWITCH;
         }
+        if ($cmd =~ m!^(ADMIN|INFO|MOTD)$!i) {
+            $self->_send_to_realops(
+                sprintf(
+                    '%s requested by %s (%s) [%s]',
+                    $cmd, $nick, (split /!/,$self->state_user_full($nick))[1], $server,
+                ), qw[Notice y],
+            );
+        }
         my $method = '_daemon_do_' . lc $cmd;
         my $uid = $self->state_user_uid($nick);
         push @$ref, $_ for map { $_->{prefix} = $server; $_->{params}[0] = $nick; $_ }
@@ -4253,6 +4287,15 @@ sub _daemon_peer_miscell {
                 $self->_state_sid_route($args->[0]),
             );
             last SWITCH;
+        }
+        if ($cmd =~ m!^(ADMIN|INFO|MOTD)$!i) {
+            my $urec = $self->{state}{uids}{$uid};
+            $self->_send_to_realops(
+                sprintf(
+                    '%s requested by %s (%s) [%s]',
+                    $cmd, $urec->{nick}, (split /!/,$urec->{full}->())[1], $urec->{server},
+                ), qw[Notice y],
+            );
         }
         my $method = '_daemon_do_' . lc $cmd;
         $ref = $self->$method($uid, @$args);
@@ -4701,7 +4744,7 @@ sub _daemon_do_stats {
         sprintf(
             'STATS %s requested by %s (%s@%s) [%s]',
             $char, $rec->{nick}, $rec->{auth}{ident},
-            $rec->{ident}{hostname}, $rec->{peer},
+            $rec->{ident}{hostname}, $rec->{server},
         ),
         'Notice', 'y',
     );
@@ -7075,6 +7118,13 @@ sub _daemon_cmd_links {
             last SWITCH;
         }
 
+        $self->_send_to_realops(
+            sprintf(
+               'LINKS requested by %s (%s) [%s]',
+               $nick, (split /!/,$self->state_user_full($nick))[1], $server,
+            ), qw[Notice y],
+        );
+
         my $mask = shift @$args || '*';
 
         push @$ref, $_ for
@@ -7319,13 +7369,24 @@ sub _daemon_peer_squit {
             my $quit_msg = join ' ',
                 $self->{state}{sids}{$qsid}{peer}, $qpeer;
 
-            $self->_send_to_realops(
-                sprintf(
-                    'Server %s split from %s',
-                    $qpeer, $self->{state}{sids}{$qsid}{peer},
-                ),
-                'Notice', 'e',
-            );
+            if ($sid eq $self->{state}{sids}{$qsid}{psid}) {
+                my $stats = $self->{state}{conns}{$peer_id}{stats}->stats();
+                $self->_send_to_realops(
+                    sprintf(
+                      '%s was connected for %s. %s/%s sendK/recvK.',
+                      $qpeer, _duration(time() - $self->{state}{sids}{$qsid}{conn_time}),
+                      ( $stats->[0] >> 10 ), ( $stats->[1] >> 10 ),
+                    ), qw[Notice e],
+                );
+            }
+            else {
+                $self->_send_to_realops(
+                    sprintf(
+                      'Server %s split from %s',
+                      $qpeer, $self->{state}{sids}{$qsid}{peer},
+                    ), qw[Notice e],
+                );
+            }
             for my $uid ($self->_state_server_squit($qsid)) {
                 my $output = {
                     prefix  => $self->state_user_full($uid),
@@ -8412,7 +8473,45 @@ sub _daemon_peer_sid {
         if (!$count || $count < 2) {
             last SWITCH;
         }
+        if ($args->[0] !~ $host_re) {
+            $self->_send_to_realops(
+                sprintf(
+                    'Link %s[unknown@%s] introduced server with bogus server name %s',
+                    $peer->{name}, $peer->{socket}[0], $args->[0],
+                ), 'Notice', 's',
+            );
+            $self->_terminate_conn_error($peer_id, 'Bogus server name introduced');
+            last SWITCH;
+        }
+        if ($args->[2] !~ $sid_re) {
+            $self->_send_to_realops(
+                sprintf(
+                    'Link %s[unknown@%s] introduced server with bogus server ID %s',
+                    $peer->{name}, $peer->{socket}[0], $args->[2],
+                ), 'Notice', 's',
+            );
+            $self->_terminate_conn_error($peer_id, 'Bogus server ID introduced');
+            last SWITCH;
+        }
         if ($self->state_sid_exists($args->[2])) {
+            my $prec = $self->{state}{conns}{$peer_id};
+            $self->_send_to_realops(
+                sprintf(
+                    'Link %s[unknown@%s] cancelled, server ID %s already exists',
+                    $prec->{name}, $prec->{socket}[0], $args->[2],
+                ), 'Notice', 's',
+            );
+            $self->_terminate_conn_error($peer_id, 'Link cancelled, server ID already exists');
+            last SWITCH;
+        }
+        if ($self->state_peer_exists($args->[0])) {
+            my $prec = $self->{state}{conns}{$peer_id};
+            $self->_send_to_realops(
+                sprintf(
+                    'Link %s[unknown@%s] cancelled, server %s already exists',
+                    $prec->{name}, $prec->{socket}[0], $args->[0],
+                ), 'Notice', 's',
+            );
             $self->_terminate_conn_error($peer_id, 'Server exists');
             last SWITCH;
         }
@@ -10623,6 +10722,13 @@ sub _daemon_peer_links {
            );
            last SWITCH;
         }
+        my $urec = $self->{state}{uids}{$uid};
+        $self->_send_to_realops(
+            sprintf(
+               'LINKS requested by %s (%s) [%s]',
+               $urec->{nick}, (split /!/,$urec->{full}->())[1], $urec->{server},
+            ), qw[Notice y],
+        );
         push @$ref, $_ for
              @{ $self->_daemon_do_links($uid,$sid,$mask ) };
     }
@@ -12373,6 +12479,16 @@ sub _state_server_squit {
     my $rec = delete $self->{state}{sids}{$sid};
     my $upeer = uc $rec->{name};
     my $me = uc $self->server_name();
+    my $mysid = $self->server_sid();
+
+    $self->_send_to_realops(
+        sprintf(
+            'Server %s split from %s',
+            $rec->{name},
+            $self->{state}{sids}{ $rec->{psid} }{name},
+        ), qw[Notice e],
+    ) if $mysid ne $rec->{psid};
+
     delete $self->{state}{peers}{$upeer};
     delete $self->{state}{peers}{$me}{peers}{$upeer};
     delete $self->{state}{peers}{$me}{sids}{$sid};
@@ -13665,6 +13781,30 @@ sub _send_output_to_channel {
         @{ $output->{params} },
     );
     return 1;
+}
+
+sub _duration {
+    my $duration = shift;
+    $duration = 0 if !defined $duration || $duration !~ m!^\d+$!;
+    my $timestr;
+    my $days = my $hours = my $mins = my $secs = 0;
+    while ($duration >= 60 * 60 * 24) {
+        $duration -= 60 * 60 * 24;
+        ++$days;
+    }
+    while ($duration >= 60 * 60) {
+        $duration -= 60 * 60;
+        ++$hours;
+    }
+    while ($duration >= 60) {
+        $duration -= 60;
+        ++$mins;
+    }
+    $secs = $duration;
+    return sprintf(
+        '%u day%s, %02u:%02u:%02u',
+        $days, ($days == 1 ? '' : 's'), $hours, $mins, $secs,
+    );
 }
 
 sub add_operator {

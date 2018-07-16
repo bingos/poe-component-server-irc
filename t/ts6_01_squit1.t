@@ -189,8 +189,7 @@ sub client_input {
   }
   if ( $cmd eq 'NOTICE' ) {
     pass($cmd);
-    is($in->{raw_line},':listen.server.irc NOTICE * :*** Notice -- Server harpo.server.irc split from listen.server.irc',
-      ':listen.server.irc NOTICE * :*** Notice -- Server harpo.server.irc split from listen.server.irc');
+    like($in->{raw_line},qr/harpo\.server\.irc was connected/,$in->{raw_line});
     $poe_kernel->state('client_input');
     $poe_kernel->yield('_clients_quit');
     return;

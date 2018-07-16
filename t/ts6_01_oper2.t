@@ -27,8 +27,7 @@ my @notices = (
 '*** Notice -- Client connecting: bobbins (~bobbins@listen.server.irc) [127.0.0.1] {users} [bobbins along] <1FUAAAAAA>',
 '*** Notice -- Failed OPER attempt as moo by bobbins (~bobbins@listen.server.irc) - requires SSL/TLS',
 '*** Notice -- Client exiting: bobbins (~bobbins@listen.server.irc) [127.0.0.1] [Quit: "Connection reset by fear"]',
-'*** Notice -- Server harpo.server.irc split from listen.server.irc',
-'*** Notice -- Server groucho.server.irc split from listen.server.irc',
+'*** Notice -- Server fake.server.irc split from groucho.server.irc',
 );
 
 my %servers = (
@@ -137,7 +136,7 @@ sub ircd_listener_add {
 
 sub ircd_daemon_snotice {
     my $notice = $_[ARG0];
-    if ($notice =~ m!(Link with|End of)!) {
+    if ($notice =~ m!(Link with|End of|was connected)!) {
         pass($notice);
         return;
     }
