@@ -31,6 +31,12 @@ Revision history for POE-Component-Server-IRC
     - LIST command now supports SAFELIST and ELIST filters
     - Implemented TRACE and ETRACE commands
     - Implemented pseudo commands/service aliases
+    - NOTICEs sent for server operations with delivery to
+      OPERs based on umodes. New snotice event.
+    - Major overhaul of TLS/SSL. Server and oper certificate
+      fingerprint authentication added.
+    - Added channel modes +C, +O, +M, +N, +R, +S, +T +u and +L
+    - Implemented WATCH command
 
 1.54  Fri Nov 25 15:36:51 UTC 2011
     - Resolve problem with remote (versus localhost) clients
