@@ -1,9 +1,25 @@
 use strict;
 use warnings;
-use Test::More tests => 25;
+use Test::More;
 use POE qw[Filter::Stackable Filter::Line Filter::IRCD];
 use POE::Component::Server::IRC;
 use Test::POE::Client::TCP;
+
+our $GOT_SSL;
+
+BEGIN {
+    eval {
+        require POE::Component::SSLify;
+        import POE::Component::SSLify qw( Server_SSLify SSLify_Options Client_SSLify );
+        $GOT_SSL = 1;
+    };
+}
+
+if (!$GOT_SSL) {
+    plan skip_all => "POE::Component::SSLify not available";
+}
+
+plan tests => 25;
 
 my $ts = time();
 
@@ -13,6 +29,7 @@ my $pocosi = POE::Component::Server::IRC->spawn(
     auth         => 0,
     antiflood    => 0,
     plugin_debug => 1,
+    sslify_options => ['certs/ircd.key', 'certs/ircd.crt'],
     config => { sid => '1FU', servername   => 'listen.server.irc', },
 );
 
@@ -41,7 +58,7 @@ $poe_kernel->run();
 sub _start {
     my ($kernel, $heap) = @_[KERNEL, HEAP];
     $heap->{ircd}->yield('register', 'all');
-    $heap->{ircd}->add_listener();
+    $heap->{ircd}->add_listener(usessl => 1);
     $kernel->delay('_shutdown', 60);
 }
 
@@ -68,11 +85,13 @@ sub ircd_listener_add {
         rpass => 'foo',
         type  => 'c',
         zip   => 1,
+        certfp => '5EF425B347ADC38F2621540788CD91C578D1F22F1AA44DD47D87470F55B80B9C',
     );
     my $filter = POE::Filter::Stackable->new();
     $filter->push( POE::Filter::Line->new( InputRegexp => '\015?\012', OutputLiteral => "\015\012" ),
                POE::Filter::IRCD->new( debug => 0 ), );
-    $heap->{testc} = Test::POE::Client::TCP->spawn( filter => $filter, address => '127.0.0.1', port => $port );
+    $heap->{testc} = Test::POE::Client::TCP->spawn( filter => $filter, address => '127.0.0.1', port => $port,
+                        usessl => 1, sslcert => 'certs/groucho.crt', sslkey => 'certs/groucho.key' );
     return;
 }
 
@@ -91,7 +110,7 @@ sub testc_registered {
 sub testc_connected {
   my ($kernel,$heap,$sender) = @_[KERNEL,HEAP,SENDER];
   pass($_[STATE]);
-  $kernel->post( $sender, 'send_to_server', { command => 'PASS', params => [ 'boo', 'TS', '6', '6FU' ], } );
+  $kernel->post( $sender, 'send_to_server', { command => 'PASS', params => [ 'foo', 'TS', '6', '6FU' ], } );
   $kernel->post( $sender, 'send_to_server', { command => 'CAPAB', params => [ 'KNOCK UNDLN DLN TBURST GLN ENCAP UNKLN KLN CHW IE EX HOPS SVS CLUSTER EOB QS' ], colonify => 1 } );
   $kernel->post( $sender, 'send_to_server', { command => 'SERVER', params => [ 'connect.server.irc', '1', 'Open the door and come in!!!!!!' ], colonify => 1 } );
   $kernel->post( $sender, 'send_to_server', { command => 'SVINFO', params => [ '6', '6', '0', time() ], colonify => 1 } );
@@ -122,7 +141,7 @@ sub testc_input {
   my ($heap,$input) = @_[HEAP,ARG0];
   #diag($input->{raw_line}, "\n");
   is($input->{command}, 'ERROR', 'ERROR! ERROR! ERROR!');
-  is($input->{params}[0], 'Closing Link: 127.0.0.1 (Invalid password.)', 'Closing Link: 127.0.0.1 (Invalid password.)');
+  is($input->{params}[0], 'Closing Link: 127.0.0.1 (Invalid certificate fingerprint.)', 'Closing Link: 127.0.0.1 (Invalid certificate fingerprint.)');
   return;
 }
 
@@ -140,6 +159,8 @@ sub testc_disconnected {
   $poe_kernel->state('testc_connected','main','testc_connected2');
   $poe_kernel->state('testc_input','main','testc_input2');
   $poe_kernel->state('testc_disconnected','main','testc_disconnected2');
+  $heap->{testc}->{sslcert} = 'certs/connect.crt';
+  $heap->{testc}->{sslkey}  = 'certs/connect.key';
   $poe_kernel->post( $_[SENDER], 'connect' );
   return;
 }

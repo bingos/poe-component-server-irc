@@ -577,11 +577,36 @@ sub _cmd_from_unknown {
                 $self->_terminate_conn_error($wheel_id, 'Non-TS server.');
                 last SWITCH;
             }
-            if (!$self->_state_auth_peer_conn($wheel_id,
-                    $conn->{name}, $conn->{pass})) {
+            my $result = $self->_state_auth_peer_conn($wheel_id,
+                            $conn->{name}, $conn->{pass});
+            if (!$result || $result <= 0) {
+                my $errstr; my $snotice;
+                if (!defined $result || $result == 0) {
+                    $snotice = 'No entry for';
+                    $errstr  = 'No connect {} block.';
+                }
+                elsif ($result == -1) {
+                    $snotice = 'Bad password';
+                    $errstr  = 'Invalid password.';
+                }
+                elsif ($result == -2) {
+                    $snotice = 'Invalid certificate fingerprint';
+                    $errstr  = 'Invalid certificate fingerprint.';
+                }
+                else {
+                    $snotice = 'Invalid host';
+                    $errstr  = 'Invalid host.';
+                }
+                $self->_send_to_realops(
+                    sprintf(
+                        'Unauthorized server connection attempt from [unknown@%s]: %s for server %s',
+                        $conn->{socket}[0], $snotice, $conn->{name},
+                    ),
+                    'Notice', 's',
+                );
                 $self->_terminate_conn_error(
                     $wheel_id,
-                    'Unauthorised server.',
+                    $errstr,
                 );
                 last SWITCH;
             }
@@ -11759,30 +11784,29 @@ sub _state_auth_peer_conn {
         return;
     }
 
-    return if !$name || !$pass;
+    return 0 if !$name || !$pass;
     my $peers = $self->{config}{peers};
-    if (!$peers->{uc $name} || !chkpasswd($pass, $peers->{uc $name}{pass})) {
-        return 0;
-    }
+    return 0 if !$peers->{uc $name};
+    my $peer = $peers->{uc $name};
+    return -1 if !chkpasswd($pass,$peer->{pass});
 
     my $conn = $self->{state}{conns}{$conn_id};
-    my $peer = $peers->{uc $name};
 
     if ($peer->{certfp} && $conn->{secured}) {
         my $certfp = $self->connection_certfp($conn_id);
-        return 0 if !$certfp || $certfp ne $peer->{certfp};
+        return -2 if !$certfp || $certfp ne $peer->{certfp};
     }
 
     if (!$peer->{ipmask} && $conn->{socket}[0] =~ /^(127\.|::1)/) {
         return 1;
     }
-    return 0 if !$peer->{ipmask};
+    return -3 if !$peer->{ipmask};
     my $client_ip = $conn->{socket}[0];
 
     if (ref $peer->{ipmask} eq 'ARRAY') {
         for my $block ( @{ $peer->{ipmask} }) {
             if ( $block->isa('Net::Netmask') ) {
-              return 1 if $block->match($client_ip);
+              return -3 if $block->match($client_ip);
               next;
             }
             return 1 if Net::CIDR::cidrlookup( $client_ip, $block );
@@ -11794,7 +11818,7 @@ sub _state_auth_peer_conn {
         "*!*\@$client_ip",
     );
 
-    return 0;
+    return -3;
 }
 
 {
