@@ -3972,25 +3972,6 @@ sub _state_peer_dependents {
     }
     return;
 }
-sub _daemon_cmd_etrace {
-    my $self   = shift;
-    my $nick   = shift || return;
-    my $server = $self->server_name();
-    my $args   = [@_];
-    my $count  = @$args;
-    my $ref    = [ ];
-
-    SWITCH: {
-        if (!$self->state_user_is_operator($nick)) {
-            push @$ref, ['481'];
-            last SWITCH;
-        }
-        # Call _daemon_do_etrace
-    }
-    return @$ref if wantarray;
-    return $ref;
-}
-
 sub _daemon_cmd_nick {
     my $self   = shift;
     my $nick   = shift || return;
@@ -4277,14 +4258,25 @@ sub _daemon_peer_miscell {
     my $ref    = [ ];
 
     SWITCH: {
-        if ($args->[0] !~ m!^$sid!) {
+        if ($cmd ne 'STATS' && $args->[0] !~ m!^$sid!) {
             $self->send_output(
                 {
                     prefix  => $uid,
                     command => $cmd,
                     params  => $args,
                 },
-                $self->_state_sid_route($args->[0]),
+                $self->_state_sid_route(substr $args->[0], 0, 3),
+            );
+            last SWITCH;
+        }
+        if ($cmd eq 'STATS' && $args->[1] !~ m!^$sid!) {
+            $self->send_output(
+                {
+                    prefix  => $uid,
+                    command => $cmd,
+                    params  => $args,
+                },
+                $self->_state_sid_route(substr $args->[1], 0, 3),
             );
             last SWITCH;
         }
@@ -4684,6 +4676,7 @@ sub _daemon_cmd_stats {
     my $char   = shift;
     my $target = shift;
     my $server = $self->server_name();
+    my $sid    = $self->server_sid();
     my $ref    = [ ];
 
     SWITCH: {
@@ -4692,41 +4685,67 @@ sub _daemon_cmd_stats {
             last SWITCH;
         }
         $char = substr $char, 0, 1;
-        if ($char !~ /[ump]/) {
-            push @$ref, ['263', 'STATS'];
+        if (!$self->state_user_is_operator($nick)) {
+            my $lastuse = $self->{state}{lastuse}{stats};
+            my $pacewait = $self->{config}{pace_wait};
+            if ( $lastuse && $pacewait && ( $lastuse + $pacewait ) > time() ) {
+                push @$ref, ['263', 'STATS'];
+                last SWITCH;
+            }
+            $self->{state}{lastuse}{stats} = time();
+        }
+        if ($char =~ /^[Ll]$/ && !$target) {
+            push @$ref, ['461', 'STATS'];
             last SWITCH;
         }
-        if ($target && !$self->state_peer_exists($target)) {
-            push @$ref, ['402', $target];
-            last SWITCH;
-        }
-        if ($target && uc $server ne uc $target) {
-            $self->send_output(
-                {
-                    prefix  => $self->state_user_uid($nick),
-                    command => 'STATS',
-                    params  => [
-                        $char,
-                        $self->_state_peer_sid($target),
-                    ],
-                },
-                $self->_state_peer_route($target),
-            );
-            last SWITCH;
+        if ($target) {
+           my $targ = $self->_state_find_peer($target);
+           if (!$targ) {
+              push @$ref, [ '402', $target ];
+              last SWITCH;
+           }
+           if ($targ !~ m!^$sid!) {
+              my $psid = substr $targ, 0, 3;
+              $self->send_output(
+                  {
+                      prefix  => $self->state_user_uid($nick),
+                      command => 'STATS',
+                      params  => [
+                          $char,
+                          $targ,
+                      ],
+                  },
+                  $self->_state_sid_route($psid),
+              );
+              last SWITCH;
+           }
         }
         my $uid = $self->state_user_uid($nick);
         push @$ref, $_ for map { $_->{prefix} = $server; $_->{params}[0] = $nick; $_ }
-                       @{ $self->_daemon_do_stats($uid, $char) };
+                       @{ $self->_daemon_do_stats($uid, $char, $target) };
     }
 
     return @$ref if wantarray;
     return $ref;
 }
 
+sub _rbytes {
+  my $bytes=shift;
+  my $d=2;
+  return undef if !defined $bytes;
+  return [ $bytes, 'Bytes' ]                              if abs($bytes) <= 2** 0*1000;
+  return [ sprintf("%.*f",$d,$bytes/2**10), 'Kilobytes' ] if abs($bytes) <  2**10*1000;
+  return [ sprintf("%.*f",$d,$bytes/2**20), 'Megabytes' ] if abs($bytes) <  2**20*1000;
+  return [ sprintf("%.*f",$d,$bytes/2**30), 'Gigabytes' ] if abs($bytes) <  2**30*1000;
+  return [ sprintf("%.*f",$d,$bytes/2**40), 'Terabytes' ] if abs($bytes) <  2**40*1000;
+  return [ sprintf("%.*f",$d,$bytes/2**50), 'Petabytes' ];
+}
+
 sub _daemon_do_stats {
     my $self   = shift;
     my $uid    = shift || return;
     my $char   = shift;
+    my $targ   = shift;
     my $server = $self->server_name();
     my $sid    = $self->server_sid();
     my $ref    = [ ];
@@ -4744,9 +4763,8 @@ sub _daemon_do_stats {
         sprintf(
             'STATS %s requested by %s (%s@%s) [%s]',
             $char, $rec->{nick}, $rec->{auth}{ident},
-            $rec->{ident}{hostname}, $rec->{server},
-        ),
-        'Notice', 'y',
+            $rec->{auth}{hostname}, $rec->{server},
+        ), qw[Notice y],
     );
 
     SWITCH: {
@@ -4897,8 +4915,7 @@ sub _daemon_do_stats {
         if ($char eq 'v') {
             my $srec = $self->{state}{sids}{$sid};
             my $count = 0;
-            foreach my $psid ( sort { $srec->{sids}{$_}{name} cmp $srec->{sids}{$_}{name} }
-                  keys %{ $srec->{sids} } ) {
+            foreach my $psid ( keys %{ $srec->{sids} } ) {
                 my $prec = $srec->{sids}{$psid};
                 my $peer = $self->{config}{peers}{uc $prec->{name}};
                 my $type = '*';
@@ -5070,6 +5087,178 @@ sub _daemon_do_stats {
                     ],
                 };
             }
+            last SWITCH;
+        }
+        if ($char =~ /^[Ll]$/) {
+            my $doall = 0;
+            if (uc $targ eq uc $server) {
+                $doall = 1;
+            }
+            elsif ($targ eq $sid) {
+                $doall = 1;
+            }
+            my $name = $targ;
+            if (!$doall && $name =~ m!^[0-9]!) {
+                $name = $self->state_user_nick($name);
+            }
+            my $conns = $self->{state}{conns};
+            my %connects;
+            foreach my $conn_id ( keys %$conns ) {
+                push @{ $connects{ $conns->{$conn_id}{type} } }, $conn_id;
+            }
+            # unknown
+            foreach my $conn_id ( @{ ( $doall ? $connects{u} : [] ) } ) {
+                my $connrec = $conns->{$conn_id};
+                my $send = $connrec->{stats}->send();
+                my $recv = $connrec->{stats}->recv();
+                my $msgs = $self->connection_msgs($conn_id);
+                push @$ref, {
+                    prefix  => $sid,
+                    command => '211',
+                    params  => [
+                        $uid,
+                        sprintf(
+                          '%s[%s@%s]', ( $connrec->{nick} || '' ),
+                          ( $connrec->{auth}{ident} || 'unknown' ),
+                          ( $char eq 'L' ? $connrec->{socket}[0] :
+                              ($connrec->{auth}{hostname} || $connrec->{socket}[0] ) ),
+                        ), '0', $msgs->[0], ( $send >> 10 ), $msgs->[1], ( $recv >> 10 ),
+                        sprintf(
+                            '%s %s -',
+                            ( time - $connrec->{conn_time} ),
+                            ( time > $connrec->{seen} ? ( time - $connrec->{seen} ) : 0 ),
+                        ),
+                    ],
+                };
+            }
+            # clients
+            foreach my $conn_id ( sort { $conns->{$a}{nick} <=> $conns->{$b}{nick} }
+                                @{ $connects{c} } ) {
+                next if !$doall && !matches_mask($name,$conns->{$conn_id}{nick});
+                my $connrec = $conns->{$conn_id};
+                my $send = $connrec->{stats}->send();
+                my $recv = $connrec->{stats}->recv();
+                my $msgs = $self->connection_msgs($conn_id);
+                push @$ref, {
+                    prefix  => $sid,
+                    command => '211',
+                    params  => [
+                        $uid,
+                        sprintf(
+                          '%s[%s@%s]', ( $connrec->{nick} || '' ),
+                          ( $connrec->{auth}{ident} || 'unknown' ),
+                          ( $char eq 'L' ? $connrec->{socket}[0] :
+                              ($connrec->{auth}{hostname} || $connrec->{socket}[0] ) ),
+                        ), '0', $msgs->[0], ( $send >> 10 ), $msgs->[1], ( $recv >> 10 ),
+                        sprintf(
+                            '%s %s -',
+                            ( time - $connrec->{conn_time} ),
+                            ( time > $connrec->{seen} ? ( time - $connrec->{seen} ) : 0 ),
+                        ),
+                    ],
+                };
+            }
+            # servers
+            foreach my $conn_id ( sort { $conns->{$a}{name} cmp $conns->{$b}{name} }
+                                @{ $connects{p} } ) {
+                next if !$doall && !matches_mask($name,$conns->{$conn_id}{name});
+                my $connrec = $conns->{$conn_id};
+                my $send = $connrec->{stats}->send();
+                my $recv = $connrec->{stats}->recv();
+                my $msgs = $self->connection_msgs($conn_id);
+                push @$ref, {
+                    prefix  => $sid,
+                    command => '211',
+                    params  => [
+                        $uid,
+                        sprintf(
+                          '%s[%s@%s]', ( $connrec->{name} || '' ),
+                          ( $connrec->{auth}{ident} || 'unknown' ),
+                          ( $char eq 'L' ? $connrec->{socket}[0] :
+                              ($connrec->{auth}{hostname} || $connrec->{socket}[0] ) ),
+                        ), '0', $msgs->[0], ( $send >> 10 ), $msgs->[1], ( $recv >> 10 ),
+                        sprintf(
+                            '%s %s %s',
+                            ( time - $connrec->{conn_time} ),
+                            ( time > $connrec->{seen} ? ( time - $connrec->{seen} ) : 0 ),
+                            join ' ', @{ $connrec->{capab} },
+                        ),
+                    ],
+                };
+            }
+            last SWITCH;
+        }
+        if ($char eq '?') {
+            my $trecv = my $tsent = 0; my $scnt = 0;
+            foreach my $link ( sort keys %{ $self->{state}{sids}{$sid}{sids} } ) {
+                $scnt++;
+                my $srec = $self->{state}{sids}{$link};
+                my $send = $srec->{stats}->send();
+                my $recv = $srec->{stats}->recv();
+                my $msgs = $self->connection_msgs($srec->{route_id});
+                $trecv += $recv; $tsent += $send;
+                push @$ref, {
+                    prefix  => $sid,
+                    command => '211',
+                    params  => [
+                        $uid,
+                        sprintf('%s[unknown@%s]', $srec->{name}, $srec->{socket}[0]),
+                        '0', $msgs->[0], ( $send >> 10 ), $msgs->[1], ( $recv >> 10 ),
+                        sprintf(
+                            '%s %s %s',
+                            ( time - $srec->{conn_time} ),
+                            ( time > $srec->{seen} ? ( time - $srec->{seen} ) : 0 ),
+                            join(' ', @{ $srec->{capab} })
+                        ),
+                    ],
+                };
+            }
+            push @$ref, {
+                prefix  => $sid,
+                command => '249',
+                params  => [ $uid, '?', "$scnt total server(s)", ],
+            };
+            push @$ref, {
+                prefix  => $sid,
+                command => '249',
+                params  => [
+                    $uid, '?', sprintf('Sent total: %s %s', @{ _rbytes($tsent) }),
+                ],
+            };
+            push @$ref, {
+                prefix  => $sid,
+                command => '249',
+                params  => [
+                    $uid, '?', sprintf('Recv total: %s %s', @{ _rbytes($trecv) }),
+                ],
+            };
+            my $uptime = time - $self->server_config('created');
+            push @$ref, {
+                prefix  => $sid,
+                command => '249',
+                params  => [
+                    $uid, '?', sprintf(
+                        'Server send: %s %s (%4.1f K/s)',
+                        @{ _rbytes($self->{_globalstats}{sent}) },
+                        ( $uptime == 0 ? 0 :
+                          ( ($self->{_globalstats}{sent} >> 10) / $uptime )
+                        ),
+                    ),
+                ],
+            };
+            push @$ref, {
+                prefix  => $sid,
+                command => '249',
+                params  => [
+                    $uid, '?', sprintf(
+                        'Server recv: %s %s (%4.1f K/s)',
+                        @{ _rbytes($self->{_globalstats}{recv}) },
+                        ( $uptime == 0 ? 0 :
+                          ( ($self->{_globalstats}{sent} >> 10) / $uptime )
+                        ),
+                    ),
+                ],
+            };
             last SWITCH;
         }
     }
@@ -13582,7 +13771,7 @@ EOF
             NETWORK MODES AWAYLEN),
     };
 
-    $self->{config}{capab} = [qw(ENCAP KNOCK CLUSTER QS DLN UNDLN EX IE HOPS UNKLN KLN GLN EOB RHOST)];
+    $self->{config}{capab} = [qw(KNOCK DLN TBURST UNDLN ENCAP UNKLN KLN RHOST SVS CLUSTER EOB QS)];
 
     $self->{config}{cmds}{uc $_}++ for
         qw[accept admin away bmask cap connect die dline encap eob etrace globops info invite ison isupport join kick kill],

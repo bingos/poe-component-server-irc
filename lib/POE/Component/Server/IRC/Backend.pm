@@ -5,7 +5,7 @@ use warnings;
 use Carp qw(carp croak);
 use List::Util qw(first);
 use POE qw(Wheel::SocketFactory Wheel::ReadWrite Filter::Stackable
-           Filter::Line Filter::IRCD Filter::ConnStats);
+           Filter::Line Filter::IRCD Filter::ThruPut);
 use Net::Netmask; # deprecated
 use Net::CIDR ();
 use Net::IP::Minimal qw[ip_is_ipv6];
@@ -217,7 +217,7 @@ sub _accept_connection {
         die "Failed to SSLify server socket: $@" if $@;
     }
 
-    my $stats_filter = POE::Filter::ConnStats->new();
+    my $stats_filter = POE::Filter::ThruPut->new();
 
     my $wheel = POE::Wheel::ReadWrite->new(
         Handle       => $socket,
@@ -244,6 +244,7 @@ sub _accept_connection {
             compress  => 0,
             secured   => $secured,
             stats     => $stats_filter,
+            _sent     => 0,
         };
 
         my $needs_auth = $listener->{auth} && $self->{auth} ? 1 : 0;
@@ -484,7 +485,7 @@ sub _sock_up {
         die "Failed to SSLify client socket: $@" if $@;
     }
 
-    my $stats_filter = POE::Filter::ConnStats->new();
+    my $stats_filter = POE::Filter::ThruPut->new();
 
     my $wheel = POE::Wheel::ReadWrite->new(
         Handle       => $socket,
@@ -508,6 +509,7 @@ sub _sock_up {
         antiflood => 0,
         compress  => 0,
         stats     => $stats_filter,
+        _sent     => 0,
     };
 
     $self->{wheels}{$wheel_id} = $ref;
@@ -594,6 +596,13 @@ sub _conn_flushed {
     my ($kernel, $self, $wheel_id) = @_[KERNEL, OBJECT, ARG0];
     return if !$self->connection_exists($wheel_id);
 
+    {
+      my $sent  = $self->{wheels}{$wheel_id}{stats}->send();
+      my $tally = $sent - $self->{wheels}{$wheel_id}{_sent};
+      $self->{wheels}{$wheel_id}{_sent} = $sent;
+      $self->{_globalstats}{sent} += $tally;
+    }
+
     if ($self->{wheels}{$wheel_id}{disconnecting}) {
         $self->_disconnected(
             $wheel_id,
@@ -620,6 +629,11 @@ sub _conn_input {
     # We aren't interested if they are disconnecting
     return if $conn->{disconnecting};
 
+    {
+        require bytes;
+        $self->{_globalstats}{recv} += bytes::length($input->{raw_line}) + 2;
+    }
+
     if ($self->{raw_events}) {
         $self->send_event(
             "$self->{prefix}raw_input",
@@ -627,6 +641,7 @@ sub _conn_input {
             $input->{raw_line},
         );
     }
+    $conn->{msgs}{recv}++;
     $conn->{seen} = time();
     $kernel->delay_adjust($conn->{alarm}, $conn->{idle});
 
@@ -669,6 +684,7 @@ sub send_output {
                 $out =~ s/\015\012$//;
                 $self->send_event("$self->{prefix}raw_output", $id, $out);
             }
+            $self->{wheels}{$id}{msgs}{sent}++;
             $self->{wheels}{$id}{wheel}->put($output);
         }
     }
@@ -815,6 +831,12 @@ sub connection_stats {
     my ($self, $wheel_id) = @_;
     return if !$wheel_id || !defined $self->{wheels}{$wheel_id};
     return $self->{wheels}{$wheel_id}{stats}->stats();
+}
+
+sub connection_msgs {
+    my ($self, $wheel_id) = @_;
+    return if !$wheel_id || !defined $self->{wheels}{$wheel_id};
+    return [ map { $self->{wheels}{$wheel_id}{msgs}{$_} } qw[sent recv] ];
 }
 
 sub _conn_flooded {
