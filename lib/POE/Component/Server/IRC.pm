@@ -9030,7 +9030,7 @@ sub _daemon_peer_uid {
         );
 
         $self->send_event('daemon_uid', $prefix, @$args);
-        $self->send_event('daemon_nick', @{ $args }[0..5], $record->{server}, ( $args->[9] || '' ) );
+        $self->send_event('daemon_nick', @{ $args }[0..5], $record->{server}, ( $args->[9+$rhost] || '' ) );
 
     }
 
@@ -13937,41 +13937,6 @@ sub _send_output_channel_local {
     return 1;
 }
 
-sub _send_output_to_channel {
-    my $self    = shift;
-    my $channel = shift || return;
-    my $output  = shift || return;
-    my $conn_id = shift || '';
-    return if !$self->state_chan_exists($channel);
-
-    # Get conn_ids for each of our peers.
-    my $ref = [ ];
-    my $peers = { };
-    $peers->{$_}++ for $self->_state_connected_peers();
-    delete $peers->{$conn_id} if $conn_id;
-    push @$ref, $self->_state_user_route($_)
-        for grep { $self->_state_is_local_user($_) }
-            $self->state_chan_list($channel);
-    @$ref = grep { $_ ne $conn_id } @$ref;
-
-    if ($channel !~ /^\&/ && scalar keys %$peers
-        && $output->{command} ne 'JOIN') {
-        my $full = $output->{prefix};
-        my $nick = (split /!/, $full)[0];
-        my $output2 = { %$output };
-        $output2->{prefix} = $nick;
-        $self->send_output($output2, keys %$peers);
-    }
-
-    $self->send_output($output, @$ref);
-    $self->send_event(
-        "daemon_" . lc $output->{command},
-        $output->{prefix},
-        @{ $output->{params} },
-    );
-    return 1;
-}
-
 sub _duration {
     my $duration = shift;
     $duration = 0 if !defined $duration || $duration !~ m!^\d+$!;
@@ -14354,8 +14319,8 @@ sub daemon_server_kill {
             }
         }
         else {
-            $self->{state}{users}{uc_irc($target)}{killed} = 1;
             my $tuid = $self->state_user_uid( $target );
+            $self->{state}{uids}{$tuid}{killed} = 1;
             $self->send_output(
                 {
                     prefix  => $mysid,
@@ -14381,6 +14346,7 @@ sub daemon_server_mode {
     my $self   = shift;
     my $chan   = shift;
     my $server = $self->server_name();
+    my $sid    = $self->server_sid();
     my $ref    = [ ];
     my $args   = [ @_ ];
     my $count  = @$args;
@@ -14391,41 +14357,50 @@ sub daemon_server_mode {
         }
         my $record = $self->{state}{chans}{uc_irc($chan)};
         $chan = $record->{name};
+        my $mode_u_set   = ( $record->{mode} =~ /u/ );
         my $full = $server;
+        my %subs; my @reply_args; my $reply;
         my $parsed_mode = parse_mode_line(@$args);
 
         while(my $mode = shift (@{ $parsed_mode->{modes} })) {
+            next if $mode !~ /^[+-][CceIbkMNRSTLOlimnpstohuv]$/;
             my $arg;
             if ($mode =~ /^(\+[ohvklbIe]|-[ohvbIe])/) {
                 $arg = shift @{ $parsed_mode->{args} };
             }
-            if (my ($flag, $char) = $mode =~ /^(\+|-)([ohv])/) {
-                next if !$self->state_is_chan_member($arg, $chan);
-                if ($flag eq '+' && $record->{users}{uc_irc($arg)} !~ /$char/) {
+            if (my ($flag, $char) = $mode =~ /^([-+])([ohv])/ ) {
+
+                if ($flag eq '+'
+                    && $record->{users}{$self->state_user_uid($arg)} !~ /$char/) {
                     # Update user and chan record
-                    $arg = uc_irc $arg;
-                    next if $mode eq '+h' && $record->{users}{$arg} =~ /o/;
-                    if ($char eq 'h' && $record->{users}{$arg} =~ /v/) {
-                        $record->{users}{$arg} =~ s/v//g;
-                    }
-                    if ($char eq 'o' && $record->{users}{$arg} =~ /h/) {
-                        $record->{users}{$arg} =~ s/h//g;
-                    }
-                    $record->{users}{$arg} = join('', sort split //,
-                        $record->{users}{$arg} . $char);
-                    $self->{state}{users}{$arg}{chans}{uc_irc($chan)}
+                    $arg = $self->state_user_uid($arg);
+                    $record->{users}{$arg} = join('', sort
+                        split //, $record->{users}{$arg} . $char);
+                    $self->{state}{uids}{$arg}{chans}{uc_irc($chan)}
                         = $record->{users}{$arg};
+                    $reply .= $mode;
+                    my $anick = $self->state_user_nick($arg);
+                    $subs{$anick} = $arg;
+                    push @reply_args, $anick;
                 }
-                if ($flag eq '-' && $record->{users}{uc_irc($arg)} =~ /$char/) {
+
+                if ($flag eq '-' && $record->{users}{uc_irc($arg)}
+                    =~ /$char/) {
                     # Update user and chan record
-                    $arg = uc_irc($arg);
+                    $arg = $self->state_user_uid($arg);
                     $record->{users}{$arg} =~ s/$char//g;
-                $self->{state}{users}{$arg}{chans}{uc_irc($chan)}
-                    = $record->{users}{$arg};
+                    $self->{state}{uids}{$arg}{chans}{uc_irc($chan)}
+                        = $record->{users}{$arg};
+                    $reply .= $mode;
+                    my $anick = $self->state_user_nick($arg);
+                    $subs{$anick} = $arg;
+                    push @reply_args, $anick;
                 }
                 next;
             }
             if ($mode eq '+l' && $arg =~ /^\d+$/ && $arg > 0) {
+                $reply .= $mode;
+                push @reply_args, $arg;
                 if ($record->{mode} !~ /l/) {
                 $record->{mode} = join('', sort split //,
                     $record->{mode} . 'l');
@@ -14434,11 +14409,14 @@ sub daemon_server_mode {
                 next;
             }
             if ($mode eq '-l' && $record->{mode} =~ /l/) {
+                $reply .= $mode;
                 $record->{mode} =~ s/l//g;
                 delete $record->{climit};
                 next;
             }
             if ($mode eq '+k' && $arg) {
+                $reply .= $mode;
+                push @reply_args, $arg;
                 if ($record->{mode} !~ /k/) {
                     $record->{mode} = join('', sort split //,
                         $record->{mode} . 'k');
@@ -14447,6 +14425,8 @@ sub daemon_server_mode {
                 next;
             }
             if ($mode eq '-k' && $record->{mode} =~ /k/) {
+                $reply .= $mode;
+                push @reply_args, '*';
                 $record->{mode} =~ s/k//g;
                 delete $record->{ckey};
                 next;
@@ -14458,9 +14438,13 @@ sub daemon_server_mode {
                 if ($flag eq '+' && !$record->{bans}{$umask}) {
                     $record->{bans}{$umask}
                         = [$mask, ($full || $server), time];
+                    $reply .= $mode;
+                    push @reply_args, $mask;
                 }
                 if ($flag eq '-' and $record->{bans}{$umask}) {
                     delete $record->{bans}{$umask};
+                    $reply .= $mode;
+                    push @reply_args, $mask;
                 }
                 next;
             }
@@ -14471,9 +14455,13 @@ sub daemon_server_mode {
                 if ($flag eq '+' && !$record->{invex}{$umask}) {
                     $record->{invex}{$umask}
                         = [$mask, ($full || $server), time];
+                    $reply .= $mode;
+                    push @reply_args, $mask;
                 }
                 if ($flag eq '-' && $record->{invex}{$umask}) {
                     delete $record->{invex}{$umask};
+                    $reply .= $mode;
+                    push @reply_args, $mask;
                 }
                 next;
             }
@@ -14484,9 +14472,13 @@ sub daemon_server_mode {
                 if ($flag eq '+' && !$record->{excepts}{$umask}) {
                     $record->{excepts}{$umask}
                         = [$mask, ($full || $server), time];
+                    $reply .= $mode;
+                    push @reply_args, $mask;
                 }
                 if ($flag eq '-' && $record->{excepts}{$umask}) {
                     delete $record->{excepts}{$umask};
+                    $reply .= $mode;
+                    push @reply_args, $mask;
                 }
                 next;
             }
@@ -14495,36 +14487,74 @@ sub daemon_server_mode {
             if ($flag eq '+' && $record->{mode} !~ /$char/) {
                 $record->{mode} = join('', sort split //,
                 $record->{mode} . $char);
+                $reply .= $mode;
                 next;
             }
             if ($flag eq '-' && $record->{mode} =~ /$char/) {
                 $record->{mode} =~ s/$char//g;
+                $reply .= $mode;
                 next;
             }
         } # while
 
-        unshift @$args, $record->{name};
-        $self->send_output(
-            {
-                prefix   => $server,
-                command  => 'MODE',
-                params   => $args,
-                colonify => 0,
-            },
-            $self->_state_connected_peers(),
-        );
-        $self->send_output(
-            {
-                prefix   => ($full || $server),
-                command  => 'MODE',
-                params   => $args,
-                colonify => 0,
-            },
-            map { $self->_state_user_route($_) }
-                grep { $self->_state_is_local_user($_) }
-                    keys %{ $record->{users} },
-        );
-        $self->send_event("daemon_mode", $server, @$args);
+        if ($reply) {
+            $reply = unparse_mode_line($reply);
+            my @reply_args_peer = map {
+              ( defined $subs{$_} ? $subs{$_} : $_ )
+            } @reply_args;
+            $self->send_output(
+               {
+                  prefix  => $sid,
+                  command => 'TMODE',
+                  params  => [$record->{ts}, $chan, $reply, @reply_args_peer],
+                  colonify => 0,
+               },
+               $self->_state_connected_peers(),
+            );
+            $self->_send_output_channel_local(
+                $record->{name},
+                {
+                    prefix   => $server,
+                    command  => 'MODE',
+                    colonify => 0,
+                    params   => [
+                        $record->{name},
+                        $reply,
+                        @reply_args,
+                    ],
+                },
+                '', ( $mode_u_set ? 'oh' : '' ),
+            );
+            if ($mode_u_set) {
+                my $bparse = parse_mode_line( $reply, @reply_args );
+                my $breply; my @breply_args;
+                while (my $bmode = shift (@{ $bparse->{modes} })) {
+                    my $arg;
+                    $arg = shift @{ $bparse->{args} }
+                      if $bmode =~ /^(\+[ohvklbIe]|-[ohvbIe])/;
+                      next if $bmode =~ m!^[+-][beI]$!;
+                      $breply .= $bmode;
+                      push @breply_args, $arg if $arg;
+                }
+                if ($breply) {
+                   my $parsed_line = unparse_mode_line($breply);
+                   $self->_send_output_channel_local(
+                      $record->{name},
+                      {
+                          prefix   => $server,
+                          command  => 'MODE',
+                          colonify => 0,
+                          params   => [
+                              $record->{name},
+                              $parsed_line,
+                              @breply_args,
+                          ],
+                      },
+                      '','-oh',
+                   );
+                }
+            }
+        }
     } # SWITCH
 
     return @$ref if wantarray;
@@ -14574,10 +14604,9 @@ sub daemon_server_kick {
                 params  => [$chan, $who, $comment],
             },
         );
-        $who = uc_irc($who);
         $chan = uc_irc($chan);
-        delete $self->{state}{chans}{$chan}{users}{$who};
-        delete $self->{state}{users}{$who}{chans}{$chan};
+        delete $self->{state}{chans}{$chan}{users}{$wuid};
+        delete $self->{state}{uids}{$wuid}{chans}{$chan};
         if (!keys %{ $self->{state}{chans}{$chan}{users} }) {
             delete $self->{state}{chans}{$chan};
         }
@@ -14612,9 +14641,18 @@ sub daemon_server_remove {
         if (!$self->state_is_chan_member($who, $chan)) {
             last SWITCH;
         }
+        my $wuid = $self->state_user_uid($who);
         my $comment = 'Enforced PART';
         $comment .= " \"$args->[2]\"" if $args->[2];
-        $self->_send_output_to_channel(
+        $self->send_output(
+            {
+                prefix  => $wuid,
+                command => 'PART',
+                params  => [$chan, $comment],
+            },
+            $self->_state_connected_peers(),
+        );
+        $self->_send_output_channel_local(
             $chan,
             {
                 prefix  => $fullwho,
@@ -14622,10 +14660,9 @@ sub daemon_server_remove {
                 params  => [$chan, $comment],
             },
         );
-        $who = uc_irc($who);
         $chan = uc_irc($chan);
-        delete $self->{state}{chans}{$chan}{users}{$who};
-        delete $self->{state}{users}{$who}{chans}{$chan};
+        delete $self->{state}{chans}{$chan}{users}{$wuid};
+        delete $self->{state}{uids}{$wuid}{chans}{$chan};
         if (!keys %{ $self->{state}{chans}{$chan}{users} }) {
             delete $self->{state}{chans}{$chan};
         }
@@ -14638,6 +14675,7 @@ sub daemon_server_remove {
 sub daemon_server_wallops {
     my $self   = shift;
     my $server = $self->server_name();
+    my $sid    = $self->server_sid();
     my $ref    = [ ];
     my $args   = [ @_ ];
     my $count  = @$args;
@@ -14645,14 +14683,35 @@ sub daemon_server_wallops {
     if ($count) {
         $self->send_output(
             {
-                prefix  => $server,
+                prefix  => $sid,
                 command => 'WALLOPS',
                 params  => [$args->[0]],
             },
             $self->_state_connected_peers(),
+        );
+        $self->send_output(
+            {
+                prefix  => $server,
+                command => 'WALLOPS',
+                params  => [$args->[0]],
+            },
             keys %{ $self->{state}{wallops} },
         );
         $self->send_event("daemon_wallops", $server, $args->[0]);
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub daemon_server_realops {
+    my $self   = shift;
+    my $ref    = [ ];
+    my $args   = [ @_ ];
+    my $count  = @$args;
+
+    if ($count) {
+        $self->_send_to_realops( @$args );
     }
 
     return @$ref if wantarray;
@@ -15362,6 +15421,19 @@ nickname of the user to remove and a pithy comment.
 =head3 C<daemon_server_wallops>
 
 Takes one argument, the message text to send.
+
+=head3 C<daemon_server_realops>
+
+Sends server notices.
+
+Takes one mandatory argument, the message text to send.
+
+Second argument is the notice type, this can be C<Notice>, C<locops>
+or C<Globops>. Defaults to C<Notice>.
+
+Third argument is a umode flag. The notice will be sent to OPERs who
+have this umode set. Default is none and the notice will be sent to
+all OPERs.
 
 =head1 INPUT EVENTS
 
@@ -16210,8 +16282,6 @@ L<POE::Component::Server::IRC::Backend|POE::Component::IRC::Server::Backend>
 L<Net::CIDR|Net::CIDR>
 
 Hybrid IRCD L<http://ircd-hybrid.com/>
-
-TSOra L<http://www.idolnet.org/docs/README.TSora>
 
 RFC 2810 L<http://www.faqs.org/rfcs/rfc2810.html>
 
