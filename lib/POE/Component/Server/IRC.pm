@@ -5326,20 +5326,27 @@ sub _daemon_cmd_userhost {
     my $server = $self->server_name();
     my $ref    = [ ];
     my $str    = '';
+    my $cnt    = 0;
 
     for my $query (@_) {
-        my ($proper, $userhost)
-            = split /!/, $self->state_user_full($query);
-        if ($proper && $userhost) {
-            $str = join(' ', $str, $proper
-                . ($self->state_user_is_operator($proper)
-                    ? '*'
-                    : ''
-                ) . '=' . ($self->_state_user_away($proper)
-                    ? '-'
-                    : '+'
-                ) . $userhost);
+        last if $cnt >= 5;
+        $cnt++;
+        my $uid = $self->state_user_uid($query);
+        next if !$uid;
+        my $urec = $self->{state}{uids}{$uid};
+        my ($name,$uh) = split /!/, $urec->{full}->();
+        if ( $nick eq $name ) {
+            $uh = join '@', (split /\@/, $uh)[0], $urec->{socket}[0];
         }
+        my $status = '';
+        if ( $urec->{umode} =~ /o/ && ( $urec->{umode} !~ /H/ ||
+              $self->state_user_is_operator($nick) ) ) {
+            $status .= '*';
+        }
+        $status .= '=';
+        $status .= ( defined $urec->{away} ? '-' : '+' );
+        $str = join ' ', $str, $name . $status . $uh;
+        $str =~ s!^ !!g;
     }
 
     push @$ref, {
