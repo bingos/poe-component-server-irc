@@ -37,6 +37,7 @@ Revision history for POE-Component-Server-IRC
       fingerprint authentication added.
     - Added channel modes +C, +O, +M, +N, +R, +S, +T +u and +L
     - Implemented WATCH command
+    - Implemented CLOSE command
     - Added daemon_server_join() for forcing channel joins
 
 1.54  Fri Nov 25 15:36:51 UTC 2011

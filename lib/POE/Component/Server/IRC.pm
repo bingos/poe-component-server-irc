@@ -2136,6 +2136,53 @@ sub _daemon_cmd_die {
     return $ref;
 }
 
+sub _daemon_cmd_close {
+    my $self   = shift;
+    my $nick   = shift || return;
+    my $server = $self->server_name();
+    my $ref    = [ ];
+
+    SWITCH: {
+        if (!$self->state_user_is_operator($nick)) {
+            push @$ref, ['723','close'];
+            last SWITCH;
+        }
+        $self->send_event("daemon_close", $nick);
+        my $count = 0;
+        foreach my $conn_id ( keys %{ $self->{state}{conns} } ) {
+            next if $self->{state}{conns}{$conn_id}{type} ne 'u';
+            my $crec = $self->{state}{conns}{$conn_id};
+            push @$ref, {
+                prefix  => $server,
+                command => '362',
+                params  => [
+                    $nick,
+                    sprintf(
+                      '%s[%s@%s]',
+                      ( $crec->{name} || $crec->{nick} || '' ),
+                      ( $crec->{user} || 'unknown' ),
+                      $crec->{socket}[0],
+                    ),
+                    'Closed: status = unknown',
+                ],
+            };
+            $count++;
+            $self->_terminate_conn_error($conn_id,'Oper Closing');
+        }
+        push @$ref, {
+            prefix  => $server,
+            command => '363',
+            params  => [
+                $nick,
+                $count,
+                'Connections closed',
+            ],
+        };
+    }
+    return @$ref if wantarray;
+    return $ref;
+}
+
 sub _daemon_cmd_rehash {
     my $self   = shift;
     my $nick   = shift || return;
