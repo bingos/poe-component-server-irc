@@ -23,7 +23,7 @@ my $pocosi = POE::Component::Server::IRC->spawn(
     auth         => 0,
     antiflood    => 0,
     plugin_debug => 1,
-    config => { servername => 'listen.server.irc', sid => '1FU', pace_wait => 0 },
+    config => { servername => 'listen.server.irc', sid => '1FU', anti_spam_exit_message_time => 0, pace_wait => 0 },
 );
 
 POE::Session->create(

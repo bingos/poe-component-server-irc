@@ -15,14 +15,18 @@ my %servers = (
 
 my $ts = time();
 
-my $uidts  = time() - 20;
-my $chants = time() - 100;
+my $uidts;
 
 my $pocosi = POE::Component::Server::IRC->spawn(
     auth         => 0,
     antiflood    => 0,
     plugin_debug => 1,
-    config => { servername => 'listen.server.irc', sid => '1FU', anti_spam_exit_message_time => 0 },
+    config => {
+      servername => 'listen.server.irc',
+      sid        => '1FU',
+      anti_spam_exit_message_time => 0,
+      floodcount => 5
+    },
 );
 
 POE::Session->create(
@@ -31,8 +35,12 @@ POE::Session->create(
             _start
             _shutdown
             _launch_client
+            _launch_client2
+            _launch_client3
+            _clients_quit
             ircd_listener_add
             ircd_daemon_eob
+            ircd_daemon_snotice
             groucho_connected
             groucho_input
             groucho_disconnected
@@ -42,11 +50,19 @@ POE::Session->create(
             client_connected
             client_input
             client_disconnected
+            client2_connected
+            client2_input
+            client2_disconnected
+            client3_connected
+            client3_input
+            client3_disconnected
         )],
         'main' => {
             groucho_registered => 'testc_registered',
             harpo_registered   => 'testc_registered',
             client_registered  => 'testc_registered',
+            client2_registered  => 'testc_registered',
+            client3_registered  => 'testc_registered',
         },
     ],
     heap => {
@@ -74,6 +90,11 @@ sub _shutdown {
     return;
 }
 
+sub ircd_daemon_snotice {
+    pass($_[ARG0]);
+    return;
+}
+
 sub ircd_listener_add {
     my ($heap, $port) = @_[HEAP, ARG0];
     pass("Started a listener on $port");
@@ -92,6 +113,7 @@ sub ircd_listener_add {
         type  => 'c',
         zip   => 1,
     );
+    $heap->{ircd}->add_service('fake.server.irc');
     foreach my $tag ( qw[groucho harpo] ) {
       my $filter = POE::Filter::Stackable->new();
       $filter->push( POE::Filter::Line->new( InputRegexp => '\015?\012', OutputLiteral => "\015\012" ),
@@ -111,6 +133,26 @@ sub _launch_client {
   return;
 }
 
+sub _launch_client2 {
+  my ($kernel,$heap) = @_[KERNEL,HEAP];
+  my $filter = POE::Filter::Stackable->new();
+  $filter->push( POE::Filter::Line->new( InputRegexp => '\015?\012', OutputLiteral => "\015\012" ),
+             POE::Filter::IRCD->new( debug => 0 ), );
+  my $tag = 'client2';
+  $heap->{client} = Test::POE::Client::TCP->spawn( alias => $tag, filter => $filter, address => '127.0.0.1', port => $heap->{port}, prefix => $tag );
+  return;
+}
+
+sub _launch_client3 {
+  my ($kernel,$heap) = @_[KERNEL,HEAP];
+  my $filter = POE::Filter::Stackable->new();
+  $filter->push( POE::Filter::Line->new( InputRegexp => '\015?\012', OutputLiteral => "\015\012" ),
+             POE::Filter::IRCD->new( debug => 0 ), );
+  my $tag = 'client3';
+  $heap->{client} = Test::POE::Client::TCP->spawn( alias => $tag, filter => $filter, address => '127.0.0.1', port => $heap->{port}, prefix => $tag );
+  return;
+}
+
 sub testc_registered {
   my ($kernel,$sender) = @_[KERNEL,SENDER];
   pass($_[STATE]);
@@ -126,6 +168,22 @@ sub client_connected {
   return;
 }
 
+sub client2_connected {
+  my ($kernel,$heap,$sender) = @_[KERNEL,HEAP,SENDER];
+  pass($_[STATE]);
+  $kernel->post( $sender, 'send_to_server', { command => 'NICK', params => [ 'rubbarb' ], colonify => 0 } );
+  $kernel->post( $sender, 'send_to_server', { command => 'USER', params => [ 'rubbarb', '*', '*', 'rubbarb rubbarb' ], colonify => 1 } );
+  return;
+}
+
+sub client3_connected {
+  my ($kernel,$heap,$sender) = @_[KERNEL,HEAP,SENDER];
+  pass($_[STATE]);
+  $kernel->post( $sender, 'send_to_server', { command => 'NICK', params => [ 'custard' ], colonify => 0 } );
+  $kernel->post( $sender, 'send_to_server', { command => 'USER', params => [ 'custard', '*', '*', 'custard cream' ], colonify => 1 } );
+  return;
+}
+
 sub groucho_connected {
   my ($kernel,$heap,$sender) = @_[KERNEL,HEAP,SENDER];
   pass($_[STATE]);
@@ -133,9 +191,10 @@ sub groucho_connected {
   $kernel->post( $sender, 'send_to_server', { command => 'CAPAB', params => [ 'KNOCK UNDLN DLN TBURST GLN ENCAP UNKLN KLN CHW IE EX HOPS SVS CLUSTER EOB QS' ], colonify => 1 } );
   $kernel->post( $sender, 'send_to_server', { command => 'SERVER', params => [ 'groucho.server.irc', '1', 'Open the door and come in!!!!!!' ], colonify => 1 } );
   $kernel->post( $sender, 'send_to_server', { command => 'SVINFO', params => [ '6', '6', '0', time() ], colonify => 1 } );
+  $uidts = time() - 20;
   $kernel->post( $sender, 'send_to_server', { prefix => '7UP', command => 'SID', params => [ 'fake.server.irc', 2, '4AK', 'This is a fake server' ] } );
   $kernel->post( $sender, 'send_to_server', { prefix => '7UP', command => 'UID', params => [ 'groucho', '1', $uidts, '+aiow', 'groucho', 'groucho.marx', '0', '7UPAAAAAA', '0', 'Groucho Marx' ], colonify => 1 } );
-  $kernel->post( $sender, 'send_to_server', { prefix => '7UP', command => 'SJOIN', params => [ $chants, '#marxbros', '+int', '@7UPAAAAAA' ], colonify => 1 } );
+  $kernel->post( $sender, 'send_to_server', { prefix => '4AK', command => 'UID', params => [ 'NickServ', '2', ($uidts - 50), '+iow', 'nickserv', 'nickserv.server.irc', '0', '4AKAAAAAA', '0', 'NickServ' ], colonify => 1 } );
   $kernel->post( $sender, 'send_to_server', { command => 'EOB', prefix => '7UP' } );
   $kernel->post( $sender, 'send_to_server', { command => 'EOB', prefix => '4AK' } );
   $kernel->post( $sender, 'send_to_server', { command => 'PING', params => [ '7UP' ], colonify => 1 } );
@@ -149,8 +208,8 @@ sub harpo_connected {
   $kernel->post( $sender, 'send_to_server', { command => 'CAPAB', params => [ 'KNOCK UNDLN DLN TBURST GLN ENCAP UNKLN KLN CHW IE EX HOPS SVS CLUSTER EOB QS' ], colonify => 1 } );
   $kernel->post( $sender, 'send_to_server', { command => 'SERVER', params => [ 'harpo.server.irc', '1', 'Open the door and come in!!!!!!' ], colonify => 1 } );
   $kernel->post( $sender, 'send_to_server', { command => 'SVINFO', params => [ '6', '6', '0', time() ], colonify => 1 } );
+  $uidts = time() - 20;
   $kernel->post( $sender, 'send_to_server', { prefix => '9T9', command => 'UID', params => [ 'harpo', '1', $uidts, '+aiow', 'harpo', 'harpo.marx', '0', '9T9AAAAAA', '0', 'Harpo Marx' ], colonify => 1 } );
-  $kernel->post( $sender, 'send_to_server', { prefix => '9T9', command => 'SJOIN', params => [ $chants, '#marxbros', '+int', '9T9AAAAAA' ], colonify => 1 } );
   $kernel->post( $sender, 'send_to_server', { command => 'EOB', prefix => '9T9' } );
   $kernel->post( $sender, 'send_to_server', { command => 'PING', params => [ '9T9' ], colonify => 1 } );
   return;
@@ -164,42 +223,75 @@ sub client_input {
   my $cmd    = $in->{command};
   my $params = $in->{params};
   if ( $cmd eq 'MODE' && $prefix =~ m'^bobbins' && $params->[1] eq '+i' ) {
-    $poe_kernel->post( $sender, 'send_to_server', { command => 'JOIN', params => [ '#marxbros' ] } );
-    return;
-  }
-  if ( $cmd eq '473' ) {
-    pass("IRC_$cmd");
-    is($params->[1],'#marxbros','Channel is #marxbros');
-    is($params->[2],'Cannot join channel (+i)','Cannot join channel (+i)');
-    $poe_kernel->post( $sender, 'send_to_server', { command => 'KNOCK', params => [ '#marxbros' ] } );
-    return;
-  }
-  if ( $cmd eq '711' ) {
-    pass("IRC_$cmd");
-    is($params->[1],'#marxbros','Channel is #marxbros');
-    is($params->[2],'Your KNOCK has been delivered.','Your KNOCK has been delivered.');
-    $poe_kernel->post( $sender, 'send_to_server', { command => 'KNOCK', params => [ '#marxbros' ] } );
-    return;
-  }
-  # :listen.server.irc 712 bobbins #marxbros :Too many KNOCKs (channel).
-  if ( $cmd eq '712' ) {
-    pass("IRC_$cmd");
-    is($params->[1],'#marxbros','Channel is #marxbros');
-    is($params->[2],'Too many KNOCKs (channel).','Too many KNOCKs (channel).');
-    $poe_kernel->post( $sender, 'send_to_server', { command => 'QUIT', params => [ "Connection reset by fear" ] } );
-    return;
-  }
-  if ( $cmd eq 'ERROR' ) {
     pass($cmd);
-    my $state = $heap->{ircd}{state};
-    is( scalar keys %{ $state->{chans} }, 1, 'One channel' );
-    is( scalar keys %{ $state->{conns} }, 2, 'Should only be 2 connections' );
-    is( scalar keys %{ $state->{uids} }, 2, 'Two UIDs' );
-    is( scalar keys %{ $state->{users} }, 2, 'Two users' );
-    is( scalar keys %{ $state->{peers}{'LISTEN.SERVER.IRC'}{users} }, 0, 'No local users' );
-    is( scalar keys %{ $state->{sids}{'1FU'}{uids} }, 0, 'No local UIDs' );
-    $poe_kernel->post( $sender, 'shutdown' );
-    $poe_kernel->post( 'harpo', 'terminate' );
+    $poe_kernel->post( $sender, 'send_to_server', { command => 'JOIN', params => [ '#floobar' ], colonify => 0 } );
+    $poe_kernel->delay('_launch_client2', 2) if !$heap->{client2};
+  }
+  if ( $cmd eq 'JOIN' ) {
+    pass($cmd);
+    if ( $prefix =~ m{^rubbarb!} ) {
+      return;
+    }
+    if ( $prefix =~ m{^custard!} ) {
+      return;
+    }
+    return;
+  }
+  return;
+}
+
+sub _clients_quit {
+    $poe_kernel->post($_, 'send_to_server', { command => 'QUIT', params => [ 'Connection reset by fear' ] } )
+      for qw[client3 client2 client];
+    return;
+}
+
+sub client2_input {
+  my ($heap,$sender,$in) = @_[HEAP,SENDER,ARG0];
+  #diag($in->{raw_line}, "\n");
+  my $prefix = $in->{prefix};
+  my $cmd    = $in->{command};
+  my $params = $in->{params};
+  if ( $cmd eq 'MODE' && $prefix =~ m'^rubbarb' && $params->[1] eq '+i' ) {
+    pass($cmd);
+    $poe_kernel->post( $sender, 'send_to_server', { command => 'JOIN', params => [ '#floobar'], colonify => 0 } );
+    return;
+  }
+  if ( $cmd eq '366' ) {
+    $poe_kernel->post( 'client', 'send_to_server', { command => 'MODE', params => [ '#floobar', '+h', 'rubbarb' ], colonify => 0 } );
+    $poe_kernel->yield('_launch_client3');
+    return;
+  }
+  return;
+}
+
+sub client3_input {
+  my ($heap,$sender,$in) = @_[HEAP,SENDER,ARG0];
+  #diag($in->{raw_line}, "\n");
+  my $prefix = $in->{prefix};
+  my $cmd    = $in->{command};
+  my $params = $in->{params};
+  if ( $cmd eq 'MODE' && $prefix =~ m'^custard' && $params->[1] eq '+i' ) {
+    pass($cmd);
+    $poe_kernel->post( $sender, 'send_to_server', { command => 'JOIN', params => [ '#floobar' ], colonify => 0 } );
+  }
+  if ( $cmd eq '366' ) {
+    $poe_kernel->post($sender, 'send_to_server', { command => 'PRIVMSG', params => [ '#floobar', $_ ], colonify => 1 } ) for
+      (
+          'You are all losers',
+          'Eat my shorts, suckers',
+          'This is not a love song',
+          'Heaven is a place on earth',
+          'Oh happy days',
+          'I am aardvark',
+      );
+    return;
+  }
+  if ( $cmd eq 'NOTICE' ) {
+    pass($cmd);
+    is($params->[1],'*** Message to #floobar throttled due to flooding',
+      '*** Message to #floobar throttled due to flooding');
+    $poe_kernel->delay('_clients_quit',2);
     return;
   }
   return;
@@ -211,12 +303,6 @@ sub groucho_input {
   my $prefix = $in->{prefix};
   my $cmd    = $in->{command};
   my $params = $in->{params};
-  if ( $cmd eq 'QUIT' ) {
-    pass($cmd);
-    is( $prefix, '1FUAAAAAA', 'Correct prefix: 1FUAAAAAAA' );
-    is( $params->[0], q{Quit: "Connection reset by fear"}, 'Correct QUIT message' );
-    return;
-  }
   if ( $cmd eq 'SQUIT' ) {
     pass($cmd);
     is( $params->[0], '9T9', 'Correct SID: 9T9' );
@@ -224,14 +310,10 @@ sub groucho_input {
     $poe_kernel->post( $sender, 'terminate' );
     return;
   }
-  if ( $cmd eq 'KNOCK' ) {
+  if ( $cmd eq 'UID' ) {
     pass($cmd);
-    is($prefix,'1FUAAAAAA','Prefix is agreeable');
-    is($params->[0],'#marxbros','The channel is as expected');
-    return;
-    unshift @$params, $prefix;
-    push @$params, $chants;
-    $poe_kernel->post( $sender, 'send_to_server', { prefix => '7UPAAAAAA', command => 'INVITE', params => $params, colonify => 0 } );
+    return if $params->[0] !~ m!^(rubbarb|bobbins)$!;
+    $poe_kernel->post($sender, 'send_to_server', { prefix => '4AK', command => 'SVSMODE', params => [ $params->[7], $params->[2], '+dr', $params->[0] ] } );
     return;
   }
   return;
@@ -243,24 +325,28 @@ sub harpo_input {
   my $prefix = $in->{prefix};
   my $cmd    = $in->{command};
   my $params = $in->{params};
-  if ( $cmd eq 'QUIT' ) {
-    pass($cmd);
-    is( $prefix, '1FUAAAAAA', 'Correct prefix: 1FUAAAAAAA' );
-    is( $params->[0], q{Quit: "Connection reset by fear"}, 'Correct QUIT message' );
-    return;
-  }
-  if ( $cmd eq 'KNOCK' ) {
-    pass($cmd);
-    is($prefix,'1FUAAAAAA','Prefix is agreeable');
-    is($params->[0],'#marxbros','The channel is as expected');
-    return;
-  }
   return;
 }
 
 sub client_disconnected {
   my ($heap,$state,$sender) = @_[HEAP,STATE,SENDER];
   pass($state);
+  $poe_kernel->call( $sender, 'shutdown' );
+  $poe_kernel->post( 'harpo', 'terminate' );
+  return;
+}
+
+sub client2_disconnected {
+  my ($heap,$state,$sender) = @_[HEAP,STATE,SENDER];
+  pass($state);
+  $poe_kernel->call( $sender, 'shutdown' );
+  return;
+}
+
+sub client3_disconnected {
+  my ($heap,$state,$sender) = @_[HEAP,STATE,SENDER];
+  pass($state);
+  $poe_kernel->call( $sender, 'shutdown' );
   return;
 }
 
@@ -269,7 +355,7 @@ sub groucho_disconnected {
   pass($state);
   $poe_kernel->call( $sender, 'shutdown' );
   $heap->{ircd}->yield('shutdown');
-  $poe_kernel->delay('_shutdown');
+  $poe_kernel->alarm_remove_all();
   return;
 }
 

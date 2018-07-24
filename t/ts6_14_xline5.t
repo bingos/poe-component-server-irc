@@ -54,7 +54,7 @@ my $pocosi = POE::Component::Server::IRC->spawn(
     auth         => 0,
     antiflood    => 0,
     plugin_debug => 1,
-    config => { servername => 'listen.server.irc', sid => '1FU' },
+    config => { servername => 'listen.server.irc', sid => '1FU', anti_spam_exit_message_time => 0 },
 );
 
 $pocosi->plugin_add( 'hackity', Poco::Server::IRC::Plugin::Hackity->new() );

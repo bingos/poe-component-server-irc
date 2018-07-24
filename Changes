@@ -39,6 +39,8 @@ Revision history for POE-Component-Server-IRC
     - Implemented WATCH command
     - Implemented CLOSE command
     - Added daemon_server_join() for forcing channel joins
+    - Added daemon_server_realops() for sending server notices
+    - Added antispam features for exit messages and nick changes
 
 1.54  Fri Nov 25 15:36:51 UTC 2011
     - Resolve problem with remote (versus localhost) clients

@@ -855,10 +855,15 @@ sub _cmd_from_client {
     SWITCH: {
         my $method = '_daemon_cmd_' . lc $cmd;
         if ($cmd eq 'QUIT') {
+            my $qmsg = $params->[0];
             delete $self->{state}{localops}{ $wheel_id };
+            if ( $qmsg and my $msgtime = $self->{config}{anti_spam_exit_message_time} ) {
+              $qmsg = '' if
+                time - $self->{state}{conns}{$wheel_id}->{conn_time} < $msgtime;
+            }
             $self->_terminate_conn_error(
                 $wheel_id,
-                ($pcount ? qq{Quit: "$params->[0]"} : 'Client Quit'),
+                ($qmsg ? qq{Quit: "$qmsg"} : 'Client Quit'),
             );
             last SWITCH;
         }
@@ -1524,42 +1529,18 @@ sub _daemon_cmd_message {
                 push @$ref, ['482', $target];
                 next LOOP;
             }
-            if ($channel && $self->state_chan_mode_set($channel, 'n')
-                    && !$self->state_is_chan_member($nick, $channel)) {
-                push @$ref, ['404', $channel];
-                next LOOP;
-            }
-            if ($channel && $self->state_chan_mode_set($channel, 'm')
-                    && !$self->state_user_chan_mode($nick, $channel)) {
-                push @$ref, ['404', $channel];
-                next LOOP;
-            }
-            if ($channel && $self->state_chan_mode_set($channel, 'T')
-                    && $type eq 'NOTICE' && !$self->state_user_chan_mode($nick, $channel)) {
-                push @$ref, ['404', $channel];
-                next LOOP;
-            }
-            if ($channel && $self->state_chan_mode_set($channel, 'M')
-                    && $self->state_user_umode($nick) !~ /r/) {
-                push @$ref, ['477', $channel];
-                next LOOP;
-            }
-            if ($channel && $self->_state_user_banned($nick, $channel)
-                    && !$self->state_user_chan_mode($nick, $channel)) {
-                push @$ref, ['404', $channel];
-                next LOOP;
-            }
-            if ($channel && $self->state_chan_mode_set($channel, 'c')
-                    && ( has_color($args->[1]) || has_formatting($args->[1]) ) ){
-                push @$ref, ['408', $channel];
-                next LOOP;
-            }
-            if ($channel && $self->state_chan_mode_set($channel, 'C')
-                    && $args->[1] =~ m!^\001! && $args->[1] !~ m!^\001ACTION! ){
-                push @$ref, ['492', $channel];
-                next LOOP;
-            }
             if ($channel) {
+                my $res = $self->state_can_send_to_channel($nick,$channel,$args->[1],$type);
+                if ( !$res ) {
+                    next LOOP;
+                }
+                elsif ( ref $res eq 'ARRAY' ) {
+                    push @$ref, $res;
+                    next LOOP;
+                }
+                if ( $res != 2 && $self->state_flood_attack_channel($nick,$channel,$type) ) {
+                    next LOOP;
+                }
                 my $common = { };
                 my $msg = {
                     command => $type,
@@ -1596,6 +1577,9 @@ sub _daemon_cmd_message {
             my $server = $self->server_name();
             if ($self->state_nick_exists($target)) {
                 $target = $self->state_user_nick($target);
+
+                # Flood check
+                next LOOP if $self->state_flood_attack_client($nick,$target,$type);
 
                 if (my $away = $self->_state_user_away_msg($target)) {
                     push @$ref, {
@@ -1809,13 +1793,14 @@ sub _daemon_cmd_accept {
 sub _daemon_cmd_quit {
     my $self = shift;
     my $nick = shift || return;
-    my $qmsg = shift || 'Client Quit';
+    my $qmsg = shift;
     my $ref  = [ ];
     my $name = uc $self->server_name();
     my $sid  = $self->server_sid();
 
     $nick = uc_irc($nick);
     my $record = delete $self->{state}{peers}{$name}{users}{$nick};
+    $qmsg = 'Client Quit' if !$qmsg;
     my $full = $record->{full}->();
     delete $self->{state}{peers}{$name}{uids}{ $record->{uid} };
     my $uid = $record->{uid};
@@ -4091,6 +4076,20 @@ sub _daemon_cmd_nick {
             push @$ref,['447',$nonickchange];
             last SWITCH;
         }
+
+        my $lastattempt = $record->{_nick_last};
+        if ( $lastattempt && ( $lastattempt + $self->{config}{max_nick_time} < time() ) ) {
+            $record->{_nick_count} = 0;
+        }
+
+        if ( ( $self->{config}{anti_nick_flood} && $record->{umode} !~ /o/ ) &&
+              $record->{_nick_count} && ( $record->{_nick_count} >= $self->{config}{max_nick_changes} ) ) {
+            push @$ref,['438',$new,$self->{config}{max_nick_time}];
+            last SWITCH;
+        }
+
+        $record->{_nick_last} = time();
+        $record->{_nick_count}++;
 
         if ($unick eq $unew) {
             $record->{nick} = $new;
@@ -6714,6 +6713,9 @@ sub _daemon_cmd_join {
                 $self->_send_output_to_client($route_id, '474', $channel);
                 next LOOP;
             }
+            # Spambot checks
+            $self->state_check_spambot_warning($nick,$channel) if !$nick_is_oper;
+            $self->state_check_joinflood_warning($nick,$channel) if !$nick_is_oper;
             # JOIN the channel
             delete $self->{state}{users}{$unick}{invites}{$uchannel};
             delete $self->{state}{chans}{$uchannel}{invites}{$uid};
@@ -6793,12 +6795,28 @@ sub _daemon_cmd_part {
 
         $chan = $self->_state_chan_name($chan);
         my $uid = $self->state_user_uid($nick);
+        my $urec = $self->{state}{uids}{$uid};
+
+        my $pmsg = $args->[0];
+        my $params = [ $chan ];
+
+        if ( $pmsg and my $msgtime = $self->{config}{anti_spam_exit_message_time} ) {
+           $pmsg = '' if time - $urec->{conn_time} < $msgtime;
+        }
+
+        if ( $pmsg && !$self->state_can_send_to_channel($nick,$chan,$pmsg,'PART') ) {
+           $pmsg = '';
+        }
+
+        push @$params, $pmsg if $pmsg;
+
+        $self->state_check_spambot_warning($nick) if $urec->{umode} !~ /o/;
 
         $self->send_output(
             {
                 prefix  => $uid,
                 command => 'PART',
-                params  => [$chan, ($args->[0] || '')],
+                params  => $params,
             },
             $self->_state_connected_peers(),
         );
@@ -6807,7 +6825,7 @@ sub _daemon_cmd_part {
             {
                 prefix  => $self->state_user_full($nick),
                 command => 'PART',
-                params  => [$chan, ($args->[0] || $nick)],
+                params  => $params,
             },
         );
 
@@ -13041,6 +13059,243 @@ sub state_sid_exists {
     return 1;
 }
 
+sub state_check_joinflood_warning {
+    my $self = shift;
+    my $nick = shift || return;
+    my $chan = shift || return;
+    my $joincount = $self->{config}{joinfloodcount};
+    my $jointime  = $self->{config}{joinfloodtime};
+    return if !$joincount || !$jointime;
+    return if !$self->state_nick_exists($nick);
+    return if !$self->state_chan_exists($chan);
+    my $crec = $self->{state}{chans}{uc_irc $chan};
+    $crec->{_num_joined}++;
+    $crec->{_num_joined} -= ( time - ( $self->{_last_joined} || time ) ) *
+                              ( $joincount / $jointime );
+    if ( $crec->{_num_joined} <= 0 ) {
+        $crec->{_num_joined} = 0;
+        delete $crec->{_jfnotice};
+    }
+    elsif ( $crec->{_num_joined} >= $joincount ) {
+        if ( !$crec->{_jfnotice} ) {
+            $crec->{_jfnotice} = 1;
+            my $urec = $self->{state}{users}{uc_irc $nick};
+            $self->_send_to_realops(
+                sprintf(
+                    'Possible Join Flooder %s[%s] on %s target: %s',
+                    $urec->{nick}, (split /!/,$urec->{full}->())[1],
+                    $urec->{server}, $crec->{name},
+                ),
+                qw[Notice b],
+            );
+        }
+    }
+    $crec->{_last_joined} = time();
+}
+
+sub state_check_spambot_warning {
+    my $self = shift;
+    my $nick = shift || return;
+    my $chan = shift || return;
+    my $spamnum = $self->{config}{MAX_JOIN_LEAVE_COUNT};
+    return if !$self->state_nick_exists($nick);
+    my $urec = $self->{state}{users}{uc_irc $nick};
+
+    if ( $spamnum && $urec->{_jl_cnt} && $urec->{_jl_cnt} >= $spamnum ) {
+        if ( $urec->{_owcd} && $urec->{_owcd} > 0 ) {
+            $urec->{_owcd}--;
+        }
+        else {
+            $urec->{_owcd} = 0;
+        }
+        if ( $urec->{_owcd} == 0 ) {
+            my $msg = $chan ?
+              sprintf(
+                'User %s (%s) trying to join %s is a possible spambot',
+                $urec->{nick}, (split /!/,$urec->{full}->())[1], $chan,
+              ) :
+              sprintf(
+                'User %s (%s) is a possible spambot',
+                $urec->{nick}, (split /!/,$urec->{full}->())[1],
+              );
+              $self->_send_to_realops(
+                  $msg, qw[Notice b],
+              );
+              $urec->{_owcd} = $self->{config}{OPER_SPAM_COUNTDOWN};
+        }
+    }
+    else {
+        my $delta = time() - ( $urec->{_last_leave} || 0 );
+        if ( $delta > $self->{config}{JOIN_LEAVE_COUNT_EXPIRE} ) {
+           my $dec_cnt = $delta / $self->{config}{JOIN_LEAVE_COUNT_EXPIRE};
+           if ($dec_cnt > ( $urec->{_jl_cnt} || 0 )) {
+                $urec->{_jl_cnt} = 0;
+           }
+           else {
+                $urec->{_jl_cnt} -= $dec_cnt;
+           }
+        }
+        else {
+           $urec->{_jl_cnt}++ if ( time() - $urec->{_last_join} )
+                                    < $self->{config}{MIN_JOIN_LEAVE_TIME};
+        }
+        if ( $chan ) {
+            $urec->{_last_join}  = time();
+        }
+        else {
+            $urec->{_last_leave} = time();
+        }
+    }
+}
+
+sub state_flood_attack_channel {
+    my $self = shift;
+    my $nick = shift || return;
+    my $chan = shift || return;
+    my $type = shift || 'PRIVMSG';
+    return 0 if !$self->{config}{floodcount} || !$self->{config}{floodtime};
+    return if !$self->state_nick_exists($nick);
+    return if !$self->state_chan_exists($chan);
+    my $urec = $self->{state}{users}{uc_irc $nick};
+    return 0 if $urec->{route_id} eq 'spoofed';
+    return 0 if $urec->{can_flood} || $urec->{umode} =~ /o/;
+    my $crec = $self->{state}{chans}{uc_irc $chan};
+    my $first = $crec->{_first_msg};
+    if ( $first && ( $first + $self->{config}{floodtime} < time() ) ) {
+       if ( $crec->{_recv_msgs} ) {
+          $crec->{_recv_msgs} = 0;
+       }
+       else {
+          $crec->{_flood_notice} = 0;
+       }
+       $crec->{_first_msg} = time();
+    }
+    my $recv = $crec->{_recv_msgs};
+    if ( $recv && $recv >= $self->{config}{floodcount} ) {
+       if ( !$crec->{_flood_notice} ) {
+          $self->_send_to_realops(
+              sprintf(
+                'Possible Flooder %s[%s] on %s target: %s',
+                $urec->{nick}, (split /!/, $urec->{full}->())[1],
+                $urec->{server}, $crec->{name},
+              ), qw[Notice b],
+          );
+          $crec->{_flood_notice} = 1;
+       }
+       if ( $type ne 'NOTICE' ) {
+          $self->send_output(
+              {
+                  prefix  => $self->server_name(),
+                  command => 'NOTICE',
+                  params  => [
+                      $urec->{nick},
+                      "*** Message to $crec->{name} throttled due to flooding",
+                  ],
+              },
+              $urec->{route_id},
+          );
+       }
+       return 1;
+    }
+    $crec->{_first_msg} = time() if !$first;
+    $crec->{_recv_msgs}++;
+    return 0;
+}
+
+sub state_flood_attack_client {
+    my $self = shift;
+    my $nick = shift || return;
+    my $targ = shift || return;
+    my $type = shift || 'PRIVMSG';
+    return 0 if !$self->{config}{floodcount} || !$self->{config}{floodtime};
+    return if !$self->state_nick_exists($nick);
+    return if !$self->state_nick_exists($targ);
+    my $urec = $self->{state}{users}{uc_irc $nick};
+    return 0 if $urec->{route_id} eq 'spoofed';
+    return 0 if $urec->{can_flood} || $urec->{umode} =~ /o/;
+    my $trec = $self->{state}{users}{uc_irc $targ};
+    my $first = $trec->{_first_msg};
+    if ( $first && ( $first + $self->{config}{floodtime} < time() ) ) {
+       if ( $trec->{_recv_msgs} ) {
+          $trec->{_recv_msgs} = 0;
+       }
+       else {
+          $trec->{_flood_notice} = 0;
+       }
+       $trec->{_first_msg} = time();
+    }
+    my $recv = $trec->{_recv_msgs};
+    if ( $recv && $recv >= $self->{config}{floodcount} ) {
+       if ( !$trec->{_flood_notice} ) {
+          $self->_send_to_realops(
+              sprintf(
+                'Possible Flooder %s[%s] on %s target: %s',
+                $urec->{nick}, (split /!/, $urec->{full}->())[1],
+                $urec->{server}, $trec->{nick},
+              ), qw[Notice b],
+          );
+          $trec->{_flood_notice} = 1;
+       }
+       if ( $type ne 'NOTICE' ) {
+          $self->send_output(
+              {
+                  prefix  => $self->server_name(),
+                  command => 'NOTICE',
+                  params  => [
+                      $urec->{nick},
+                      "*** Message to $trec->{nick} throttled due to flooding",
+                  ],
+              },
+              $urec->{route_id},
+          );
+       }
+       return 1;
+    }
+    $trec->{_first_msg} = time() if !$first;
+    $trec->{_recv_msgs}++;
+    return 0;
+}
+
+sub state_can_send_to_channel {
+    my $self = shift;
+    my $nick = shift || return;
+    my $chan = shift || return;
+    my $msg  = shift || return;
+    my $type = shift || 'PRIVMSG';
+    return if !$self->state_nick_exists($nick);
+    return if !$self->state_chan_exists($chan);
+    my $uid = $self->state_user_uid($nick);
+    my $crec = $self->{state}{chans}{uc_irc $chan};
+    my $urec = $self->{state}{uids}{$uid};
+    my $member = defined $crec->{users}{$uid};
+
+    if ( $crec->{mode} =~ /c/ && ( has_color($msg) || has_formatting($msg) ) ) {
+        return [ '408', $crec->{name} ];
+    }
+    if ( $crec->{mode} =~ /C/ && $msg =~ m!^\001! && $msg !~ m!^\001ACTION! ) {
+        return [ '492', $crec->{name} ];
+    }
+    if ( $crec->{mode} =~ /n/ && !$member ) {
+        return [ '404', $crec->{name} ];
+    }
+    if ( $crec->{mode} =~ /M/ && $urec->{umode} !~ /r/ ) {
+        return [ '477', $crec->{name} ];
+    }
+    if ( $member && $crec->{users}{$uid} ) {
+        return 2;
+    }
+    if ( $crec->{mode} =~ /m/ ) {
+        return [ '404', $crec->{name} ];
+    }
+    if ( $crec->{mode} =~ /T/ && $type eq 'NOTICE' ) {
+        return [ '404', $crec->{name} ];
+    }
+    if ( $self->_state_user_banned($nick, $chan) ) {
+        return [ '404', $crec->{name} ];
+    }
+    return 1;
+}
+
 sub _state_peer_name {
     my $self = shift;
     my $peer = shift || return;
@@ -13651,13 +13906,25 @@ sub configure {
         ANTIFLOOD     => 1,
         WHOISACTUALLY => 1,
         OPHACKS       => 0,
-        knock_client_count  => 1,
-        knock_client_time   => 5 * 60,
-        knock_delay_channel => 60,
-        pace_wait           => 10,
-        max_watch           => 50,
-        max_bans_large      => 500,
-        oper_umode          => 'aceklnswy',
+        JOIN_LEAVE_COUNT_EXPIRE     => 120,
+        OPER_SPAM_COUNTDOWN         => 5,
+        MAX_JOIN_LEAVE_COUNT        => 25,
+        MIN_JOIN_LEAVE_TIME         => 60,
+        knock_client_count          => 1,
+        knock_client_time           => 5 * 60,
+        knock_delay_channel         => 60,
+        pace_wait                   => 10,
+        max_watch                   => 50,
+        max_bans_large              => 500,
+        oper_umode                  => 'aceklnswy',
+        anti_spam_exit_message_time => 5 * 60,
+        anti_nick_flood             => 1,
+        max_nick_time               => 20,
+        max_nick_changes            => 5,
+        floodcount                  => 10,
+        floodtime                   => 1,
+        joinfloodcount              => 18,
+        joinfloodtime               => 6,
     );
     $self->{config}{$_} = $defaults{$_} for keys %defaults;
 
@@ -13677,7 +13944,7 @@ sub configure {
     }
 
     for my $opt (keys %$opts) {
-      next if $opt !~ m!^(knock_|pace_|max_watch|max_bans_|oper_umode)!i;
+      next if $opt !~ m!^(knock_|pace_|max_watch|max_bans_|oper_umode|max_nick|anti_|flood)!i;
       $self->{config}{lc $opt} = delete $opts->{$opt}
         if defined $opts->{$opt};
     }
@@ -13762,6 +14029,7 @@ EOF
         433 => [1, "Nickname is already in use"],
         436 => [1, "Nickname collision KILL from %s\@%s"],
         437 => [1, "Nick/channel is temporarily unavailable"],
+        438 => [1, "Nick change too fast. Please wait %s seconds."],
         440 => [1, "Services are currently unavailable."],
         441 => [1, "They aren\'t on that channel"],
         442 => [1, "You\'re not on that channel"],
