@@ -143,7 +143,7 @@ sub resolve_ident {
         SockAddr    => $sockaddr,
         SockPort    => $sockport,
         BuggyIdentd => 1,
-        TimeOut     => 10,
+        TimeOut     => ( $self->{ircd}{config}{ident_timeout} || 10 ),
         Reference   => $conn_id,
         IdentPort   => ( $self->{identport} || '' ),
     );

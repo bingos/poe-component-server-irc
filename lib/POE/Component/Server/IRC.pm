@@ -2168,6 +2168,313 @@ sub _daemon_cmd_close {
     return $ref;
 }
 
+sub _daemon_cmd_set {
+    my $self   = shift;
+    my $nick   = shift || return;
+    my $server = $self->server_name();
+    my $ref    = [ ];
+    my $args   = [@_];
+    my $count  = @$args;
+
+    my %vars = (
+      FLOODCOUNT    => sub {
+          my $val = shift;
+          if ( $val && $val >= 0 ) {
+              $self->{config}{floodcount} = $val;
+              $self->_send_to_realops(
+                  sprintf(
+                    '%s has changed FLOODCOUNT to %s',
+                    $self->state_user_full($nick,1), $val,
+                  ), qw[Notice s],
+              );
+          }
+          else {
+              push @$ref, {
+                  prefix  => $server,
+                  command => 'NOTICE',
+                  params  => [
+                      $nick,
+                      sprintf(
+                          'FLOODCOUNT is currently %s',
+                          $self->{config}{floodcount},
+                      ),
+                  ],
+              };
+          }
+      },
+      FLOODTIME     => sub {
+          my $val = shift;
+          if ( $val && $val >= 0 ) {
+              $self->{config}{floodtime} = $val;
+              $self->_send_to_realops(
+                  sprintf(
+                    '%s has changed FLOODTIME to %s',
+                    $self->state_user_full($nick,1), $val,
+                  ), qw[Notice s],
+              );
+          }
+          else {
+              push @$ref, {
+                  prefix  => $server,
+                  command => 'NOTICE',
+                  params  => [
+                      $nick,
+                      sprintf(
+                          'FLOODTIME is currently %s',
+                          $self->{config}{floodtime},
+                      ),
+                  ],
+              };
+          }
+      },
+      IDENTTIMEOUT  => sub {
+          my $val = shift;
+          if ( $val && $val >= 0 ) {
+              $self->{config}{ident_timeout} = $val;
+              $self->_send_to_realops(
+                  sprintf(
+                    '%s has changed IDENTTIMEOUT to %s',
+                    $self->state_user_full($nick,1), $val,
+                  ), qw[Notice s],
+              );
+          }
+          else {
+              push @$ref, {
+                  prefix  => $server,
+                  command => 'NOTICE',
+                  params  => [
+                      $nick,
+                      sprintf(
+                          'IDENTTIMEOUT is currently %s',
+                          ( $self->{config}{ident_timeout} || 10 ),
+                      ),
+                  ],
+              };
+          }
+      },
+      MAX           =>  sub {
+          my $val = shift;
+          if ( $val && $val >= 0 ) {
+              if ( $val > 7000 ) {
+                  push @$ref, {
+                      prefix  => $server,
+                      command => 'NOTICE',
+                      params  => [
+                          $nick,
+                          sprintf(
+                              'You cannot set MAXCLIENTS to > 7000, restoring to %u',
+                              $self->{config}{MAXCLIENTS},
+                          ),
+                      ],
+                  };
+                  return;
+              }
+              if ( $val < 32 ) {
+                  push @$ref, {
+                      prefix  => $server,
+                      command => 'NOTICE',
+                      params  => [
+                          $nick,
+                          sprintf(
+                              'You cannot set MAXCLIENTS to < 32, restoring to %u',
+                              $self->{config}{MAXCLIENTS},
+                          ),
+                      ],
+                  };
+                  return;
+              }
+              $self->{config}{MAXCLIENTS} = $val;
+              $self->_send_to_realops(
+                  sprintf(
+                    '%s has changed MAXCLIENTS to %s',
+                    $self->state_user_full($nick,1), $val,
+                  ), qw[Notice s],
+              );
+          }
+          else {
+              push @$ref, {
+                  prefix  => $server,
+                  command => 'NOTICE',
+                  params  => [
+                      $nick,
+                      sprintf(
+                          'MAXCLIENTS is currently %s',
+                          $self->{config}{MAXCLIENTS},
+                      ),
+                  ],
+              };
+          }
+      },
+      SPAMNUM       => sub {
+          my $val = shift;
+          if ( defined $val && $val >= 0 ) {
+              $self->{config}{MAX_JOIN_LEAVE_COUNT} = $val;
+              if ( $val == 0 ) {
+                  $self->_send_to_realops(
+                      sprintf(
+                        '%s has disabled ANTI_SPAMBOT',
+                        $self->state_user_full($nick,1),
+                      ), qw[Notice s],
+                  );
+              }
+              else {
+                  $self->_send_to_realops(
+                      sprintf(
+                        '%s has changed SPAMNUM to %s',
+                        $self->state_user_full($nick,1), $val,
+                      ), qw[Notice s],
+                  );
+              }
+          }
+          else {
+              push @$ref, {
+                  prefix  => $server,
+                  command => 'NOTICE',
+                  params  => [
+                      $nick,
+                      sprintf(
+                          'SPAMNUM is currently %s',
+                          $self->{config}{MAX_JOIN_LEAVE_COUNT},
+                      ),
+                  ],
+              };
+          }
+      },
+      SPAMTIME      => sub {
+          my $val = shift;
+          if ( $val && $val >= 0 ) {
+              $self->{config}{MIN_JOIN_LEAVE_TIME} = $val;
+              $self->_send_to_realops(
+                  sprintf(
+                    '%s has changed SPAMTIME to %s',
+                    $self->state_user_full($nick,1), $val,
+                  ), qw[Notice s],
+              );
+          }
+          else {
+              push @$ref, {
+                  prefix  => $server,
+                  command => 'NOTICE',
+                  params  => [
+                      $nick,
+                      sprintf(
+                          'SPAMTIME is currently %s',
+                          $self->{config}{MIN_JOIN_LEAVE_TIME},
+                      ),
+                  ],
+              };
+          }
+      },
+      JFLOODTIME    => sub {
+          my $val = shift;
+          if ( $val && $val >= 0 ) {
+              $self->{config}{joinfloodtime} = $val;
+              $self->_send_to_realops(
+                  sprintf(
+                    '%s has changed JFLOODTIME to %s',
+                    $self->state_user_full($nick,1), $val,
+                  ), qw[Notice s],
+              );
+          }
+          else {
+              push @$ref, {
+                  prefix  => $server,
+                  command => 'NOTICE',
+                  params  => [
+                      $nick,
+                      sprintf(
+                          'JFLOODTIME is currently %s',
+                          $self->{config}{joinfloodtime},
+                      ),
+                  ],
+              };
+          }
+      },
+      JFLOODCOUNT   => sub {
+          my $val = shift;
+          if ( $val && $val >= 0 ) {
+              $self->{config}{joinfloodcount} = $val;
+              $self->_send_to_realops(
+                  sprintf(
+                    '%s has changed JFLOODCOUNT to %s',
+                    $self->state_user_full($nick,1), $val,
+                  ), qw[Notice s],
+              );
+          }
+          else {
+              push @$ref, {
+                  prefix  => $server,
+                  command => 'NOTICE',
+                  params  => [
+                      $nick,
+                      sprintf(
+                          'JFLOODCOUNT is currently %s',
+                          $self->{config}{joinfloodcount},
+                      ),
+                  ],
+              };
+          }
+      },
+    );
+
+    SWITCH: {
+        if (!$self->state_user_is_operator($nick)) {
+            push @$ref, ['481'];
+            last SWITCH;
+        }
+        if ($count > 0) {
+            if ( defined $vars{ uc $args->[0] } ) {
+                $vars{ uc $args->[0] }->( $args->[1] );
+                last SWITCH;
+            }
+            push @$ref, {
+                prefix  => $server,
+                command => 'NOTICE',
+                params  => [
+                    $nick,
+                    'Variable not found.',
+                ],
+            };
+            last SWITCH;
+        }
+        push @$ref, {
+            prefix  => $server,
+            command => 'NOTICE',
+            params  => [
+                $nick,
+                'Available QUOTE SET commands:',
+            ],
+        };
+        my @names;
+        foreach my $var ( sort keys %vars ) {
+            push @names, $var;
+            if ( scalar @names == 4 ) {
+                push @$ref, {
+                    prefix  => $server,
+                    command => 'NOTICE',
+                    params  => [
+                        $nick,
+                        join(' ',@names),
+                    ],
+                };
+                @names = ();
+            }
+        }
+        if (@names) {
+            push @$ref, {
+                prefix  => $server,
+                command => 'NOTICE',
+                params  => [
+                    $nick,
+                    join(' ',@names),
+                ],
+            };
+        }
+    }
+    return @$ref if wantarray;
+    return $ref;
+}
+
 sub _daemon_cmd_rehash {
     my $self   = shift;
     my $nick   = shift || return;
