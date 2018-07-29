@@ -14096,9 +14096,9 @@ EOF
     $self->{config}{capab} = [qw(KNOCK DLN TBURST UNDLN ENCAP UNKLN KLN RHOST SVS CLUSTER EOB QS)];
 
     $self->{config}{cmds}{uc $_}++ for
-        qw[accept admin away bmask cap connect die dline encap eob etrace globops info invite ison isupport join kick kill],
+        qw[accept admin away bmask cap close connect die dline encap eob etrace globops info invite ison isupport join kick kill],
         qw[kline knock links list locops lusers map message mode motd names nick oper part pass ping pong quit rehash remove],
-        qw[resv rkline sid sjoin squit stats summon svinfo svshost svsjoin svskill svsmode svsnick svspart svstag tburst time],
+        qw[resv rkline set sid sjoin squit stats summon svinfo svshost svsjoin svskill svsmode svsnick svspart svstag tburst time],
         qw[tmode topic trace uid umode undline unkline unresv unrkline unxline user userhost users version wallops watch who whois whowas xline];
 
     return 1;
@@ -14307,12 +14307,8 @@ sub add_operator {
 
     if ( $ref->{ipmask} && $ref->{ipmask} eq 'ARRAY' ) {
       my @validated;
-      my $warned;
       foreach my $mask ( @{ $ref->{ipmask} } ) {
         if ( $mask->isa('Net::Netmask' ) ) {
-          carp("Use of Net::Netmask is deprecated and will be removed from a future version of this module")
-            if !$warned;
-          $warned++;
           push @validated, $mask;
           next;
         }
@@ -14420,12 +14416,8 @@ sub add_peer {
 
     if ( $parms->{ipmask} && $parms->{ipmask} eq 'ARRAY' ) {
       my @validated;
-      my $warned;
       foreach my $mask ( @{ $parms->{ipmask} } ) {
         if ( $mask->isa('Net::Netmask' ) ) {
-          carp("Use of Net::Netmask is deprecated and will be removed from a future version of this module")
-            if !$warned;
-          $warned++;
           push @validated, $mask;
           next;
         }

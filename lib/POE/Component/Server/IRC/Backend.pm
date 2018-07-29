@@ -6,7 +6,7 @@ use Carp qw(carp croak);
 use List::Util qw(first);
 use POE qw(Wheel::SocketFactory Wheel::ReadWrite Filter::Stackable
            Filter::Line Filter::IRCD Filter::ThruPut);
-use Net::Netmask; # deprecated
+use Net::Netmask;
 use Net::CIDR ();
 use Net::IP::Minimal qw[ip_is_ipv6];
 use Socket qw(getnameinfo NI_NUMERICHOST NI_NUMERICSERV AF_INET6);
@@ -851,10 +851,7 @@ sub add_denial {
     my $netmask = shift || return;
     my $reason = shift || 'Denied';
 
-    if ( $netmask->isa('Net::Netmask') ) {
-      carp("Use of Net::Netmask is deprecated and will be removed from a future version of this module")
-    }
-    else {
+    if ( !$netmask->isa('Net::Netmask') ) {
       $netmask = Net::CIDR::cidrvalidate( $netmask );
     }
 
@@ -873,9 +870,6 @@ sub add_denial {
 sub del_denial {
     my $self = shift;
     my $netmask = shift || return;
-    if ( $netmask->isa('Net::Netmask') ) {
-      carp("Use of Net::Netmask is deprecated and will be removed from a future version of this module")
-    }
     return if !$self->{denials}{$netmask};
     delete $self->{denials}{$netmask};
     return 1;
@@ -885,10 +879,7 @@ sub add_exemption {
     my $self = shift;
     my $netmask = shift || return;
 
-    if ( $netmask->isa('Net::Netmask') ) {
-      carp("Use of Net::Netmask is deprecated and will be removed from a future version of this module")
-    }
-    else {
+    if ( !$netmask->isa('Net::Netmask') ) {
       $netmask = Net::CIDR::cidrvalidate( $netmask );
     }
 
@@ -906,9 +897,6 @@ sub add_exemption {
 sub del_exemption {
     my $self = shift;
     my $netmask = shift || return;
-    if ( $netmask->isa('Net::Netmask') ) {
-      carp("Use of Net::Netmask is deprecated and will be removed from a future version of this module")
-    }
     return if !$self->{exemptions}{$netmask};
     delete $self->{exemptions}{$netmask};
     return 1;
