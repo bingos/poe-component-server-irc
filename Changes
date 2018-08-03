@@ -42,6 +42,7 @@ Revision history for POE-Component-Server-IRC
     - Added daemon_server_realops() for sending server notices
     - Added antispam features for exit messages and nick changes
     - Added SET command for adjusting tunable settings
+    - Added HELP command
 
 1.54  Fri Nov 25 15:36:51 UTC 2011
     - Resolve problem with remote (versus localhost) clients

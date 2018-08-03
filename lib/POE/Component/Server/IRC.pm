@@ -970,15 +970,62 @@ sub _cmd_from_client {
     return 1;
 }
 
-# 600 */  [RPL_LOGON] = "%s %s %s %ju :logged online"
-# 601 */  [RPL_LOGOFF] = "%s %s %s %ju :logged offline"
-# 604 */  [RPL_NOWON] = "%s %s %s %ju :is online"
-# 605 */  [RPL_NOWOFF] = "%s %s %s %ju :is offline"
-# 602 */  [RPL_WATCHOFF] = "%s %s %s %ju :stopped watching"
-# 603 */  [RPL_WATCHSTAT] = ":You have %u and are on %u WATCH entries"
-# 606 */  [RPL_WATCHLIST] = ":%s"
-# 607 */  [RPL_ENDOFWATCHLIST] = ":End of WATCH %c"
-# 512 */  [ERR_TOOMANYWATCH] = "%s :Maximum size for WATCH-list is %u entries"
+sub _daemon_cmd_help {
+    my $self   = shift;
+    my $nick   = shift || return;
+    my $server = $self->server_name();
+    my $ref    = [ ];
+    my $args   = [@_];
+    my $count  = @$args;
+
+    SWITCH: {
+        if (!$self->state_user_is_operator($nick)) {
+            my $lastuse = $self->{state}{lastuse}{help};
+            my $pacewait = $self->{config}{pace_wait};
+            if ( $lastuse && $pacewait && ( $lastuse + $pacewait ) > time() ) {
+                push @$ref, ['263', 'HELP'];
+                last SWITCH;
+            }
+            $self->{state}{lastuse}{help} = time();
+        }
+        my $item = shift @$args || 'index';
+        if (!$self->{_help}) {
+            require POE::Component::Server::IRC::Help;
+            $self->{_help} = POE::Component::Server::IRC::Help->new();
+        }
+        $item = lc $item;
+        my @lines = $self->{_help}->topic($item);
+        if (!scalar @lines) {
+            push @$ref, [ '524', $item ];
+            last SWITCH;
+        }
+        my $reply = '704';
+        foreach my $line (@lines) {
+            push @$ref, {
+                prefix  => $server,
+                command => $reply,
+                params  => [
+                    $nick,
+                    $item,
+                    $line,
+                ],
+            };
+            $reply = '705';
+        }
+        push @$ref, {
+            prefix  => $server,
+            command => '706',
+            params  => [
+               $nick,
+               $item,
+               'End of /HELP.',
+            ],
+        };
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
 
 sub _daemon_cmd_watch {
     my $self   = shift;
@@ -14374,6 +14421,7 @@ EOF
         512 => [0, "Maximum size for WATCH-list is %s entries"],
         520 => [1, "Cannot join channel (+O)"],
         521 => [0, "Bad list syntax"],
+        524 => [1, "Help not found"],
         710 => [2, "has asked for an invite."],
         711 => [1, "Your KNOCK has been delivered."],
         712 => [1, "Too many KNOCKs (%s)."],
