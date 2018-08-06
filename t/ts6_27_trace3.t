@@ -324,7 +324,7 @@ sub groucho_input {
   }
   if ( $cmd eq '200' ) {
     pass("IRC$cmd");
-    is($in->{raw_line},':1FU 200 7UPAAAAAA Link POE::Component::Server::IRC-dev-git harpo.server.irc :harpo.server.irc',
+    like($in->{raw_line},qr/^:1FU 200 7UPAAAAAA Link POE::Component::Server::IRC-(.+?) harpo.server.irc :harpo.server.irc$/,
       'Link message okay' );
     return;
   }

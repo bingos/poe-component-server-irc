@@ -257,7 +257,7 @@ sub client_input {
   }
   if ( $cmd eq '200' ) {
     pass("IRC$cmd");
-    is($in->{raw_line},':listen.server.irc 200 bobbins Link POE::Component::Server::IRC-dev-git NickServ :groucho.server.irc',
+    like($in->{raw_line},qr/^:listen.server.irc 200 bobbins Link POE::Component::Server::IRC-(.+?) NickServ :groucho.server.irc$/,
       ':listen.server.irc 200 bobbins Link POE::Component::Server::IRC-dev-git NickServ :groucho.server.irc');
     $poe_kernel->delay('_clients_quit',2);
     return;
