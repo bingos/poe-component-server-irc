@@ -828,6 +828,12 @@ sub _cmd_from_peer {
             last SWITCH;
         }
 
+        if ($cmd =~ m!^WHO(IS|WAS)$!i ) {
+            $self->send_output( $_, $conn_id ) for
+              $self->$method($conn_id, $prefix, @$params);
+            last SWITCH;
+        }
+
         if ($self->can($method)) {
             $self->$method($conn_id, $prefix, @$params);
             last SWITCH;
@@ -1867,7 +1873,7 @@ sub _daemon_cmd_quit {
     };
     $self->send_event("daemon_quit", $full, $qmsg);
 
-    # Remove for peoples accept lists
+    # Remove from peoples accept lists
     for my $user (keys %{ $record->{accepts} }) {
         delete $self->{state}{users}{$user}{accepts}{uc_irc($nick)};
     }
@@ -1922,6 +1928,17 @@ sub _daemon_cmd_quit {
     delete $self->{state}{users}{$nick} if !$record->{nick_collision};
     delete $self->{state}{uids}{ $record->{uid} };
     delete $self->{state}{localops}{$record->{route_id}};
+    unshift @{ $self->{state}{whowas}{$nick} }, {
+        logoff  => time(),
+        account => $record->{account},
+        nick    => $record->{nick},
+        user    => $record->{auth}{ident},
+        host    => $record->{auth}{hostname},
+        real    => $record->{auth}{realhost},
+        sock    => $record->{socket}[0],
+        ircname => $record->{ircname},
+        server  => $name,
+    };
     return @$ref if wantarray;
     return $ref;
 }
@@ -4520,6 +4537,17 @@ sub _daemon_cmd_nick {
                     $record->{route_id},
                 );
             }
+            unshift @{ $self->{state}{whowas}{$unick} }, {
+                logoff  => time(),
+                account => $record->{account},
+                nick    => $nick,
+                user    => $record->{auth}{ident},
+                host    => $record->{auth}{hostname},
+                real    => $record->{auth}{realhost},
+                sock    => $record->{socket}[0],
+                ircname => $record->{ircname},
+                server  => $record->{server},
+            };
         }
 
         $self->_send_to_realops(
@@ -6172,10 +6200,11 @@ sub _daemon_cmd_whois {
 }
 
 sub _daemon_peer_whois {
-    my $self   = shift;
-    my $uid    = shift || return;
-    my $sid    = $self->server_sid();
-    my $ref    = [ ];
+    my $self    = shift;
+    my $peer_id = shift;
+    my $uid     = shift || return;
+    my $sid     = $self->server_sid();
+    my $ref     = [ ];
     my ($first, $second) = @_;
 
     my $targ = substr $first, 0, 3;
@@ -6347,8 +6376,9 @@ sub _daemon_do_whois {
                params  => [
                     $uid,
                     $record->{nick},
+                    join('@', $record->{auth}{ident}, $record->{auth}{realhost}),
                     ( $record->{ipaddress} || 'fake.hidden' ),
-                    'actually using host',
+                    'Actual user@host, actual IP',
                ],
         };
      }
@@ -6397,26 +6427,163 @@ sub _daemon_cmd_whowas {
     my $self   = shift;
     my $nick   = shift || return;
     my $server = $self->server_name();
+    my $sid    = $self->server_sid();
     my $ref    = [ ];
-    my ($first) = @_;
+    my $args   = [@_];
+    my $count  = @$args;
 
     SWITCH: {
-        if (!$first) {
+        if (!$args->[0]) {
             push @$ref, ['431'];
             last SWITCH;
         }
-        my $query = ( split /,/, $first )[0];
-        push @$ref, {
-            prefix  => $server,
-            command => '406',
-            params  => [$nick, $query, 'There was no such nickname'],
-        };
-        push @$ref, {
-            prefix  => $server,
-            command => '369',
-            params  => [$nick, $query, 'End of WHOWAS'],
-        };
+        if (!$self->state_user_is_operator($nick)) {
+            my $lastuse = $self->{state}{lastuse}{whowas};
+            my $pacewait = $self->{config}{pace_wait};
+            if ( $lastuse && $pacewait && ( $lastuse + $pacewait ) > time() ) {
+                push @$ref, ['263', 'WHOWAS'];
+                last SWITCH;
+            }
+            $self->{state}{lastuse}{whowas} = time();
+        }
+        my $query = (split /,/, $args->[0])[0];
+        if ($args->[2]) {
+           my $targ = $self->_state_find_peer($args->[2]);
+           if (!$targ) {
+              push @$ref, [ '402', $args->[2] ];
+              last SWITCH;
+           }
+           if ($targ !~ m!^$sid!) {
+              my $psid = substr $targ, 0, 3;
+              $self->send_output(
+                  {
+                      prefix  => $self->state_user_uid($nick),
+                      command => 'WHOWAS',
+                      params  => [
+                          $args->[0], $args->[1], $targ,
+                      ],
+                  },
+                  $self->_state_sid_route($psid),
+              );
+              last SWITCH;
+           }
+        }
+        my $uid = $self->state_user_uid($nick);
+        push @$ref, $_ for map { $_->{prefix} = $server; $_->{params}[0] = $nick; $_ }
+                       @{ $self->_daemon_do_whowas($uid,@$args) };
     }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _daemon_peer_whowas {
+    my $self    = shift;
+    my $peer_id = shift || return;
+    my $uid     = shift || return;
+    my $server  = $self->server_name();
+    my $sid     = $self->server_sid();
+    my $ref     = [ ];
+    my ($first, $second, $third) = @_;
+
+    my $targ = substr $third, 0, 3;
+    SWITCH: {
+        if ( $targ !~ m!^$sid! ) {
+          $self->send_output(
+            {
+                prefix  => $uid,
+                command => 'WHOWAS',
+                params  => [
+                    $first,
+                    $second,
+                    $third,
+                ],
+           },
+           $self->_state_sid_route($targ),
+        );
+        last SWITCH;
+      }
+      $ref = $self->_daemon_do_whowas($uid,$first,$second);
+    }
+
+    return @$ref if wantarray;
+    return $ref;
+}
+
+sub _daemon_do_whowas {
+    my $self   = shift;
+    my $uid    = shift || return;
+    my $server = $self->server_name();
+    my $sid    = $self->server_sid();
+    my $ref    = [ ];
+    my $args   = [@_];
+    my $query = shift @$args;
+
+    SWITCH: {
+        my $is_oper = ( $self->{state}{uids}{$uid}{umode} =~ /o/ );
+        my $max   = shift @$args;
+        if ( $uid !~ m!^$sid! && ( !$max || $max < 0 || $max > 20 ) ) {
+            $max = 20;
+        }
+        if (!$self->{state}{whowas}{uc_irc $query}) {
+            push @$ref, {
+                prefix  => $sid,
+                command => '406',
+                params  => [$uid, $query, 'There was no such nickname'],
+            };
+            last SWITCH;
+        }
+        my $cnt = 0;
+        WASNOTWAS: foreach my $was ( @{ $self->{state}{whowas}{uc_irc $query} } ) {
+            push @$ref, {
+                prefix  => $sid,
+                command => '314',
+                params  => [
+                    $uid,
+                    $was->{nick}, $was->{user}, $was->{host}, '*',
+                    $was->{ircname},
+                ],
+            };
+            push @$ref, {
+                prefix  => $sid,
+                command => '338',
+                params  => [
+                    $uid,
+                    $was->{nick},
+                    join('@', $was->{user}, $was->{real}),
+                    $was->{sock},
+                    'Actual user@host, actual IP',
+                ],
+            } if $is_oper;
+            push @$ref, {
+                prefix  => $sid,
+                command => '330',
+                params  => [
+                    $uid,
+                    $was->{nick},
+                    $was->{account},
+                    'was logged in as',
+                ],
+            } if $was->{account} ne '*';
+            push @$ref, {
+                prefix  => $sid,
+                command => '312',
+                params  => [
+                    $uid,
+                    $was->{nick}, $was->{server},
+                    strftime("%a %b %e %T %Y", localtime($was->{logoff})),
+                ],
+            };
+            ++$cnt;
+            last WASNOTWAS if $max && $cnt >= $max;
+        }
+    }
+
+    push @$ref, {
+        prefix  => $sid,
+        command => '369',
+        params  => [$uid, $query, 'End of WHOWAS'],
+    };
 
     return @$ref if wantarray;
     return $ref;
@@ -8058,6 +8225,17 @@ sub _daemon_peer_squit {
                 if ($record->{umode} =~ /i/) {
                     $self->{state}{stats}{invisible}--;
                 }
+                unshift @{ $self->{state}{whowas}{$nick} }, {
+                    logoff  => time(),
+                    account => $record->{account},
+                    nick    => $record->{nick},
+                    user    => $record->{auth}{ident},
+                    host    => $record->{auth}{hostname},
+                    real    => $record->{auth}{realhost},
+                    sock    => $record->{ipaddress},
+                    ircname => $record->{ircname},
+                    server  => $record->{server},
+                };
             }
             last SWITCH;
         }
@@ -9276,7 +9454,17 @@ sub _daemon_peer_quit {
     $self->{state}{stats}{ops_online}-- if $record->{umode} =~ /o/;
     $self->{state}{stats}{invisible}-- if $record->{umode} =~ /i/;
     delete $self->{state}{peers}{uc $record->{server}}{users}{$nick};
-
+    unshift @{ $self->{state}{whowas}{$nick} }, {
+        logoff  => time(),
+        account => $record->{account},
+        nick    => $record->{nick},
+        user    => $record->{auth}{ident},
+        host    => $record->{auth}{hostname},
+        real    => $record->{auth}{realhost},
+        sock    => $record->{ipaddress},
+        ircname => $record->{ircname},
+        server  => $record->{server},
+    };
     return @$ref if wantarray;
     return $ref;
 }
@@ -9622,6 +9810,17 @@ sub _daemon_peer_nick {
             if ( $record->{umode} =~ /r/ ) {
                 $record->{umode} =~ s/r//g;
             }
+            unshift @{ $self->{state}{whowas}{$unick} }, {
+                logoff  => time(),
+                account => $record->{account},
+                nick    => $nick,
+                user    => $record->{auth}{ident},
+                host    => $record->{auth}{hostname},
+                real    => $record->{auth}{realhost},
+                sock    => $record->{ipaddress},
+                ircname => $record->{ircname},
+                server  => $record->{server},
+            };
         }
         my $common = { };
         for my $chan (keys %{ $record->{chans} }) {
@@ -11716,7 +11915,51 @@ sub _daemon_peer_svsnick {
         else {
             $rec->{nick} = $newnick;
             $rec->{ts}   = $newts;
-            # TODO: WATCH ON/OFF
+            # WATCH ON/OFF
+            if ( defined $self->{state}{watches}{$unick} ) {
+                foreach my $wuid ( keys %{ $self->{state}{watches}{$unick}{uids} } ) {
+                    next if !defined $self->{state}{uids}{$wuid};
+                    my $wrec = $self->{state}{uids}{$wuid};
+                    my $laston = time();
+                    $self->{state}{watches}{$unick}{laston} = $laston;
+                    $self->send_output(
+                        {
+                            prefix  => $rec->{server},
+                            command => '605',
+                            params  => [
+                                $wrec->{nick},
+                                $nick,
+                                $rec->{auth}{ident},
+                                $rec->{auth}{hostname},
+                                $laston,
+                                'is offline',
+                            ],
+                        },
+                        $wrec->{route_id},
+                    );
+                }
+            }
+            if ( defined $self->{state}{watches}{$unew} ) {
+                foreach my $wuid ( keys %{ $self->{state}{watches}{$unew}{uids} } ) {
+                    next if !defined $self->{state}{uids}{$wuid};
+                    my $wrec = $self->{state}{uids}{$wuid};
+                    $self->send_output(
+                        {
+                            prefix  => $rec->{server},
+                            command => '604',
+                            params  => [
+                                $wrec->{nick},
+                                $rec->{nick},
+                                $rec->{auth}{ident},
+                                $rec->{auth}{hostname},
+                                $rec->{ts},
+                                'is online',
+                            ],
+                        },
+                        $wrec->{route_id},
+                    );
+                }
+            }
             # Remove from peoples accept lists
             for (keys %{ $rec->{accepts} }) {
                 delete $self->{state}{users}{$_}{accepts}{$unick};
@@ -11740,6 +11983,17 @@ sub _daemon_peer_svsnick {
                     $rec->{route_id},
                 );
             }
+            unshift @{ $self->{state}{whowas}{$unick} }, {
+                logoff  => time(),
+                account => $rec->{account},
+                nick    => $nick,
+                user    => $rec->{auth}{ident},
+                host    => $rec->{auth}{hostname},
+                real    => $rec->{auth}{realhost},
+                sock    => $rec->{socket}[0],
+                ircname => $rec->{ircname},
+                server  => $rec->{server},
+            };
         }
 
         $self->_send_to_realops(

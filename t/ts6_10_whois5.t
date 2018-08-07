@@ -91,6 +91,7 @@ sub ircd_listener_add {
         type  => 'c',
         zip   => 1,
     );
+    $heap->{ircd}->add_service('groucho.server.irc');
     foreach my $tag ( qw[groucho harpo] ) {
       my $filter = POE::Filter::Stackable->new();
       $filter->push( POE::Filter::Line->new( InputRegexp => '\015?\012', OutputLiteral => "\015\012" ),
@@ -134,7 +135,9 @@ sub groucho_connected {
   $kernel->post( $sender, 'send_to_server', { command => 'SVINFO', params => [ '6', '6', '0', time() ], colonify => 1 } );
   $uidts = time() - 20;
   $kernel->post( $sender, 'send_to_server', { prefix => '7UP', command => 'SID', params => [ 'fake.server.irc', 2, '4AK', 'This is a fake server' ] } );
-  $kernel->post( $sender, 'send_to_server', { prefix => '7UP', command => 'UID', params => [ 'groucho', '1', $uidts, '+aiow', 'groucho', 'groucho.marx', '0', '7UPAAAAAA', '0', 'Groucho Marx' ], colonify => 1 } );
+  $kernel->post( $sender, 'send_to_server', { prefix => '7UP', command => 'UID', params => [ 'groucho', '1', $uidts, '+aiowy', 'groucho', 'groucho.marx', '0', '7UPAAAAAA', '0', 'Groucho Marx' ], colonify => 1 } );
+  $kernel->post( $sender, 'send_to_server', { prefix => '7UP', command => 'SVSTAG', params => [ '7UPAAAAAA', $uidts, '313', '+', q{is a rock'n'roll messiah}, ], colonify => 1 } );
+  $kernel->post( $sender, 'send_to_server', { prefix => '7UP', command => 'SJOIN', params => [ ( time - 100 ), '#marxbros', '+nt', '@7UPAAAAAA' ], colonify => 1 } );
   $kernel->post( $sender, 'send_to_server', { command => 'EOB', prefix => '7UP' } );
   $kernel->post( $sender, 'send_to_server', { command => 'EOB', prefix => '4AK' } );
   $kernel->post( $sender, 'send_to_server', { command => 'PING', params => [ '7UP' ], colonify => 1 } );
@@ -169,7 +172,7 @@ sub client_input {
   if ( $cmd eq 'ERROR' ) {
     pass($cmd);
     my $state = $heap->{ircd}{state};
-    is( scalar keys %{ $state->{chans} }, 0, 'No channels' );
+    is( scalar keys %{ $state->{chans} }, 1, 'One channel' );
     is( scalar keys %{ $state->{conns} }, 2, 'Should only be 2 connections' );
     is( scalar keys %{ $state->{uids} }, 2, 'Two UIDs' );
     is( scalar keys %{ $state->{users} }, 2, 'Two users' );
@@ -185,7 +188,7 @@ sub client_input {
     is( $params->[0], '#potato', 'Channel is #potato' );
 
     my $state = $heap->{ircd}{state};
-    is( scalar keys %{ $state->{chans} }, 1, 'Should be 1 channel' );
+    is( scalar keys %{ $state->{chans} }, 2, 'Should be 2 channels' );
     is( scalar keys %{ $state->{conns} }, 3, 'Should be 3 connections' );
     is( scalar keys %{ $state->{uids} }, 3, 'Three UIDs' );
     is( scalar keys %{ $state->{users} }, 3, 'Three users' );
@@ -226,7 +229,7 @@ sub client_input {
     is( $params->[0], 'bobbins', 'It is me, bobbins' );
     is( $params->[1], '#potato', 'Channel name is #potato' );
     like( $params->[2], qr/\d+/, 'Looks like a timestamp' );
-    $poe_kernel->post( $sender, 'send_to_server', { command => 'WHOIS', params => [ 'bobbins' ] } );
+    $poe_kernel->post( 'groucho', 'send_to_server', { prefix => '7UPAAAAAA', command => 'WHOIS', params => [ '1FU', 'bobbins' ] } );
     return;
   }
   if ( $cmd eq 'PART' ) {
@@ -234,63 +237,6 @@ sub client_input {
     is( $prefix, 'bobbins!~bobbins@listen.server.irc', 'It is I, bobbins' );
     is( $params->[0], '#potato', 'Channel name is #potato' );
     is( $params->[1], 'Suckers', 'So long suckers' );
-    $poe_kernel->post( $sender, 'send_to_server', { command => 'QUIT', params => [ 'Connection reset by fear' ] } );
-    return;
-  }
-  if ( $cmd eq '311' ) {
-    pass("IRC$cmd");
-    is( $prefix, 'listen.server.irc', 'Our server: listen.server.irc' );
-    is( $params->[0], 'bobbins', 'It is me, bobbins' );
-    is( $params->[1], 'bobbins', 'The nick is okay' );
-    is( $params->[2], '~bobbins', 'Username is okay' );
-    is( $params->[3], 'listen.server.irc', 'Hostname is okay' );
-    is( $params->[4], '*', 'Should be an asterix the gaul' );
-    is( $params->[5], 'bobbins along', 'Witty remark all present and correct' );
-    return;
-  }
-  if ( $cmd eq '319' ) {
-    pass("IRC$cmd");
-    is( $prefix, 'listen.server.irc', 'Our server: listen.server.irc' );
-    is( $params->[0], 'bobbins', 'It is me, bobbins' );
-    is( $params->[1], 'bobbins', 'It is him, bobbins' );
-    is( $params->[2], '@#potato', 'Channel list is correct' );
-    return;
-  }
-  if ( $cmd eq '312' ) {
-    pass("IRC$cmd");
-    is( $prefix, 'listen.server.irc', 'Our server: listen.server.irc' );
-    is( $params->[0], 'bobbins', 'It is me, bobbins' );
-    is( $params->[1], 'bobbins', 'It is him, bobbins' );
-    is( $params->[2], 'listen.server.irc', 'Their server: listen.server.irc' );
-    is( $params->[3], 'Poco? POCO? POCO!', 'Default server description' );
-    return;
-  }
-  if ( $cmd eq '338' ) {
-    pass("IRC$cmd");
-    is( $prefix, 'listen.server.irc', 'Our server: listen.server.irc' );
-    is( $params->[0], 'bobbins', 'It is me, bobbins' );
-    is( $params->[1], 'bobbins', 'It is him, bobbins' );
-    is( $params->[2], '~bobbins@listen.server.irc', '~bobbins@listen.server.irc' );
-    is( $params->[3], '127.0.0.1', 'IP address' );
-    is( $params->[4], 'Actual user@host, actual IP', 'Actual user@host, actual IP' );
-    return;
-  }
-  if ( $cmd eq '317' ) {
-    pass("IRC$cmd");
-    is( $prefix, 'listen.server.irc', 'Our server: listen.server.irc' );
-    is( $params->[0], 'bobbins', 'It is me, bobbins' );
-    is( $params->[1], 'bobbins', 'It is him, bobbins' );
-    like( $params->[2], qr/^\d+$/, 'Should be a number: idle' );
-    like( $params->[3], qr/^\d+$/, 'Should be a number: signon' );
-    is( $params->[4], 'seconds idle, signon time', 'seconds idle, signon time' );
-    return;
-  }
-  if ( $cmd eq '318' ) {
-    pass("IRC$cmd");
-    is( $prefix, 'listen.server.irc', 'Our server: listen.server.irc' );
-    is( $params->[0], 'bobbins', 'It is me, bobbins' );
-    is( $params->[1], 'bobbins', 'It is him, bobbins' );
-    is( $params->[2], 'End of /WHOIS list.', 'End of /WHOIS list.' );
     $poe_kernel->post( $sender, 'send_to_server', { command => 'QUIT', params => [ 'Connection reset by fear' ] } );
     return;
   }
@@ -332,6 +278,15 @@ sub groucho_input {
     $poe_kernel->post( $sender, 'terminate' );
     return;
   }
+  if ( $cmd eq '318' ) {
+    pass("IRC$cmd");
+    is( $prefix, '1FU', 'Server: listen.server.irc' );
+    is( $params->[0], '7UPAAAAAA', 'It is me, groucho' );
+    is( $params->[1], 'bobbins', 'It is them, bobbins' );
+    is( $params->[2], 'End of /WHOIS list.', 'End of /WHOIS list.' );
+    $poe_kernel->post( 'client', 'send_to_server', { command => 'QUIT', params => [ 'Connection reset by fear' ] } );
+    return;
+  }
   return;
 }
 
@@ -341,15 +296,6 @@ sub harpo_input {
   my $prefix = $in->{prefix};
   my $cmd    = $in->{command};
   my $params = $in->{params};
-  if ( $cmd eq 'SJOIN' ) {
-    pass($cmd);
-    is( $prefix, '1FU', 'Correct prefix: 1FU' );
-    like( $params->[0], qr/\d+/, 'Looks like a timestamp' );
-    is( $params->[1], '#potato', 'Channel is correct: #potato' );
-    is( $params->[2], '+nt', 'Correct chanmodes applied: +nt' );
-    is( $params->[3], '@1FUAAAAAA', 'Got a correct UID + status: @1FUAAAAAA' );
-    return;
-  }
   if ( $cmd eq 'PART' ) {
     pass($cmd);
     is( $prefix, '1FUAAAAAA', 'Correct prefix: 1FUAAAAAAA' );
