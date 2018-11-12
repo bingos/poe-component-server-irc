@@ -14798,21 +14798,6 @@ sub _send_output_to_client {
     return 1;
 }
 
-=for comment
-
-  _send_output_channel_local()
-
-  Args:
-
-  0 channel
-  1 hashref to be sent
-  2 (opt) a connection id to not send to
-  3 (opt) only send to people with this status (ohv) or prefixed with - not to those
-  4 positive CAP, we will send to people with this CAP (can be an ARRAYREF)
-  5 negative CAP, we won't send to people with this CAP (can be an ARRAYREF)
-
-=cut
-
 sub _send_output_channel_local {
     my $self    = shift;
     my $channel = shift || return;
