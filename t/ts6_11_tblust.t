@@ -21,7 +21,10 @@ my $pocosi = POE::Component::Server::IRC->spawn(
     auth         => 0,
     antiflood    => 0,
     plugin_debug => 1,
-    config => { servername => 'listen.server.irc', sid => '1FU', anti_spam_exit_message_time => 0 },
+    config => { servername => 'listen.server.irc', sid => '1FU', anti_spam_exit_message_time => 0,
+      hidden_servers => '*.server.irc',
+      NETWORKDESC => 'This is not a network',
+    },
 );
 
 POE::Session->create(
@@ -251,7 +254,7 @@ sub client_input {
   }
   if ( $cmd eq 'TOPIC' ) {
     pass($cmd);
-    is( $prefix, 'groucho.server.irc', 'It is the server' );
+    is( $prefix, 'listen.server.irc', 'It is the server' );
     is( $params->[0], '#marxbros', 'Channel name is #marxbros' );
     is( $params->[1], 'Professor Quincy Adams Wagstaff', 'TOPIC unset on server burst' );
     return;

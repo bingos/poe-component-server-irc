@@ -3767,7 +3767,8 @@ sub _daemon_cmd_undline {
 sub _daemon_cmd_kill {
     my $self   = shift;
     my $nick   = shift || return;
-    my $server = $self->server_name();
+    my $server = ( $self->{config}{'hidden_servers'} ?
+                   $self->{config}{'hidden_servers'} : $self->server_name() );
     my $ref    = [ ];
     my $args   = [@_];
     my $count  = @$args;
@@ -6298,14 +6299,15 @@ sub _daemon_do_whois {
         };
     }
     # RPL_WHOISSERVER
+    my $hidden = ( $self->{config}{'hidden_servers'} && ( $querier->{umode} !~ /o/ || $uid ne $query ) );
     push @$ref, {
         prefix  => $sid,
         command => '312',
         params  => [
              $uid,
              $record->{nick},
-             $record->{server},
-             $self->_state_peer_desc($record->{server}),
+             ( $hidden ? $self->{config}{'hidden_servers'} : $record->{server} ),
+             ( $hidden ? $self->server_config('NETWORKDESC') : $self->_state_peer_desc($record->{server}) ),
         ],
     };
     # RPL_WHOISREGNICK
@@ -6570,7 +6572,9 @@ sub _daemon_do_whowas {
                 command => '312',
                 params  => [
                     $uid,
-                    $was->{nick}, $was->{server},
+                    $was->{nick},
+                    ( ( $self->{config}{'hidden_servers'} && !$is_oper )
+                      ? ( $self->{config}{'hidden_servers'}, $self->{config}{NETWORKDESC} ) : $was->{server} ),
                     strftime("%a %b %e %T %Y", localtime($was->{logoff})),
                 ],
             };
@@ -10874,7 +10878,8 @@ sub _daemon_peer_tburst {
       if ( !$differing ) {
         last SWITCH;
       }
-      my $whom = $self->_state_peer_name( $prefix ) || $self->state_user_full( $prefix ) || $self->server_name();
+      my $whom = ( $self->{config}{'hidden_servers'} ? $self->server_name() : $self->_state_sid_name( $prefix ) )
+                 || $self->state_user_full( $prefix ) || $self->server_name();
       $self->_send_output_channel_local(
         $chan,
         {
@@ -14493,6 +14498,7 @@ sub configure {
             ref($self) . '-' . (defined $VERSION ? $VERSION : 'dev-git');
         },
         NETWORK       => 'poconet',
+        NETWORKDESC   => 'poco mcpoconet',
         HOSTLEN       => 63,
         NICKLEN       => 9,
         USERLEN       => 10,
@@ -14533,6 +14539,7 @@ sub configure {
         floodtime                   => 1,
         joinfloodcount              => 18,
         joinfloodtime               => 6,
+        hidden_servers              => '',
     );
     $self->{config}{$_} = $defaults{$_} for keys %defaults;
 
@@ -14552,7 +14559,7 @@ sub configure {
     }
 
     for my $opt (keys %$opts) {
-      next if $opt !~ m!^(knock_|pace_|max_watch|max_bans_|oper_umode|max_nick|anti_|flood)!i;
+      next if $opt !~ m!^(knock_|pace_|max_watch|max_bans_|oper_umode|max_nick|anti_|flood|hidden_)!i;
       $self->{config}{lc $opt} = delete $opts->{$opt}
         if defined $opts->{$opt};
     }

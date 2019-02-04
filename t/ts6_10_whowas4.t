@@ -13,6 +13,42 @@ my %servers = (
  'fake.server.irc'     => '4AK',
 );
 
+my @whowas = (
+    {
+        logoff  => time() - 5000,
+        account => 'cowpig',
+        nick    => 'CowPig',
+        user    => 'moooink',
+        host    => 'fakey.fake.clom',
+        real    => 'some.random.host',
+        sock    => '192.168.1.88',
+        ircname => 'They call me, Mr CowPig',
+        server  => 'listen.server.irc',
+    },
+    {
+        logoff  => time() - 10000,
+        account => 'cowpig',
+        nick    => 'CowPig',
+        user    => 'moooink',
+        host    => 'fakey.fake.clom',
+        real    => 'some.random.host',
+        sock    => '192.168.1.88',
+        ircname => 'They call me, Mr CowPig',
+        server  => 'listen.server.irc',
+    },
+    {
+        logoff  => time() - 15000,
+        account => 'cowpig',
+        nick    => 'CowPig',
+        user    => 'moooink',
+        host    => 'fakey.fake.clom',
+        real    => 'some.random.host',
+        sock    => '192.168.1.88',
+        ircname => 'They call me, Mr CowPig',
+        server  => 'listen.server.irc',
+    },
+);
+
 my $ts = time();
 
 my $uidts;
@@ -21,7 +57,10 @@ my $pocosi = POE::Component::Server::IRC->spawn(
     auth         => 0,
     antiflood    => 0,
     plugin_debug => 1,
-    config => { servername => 'listen.server.irc', sid => '1FU', anti_spam_exit_message_time => 0 },
+    config => { servername => 'listen.server.irc', sid => '1FU', anti_spam_exit_message_time => 0,
+      hidden_servers => '*.server.irc',
+      NETWORKDESC => 'This is not a network',
+    },
 );
 
 POE::Session->create(
@@ -30,8 +69,6 @@ POE::Session->create(
             _start
             _shutdown
             _launch_client
-            _launch_groucho
-            _launch_harpo
             ircd_listener_add
             ircd_daemon_eob
             groucho_connected
@@ -93,30 +130,14 @@ sub ircd_listener_add {
         type  => 'c',
         zip   => 1,
     );
-    $poe_kernel->yield( '_launch_client' );
+    push @{ $heap->{ircd}{state}{whowas}{COWPIG} }, @whowas;
+    foreach my $tag ( qw[groucho harpo] ) {
+      my $filter = POE::Filter::Stackable->new();
+      $filter->push( POE::Filter::Line->new( InputRegexp => '\015?\012', OutputLiteral => "\015\012" ),
+                POE::Filter::IRCD->new( debug => 0 ), );
+      push @{ $heap->{testc} }, Test::POE::Client::TCP->spawn( alias => $tag, filter => $filter, address => '127.0.0.1', port => $port, prefix => $tag );
+    }
     return;
-}
-
-sub _launch_groucho {
-  my ($kernel,$heap) = @_[KERNEL,HEAP];
-  foreach my $tag ( qw[groucho] ) {
-      my $filter = POE::Filter::Stackable->new();
-      $filter->push( POE::Filter::Line->new( InputRegexp => '\015?\012', OutputLiteral => "\015\012" ),
-                POE::Filter::IRCD->new( debug => 0 ), );
-      push @{ $heap->{testc} }, Test::POE::Client::TCP->spawn( alias => $tag, filter => $filter, address => '127.0.0.1', port => $heap->{port}, prefix => $tag );
-   }
-   return;
-}
-
-sub _launch_harpo {
-  my ($kernel,$heap) = @_[KERNEL,HEAP];
-  foreach my $tag ( qw[harpo] ) {
-      my $filter = POE::Filter::Stackable->new();
-      $filter->push( POE::Filter::Line->new( InputRegexp => '\015?\012', OutputLiteral => "\015\012" ),
-                POE::Filter::IRCD->new( debug => 0 ), );
-      push @{ $heap->{testc} }, Test::POE::Client::TCP->spawn( alias => $tag, filter => $filter, address => '127.0.0.1', port => $heap->{port}, prefix => $tag );
-   }
-   return;
 }
 
 sub _launch_client {
@@ -146,7 +167,6 @@ sub client_connected {
 
 sub groucho_connected {
   my ($kernel,$heap,$sender) = @_[KERNEL,HEAP,SENDER];
-  my $chants = $heap->{ircd}{state}{chans}{'#MARXBROS'}{ts};
   pass($_[STATE]);
   $kernel->post( $sender, 'send_to_server', { command => 'PASS', params => [ 'foo', 'TS', '6', '7UP' ], } );
   $kernel->post( $sender, 'send_to_server', { command => 'CAPAB', params => [ 'KNOCK UNDLN DLN TBURST GLN ENCAP UNKLN KLN CHW IE EX HOPS SVS CLUSTER EOB QS' ], colonify => 1 } );
@@ -155,8 +175,6 @@ sub groucho_connected {
   $uidts = time() - 20;
   $kernel->post( $sender, 'send_to_server', { prefix => '7UP', command => 'SID', params => [ 'fake.server.irc', 2, '4AK', 'This is a fake server' ] } );
   $kernel->post( $sender, 'send_to_server', { prefix => '7UP', command => 'UID', params => [ 'groucho', '1', $uidts, '+aiow', 'groucho', 'groucho.marx', '0', '7UPAAAAAA', '0', 'Groucho Marx' ], colonify => 1 } );
-  $kernel->post( $sender, 'send_to_server', { prefix => '7UP', command => 'SJOIN', params => [ $chants, '#marxbros', '+nt', '@7UPAAAAAA' ], colonify => 1 } );
-  $kernel->post( $sender, 'send_to_server', { prefix => '7UP', command => 'TBURST', params => [ $chants, '#marxbros', $chants, 'groucho!groucho@groucho.marx', 'Professor Quincy Adams Wagstaff' ], colonify => 1 } );
   $kernel->post( $sender, 'send_to_server', { command => 'EOB', prefix => '7UP' } );
   $kernel->post( $sender, 'send_to_server', { command => 'EOB', prefix => '4AK' } );
   $kernel->post( $sender, 'send_to_server', { command => 'PING', params => [ '7UP' ], colonify => 1 } );
@@ -165,15 +183,13 @@ sub groucho_connected {
 
 sub harpo_connected {
   my ($kernel,$heap,$sender) = @_[KERNEL,HEAP,SENDER];
-  my $chants = $heap->{ircd}{state}{chans}{'#MARXBROS'}{ts};
   pass($_[STATE]);
   $kernel->post( $sender, 'send_to_server', { command => 'PASS', params => [ 'foo', 'TS', '6', '9T9' ], } );
   $kernel->post( $sender, 'send_to_server', { command => 'CAPAB', params => [ 'KNOCK UNDLN DLN TBURST GLN ENCAP UNKLN KLN CHW IE EX HOPS SVS CLUSTER EOB QS' ], colonify => 1 } );
   $kernel->post( $sender, 'send_to_server', { command => 'SERVER', params => [ 'harpo.server.irc', '1', 'Open the door and come in!!!!!!' ], colonify => 1 } );
   $kernel->post( $sender, 'send_to_server', { command => 'SVINFO', params => [ '6', '6', '0', time() ], colonify => 1 } );
-  $uidts = time() - 50;
+  $uidts = time() - 20;
   $kernel->post( $sender, 'send_to_server', { prefix => '9T9', command => 'UID', params => [ 'harpo', '1', $uidts, '+aiow', 'harpo', 'harpo.marx', '0', '9T9AAAAAA', '0', 'Harpo Marx' ], colonify => 1 } );
-  $kernel->post( $sender, 'send_to_server', { prefix => '7UP', command => 'SJOIN', params => [ $chants, '#marxbros', '+nt', '@9T9AAAAAA' ], colonify => 1 } );
   $kernel->post( $sender, 'send_to_server', { command => 'EOB', prefix => '9T9' } );
   $kernel->post( $sender, 'send_to_server', { command => 'PING', params => [ '9T9' ], colonify => 1 } );
   return;
@@ -187,86 +203,55 @@ sub client_input {
   my $cmd    = $in->{command};
   my $params = $in->{params};
   if ( $cmd eq 'MODE' && $prefix =~ m'^bobbins' && $params->[1] eq '+i' ) {
-    $poe_kernel->post( $sender, 'send_to_server', { command => 'JOIN', params => [ '#marxbros' ] } );
+    $poe_kernel->post( $sender, 'send_to_server', { command => 'WHOWAS', params => [ 'CowPig' ], colonify => 0 } );
     return;
   }
   if ( $cmd eq 'ERROR' ) {
     pass($cmd);
     my $state = $heap->{ircd}{state};
-    is( scalar keys %{ $state->{chans} }, 1, 'One channel' );
+    is( scalar keys %{ $state->{chans} }, 0, 'No channels' );
     is( scalar keys %{ $state->{conns} }, 2, 'Should only be 2 connections' );
     is( scalar keys %{ $state->{uids} }, 2, 'Two UIDs' );
     is( scalar keys %{ $state->{users} }, 2, 'Two users' );
     is( scalar keys %{ $state->{peers}{'LISTEN.SERVER.IRC'}{users} }, 0, 'No local users' );
     is( scalar keys %{ $state->{sids}{'1FU'}{uids} }, 0, 'No local UIDs' );
+    is( scalar keys %{ $state->{whowas} }, 2, 'Should be two WHOWAS entries' );
+    is( scalar @{ $state->{whowas}{'BOBBINS'} }, 1, 'There should be a WHOWAS record for bobbins' );
     $poe_kernel->post( $sender, 'shutdown' );
     $poe_kernel->post( 'harpo', 'terminate' );
     return;
   }
-  if ( $cmd eq 'JOIN' && $prefix =~ m!^bobbins! ) {
-    pass($cmd);
-    is( $prefix, 'bobbins!~bobbins@listen.server.irc', 'It is I, bobbins' );
-    is( $params->[0], '#marxbros', 'Channel is #marxbros' );
-
-    my $state = $heap->{ircd}{state};
-    is( scalar keys %{ $state->{chans} }, 1, 'Should be 1 channels' );
-    is( scalar keys %{ $state->{conns} }, 1, 'Should be 1 connections' );
-    is( scalar keys %{ $state->{uids} }, 1, 'One UID' );
-    is( scalar keys %{ $state->{users} }, 1, 'One user' );
-    is( scalar keys %{ $state->{peers}{'LISTEN.SERVER.IRC'}{users} }, 1, 'One local user' );
-    is( scalar keys %{ $state->{sids}{'1FU'}{uids} }, 1, 'One local UID' );
-
-    return;
-  }
-  if ( $cmd eq 'JOIN' && $prefix =~ m!^groucho! ) {
-    pass($cmd);
-    is( $prefix, 'groucho!groucho@groucho.marx', 'It is groucho!' );
-    is( $params->[0], '#marxbros', 'Channel is #marxbros' );
-
-    my $state = $heap->{ircd}{state};
-    is( scalar keys %{ $state->{chans} }, 1, 'Should be 1 channels' );
-    is( scalar keys %{ $state->{conns} }, 2, 'Should be 2 connections' );
-    is( scalar keys %{ $state->{uids} }, 2, 'Two UIDs' );
-    is( scalar keys %{ $state->{users} }, 2, 'Two users' );
-    is( scalar keys %{ $state->{peers}{'LISTEN.SERVER.IRC'}{users} }, 1, 'One local user' );
-    is( scalar keys %{ $state->{sids}{'1FU'}{uids} }, 1, 'One local UID' );
-    $poe_kernel->yield( '_launch_harpo' );
-    return;
-  }
-  if ( $cmd eq '353' ) {
+  if ( $cmd eq '314' ) {
     pass("IRC$cmd");
-    is( $params->[0], 'bobbins', 'It is me, bobbins' );
-    is( $params->[1], '=', 'Correct arg =' );
-    is( $params->[2], '#marxbros', 'Channel name is #marxbros' );
-    is( $params->[3], '@bobbins', 'I am chanop' );
+    is( $params->[0], 'bobbins', 'bobbins' );
+    is( $params->[1], 'CowPig', 'Targ is: CowPig' );
+    is( $params->[2], 'moooink', 'User is: moooink' );
+    is( $params->[3], 'fakey.fake.clom', 'Hostname is expected' );
+    is( $params->[4], '*', 'Fifth arg is an asterix the gaul' );
+    is( $params->[5], 'They call me, Mr CowPig', 'They call me, Mr CowPig' );
     return;
   }
-  if ( $cmd eq '366' ) {
+  if ( $cmd eq '330' ) {
     pass("IRC$cmd");
-    is( $params->[0], 'bobbins', 'It is me, bobbins' );
-    is( $params->[1], '#marxbros', 'Channel name is #marxbros' );
-    is( $params->[2], 'End of NAMES list', 'End of NAMES list' );
-    $poe_kernel->yield( '_launch_groucho' );
+    is( $params->[0], 'bobbins', 'bobbins' );
+    is( $params->[1], 'CowPig', 'Targ is: CowPig' );
+    is( $params->[2], 'cowpig', 'Account is cowpig' );
+    is( $params->[3], 'was logged in as', 'was logged in as' );
     return;
   }
-  if ( $cmd eq 'TOPIC' ) {
-    pass($cmd);
-    is( $prefix, 'groucho.server.irc', 'It is the server' );
-    is( $params->[0], '#marxbros', 'Channel name is #marxbros' );
-    is( $params->[1], 'Professor Quincy Adams Wagstaff', 'TOPIC unset on server burst' );
+  if ( $cmd eq '312' ) {
+    pass("IRC$cmd");
+    is( $params->[0], 'bobbins', 'bobbins' );
+    is( $params->[1], 'CowPig', 'Targ is: CowPig' );
+    is( $params->[2], '*.server.irc', 'Server name is okay' );
     return;
   }
-  if ( $cmd eq 'MODE' && $prefix eq 'listen.server.irc' ) {
-    pass($cmd);
-    if ( $params->[1] eq '-o' && $params->[2] eq 'bobbins' ) {
-      pass('bobbins was deopped on channel #marxbros');
-      return;
-    }
-    if ( $params->[1] eq '+o' && $params->[2] eq 'harpo' ) {
-      pass('harpo was opped on channel #marxbros');
-      $poe_kernel->post( $sender, 'send_to_server', { command => 'QUIT', params => [ 'Connection reset by fear' ] } );
-      return;
-    }
+  if ( $cmd eq '369' ) {
+    pass("IRC$cmd");
+    is( $params->[0], 'bobbins', 'bobbins' );
+    is( $params->[1], 'CowPig', 'Targ is: CowPig' );
+    is( $params->[2], 'End of WHOWAS', 'End of WHOWAS' );
+    $poe_kernel->post( $sender, 'send_to_server', { command => 'QUIT', params => [ 'Connection reset by fear' ] } );
     return;
   }
   return;
@@ -278,6 +263,22 @@ sub groucho_input {
   my $prefix = $in->{prefix};
   my $cmd    = $in->{command};
   my $params = $in->{params};
+  if ( $cmd eq 'SJOIN' ) {
+    pass($cmd);
+    is( $prefix, '1FU', 'Correct prefix: 1FU' );
+    like( $params->[0], qr/\d+/, 'Looks like a timestamp' );
+    is( $params->[1], '#potato', 'Channel is correct: #potato' );
+    is( $params->[2], '+nt', 'Correct chanmodes applied: +nt' );
+    is( $params->[3], '@1FUAAAAAA', 'Got a correct UID + status: @1FUAAAAAA' );
+    return;
+  }
+  if ( $cmd eq 'PART' ) {
+    pass($cmd);
+    is( $prefix, '1FUAAAAAA', 'Correct prefix: 1FUAAAAAAA' );
+    is( $params->[0], '#potato', 'Channel is correct: #potato' );
+    is( $params->[1], 'Suckers', 'There is a parting messge' );
+    return;
+  }
   if ( $cmd eq 'QUIT' ) {
     pass($cmd);
     is( $prefix, '1FUAAAAAA', 'Correct prefix: 1FUAAAAAAA' );
@@ -291,15 +292,6 @@ sub groucho_input {
     $poe_kernel->post( $sender, 'terminate' );
     return;
   }
-  # :1FU TBURST 1527886202 #marxbros 1527886202 bobbins!~bobbins@listen.server.irc :Here is what it is supposed to be!
-  if ( $cmd eq 'TBURST' ) {
-    pass($cmd);
-    is( $params->[1], '#marxbros', 'TBURST for #marxbros' );
-    like( $params->[2], qr/^\d+$/, 'Looks like a timestamp' );
-    is( $params->[3], 'bobbins!~bobbins@listen.server.irc', 'The TOPIC setter looks okay' );
-    is( $params->[4], 'Here is what it is supposed to be!', 'Here is what it is supposed to be!' );
-    return;
-  }
   return;
 }
 
@@ -309,6 +301,15 @@ sub harpo_input {
   my $prefix = $in->{prefix};
   my $cmd    = $in->{command};
   my $params = $in->{params};
+  if ( $cmd eq 'SJOIN' ) {
+    pass($cmd);
+    is( $prefix, '1FU', 'Correct prefix: 1FU' );
+    like( $params->[0], qr/\d+/, 'Looks like a timestamp' );
+    is( $params->[1], '#potato', 'Channel is correct: #potato' );
+    is( $params->[2], '+nt', 'Correct chanmodes applied: +nt' );
+    is( $params->[3], '@1FUAAAAAA', 'Got a correct UID + status: @1FUAAAAAA' );
+    return;
+  }
   if ( $cmd eq 'PART' ) {
     pass($cmd);
     is( $prefix, '1FUAAAAAA', 'Correct prefix: 1FUAAAAAAA' );
@@ -358,6 +359,9 @@ sub ircd_daemon_eob {
   }
   else {
     fail('No such server expected');
+  }
+  if ( $heap->{eob} >= 3 ) {
+      $poe_kernel->yield('_launch_client');
   }
   return;
 }
