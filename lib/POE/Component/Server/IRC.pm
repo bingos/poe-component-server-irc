@@ -591,7 +591,12 @@ sub _cmd_from_unknown {
             my $conn = $self->{state}{conns}{$wheel_id};
             $conn->{name} = $params->[0];
             $conn->{hops} = $params->[1] || 1;
-            $conn->{desc} = $params->[2] || '';
+            $conn->{desc} = $params->[2] || '(unknown location)';
+
+            if ( $conn->{desc} && $conn->{desc} =~ m!^\(H\) ! ) {
+                $conn->{hidden} = 1;
+                $conn->{desc} =~ s!^\(H\) !!;
+            }
 
             if (!$conn->{ts_server}) {
                 $self->_terminate_conn_error($wheel_id, 'Non-TS server.');
@@ -9324,6 +9329,10 @@ sub _daemon_peer_sid {
             peers => { },
             users => { },
         };
+        if ( $record->{desc} && $record->{desc} =~ m!^\(H\) ! ) {
+            $record->{hidden} = 1;
+            $record->{desc} =~ s!^\(H\) !!;
+        }
         $self->{state}{sids}{ $prefix }{sids}{ $record->{sid} } = $record;
         $self->{state}{sids}{ $record->{sid} } = $record;
         my $uname = uc $record->{name};
@@ -9338,7 +9347,8 @@ sub _daemon_peer_sid {
                     $record->{name},
                     $record->{hops} + 1,
                     $record->{sid},
-                    $record->{desc},
+                    ( $record->{hidden} ? '(H) ' : '' ) .
+                      $record->{desc},
                 ],
             },
             grep { $_ ne $peer_id } $self->_state_connected_peers(),
@@ -12867,10 +12877,18 @@ sub _state_send_credentials {
         $conn_id,
     );
 
+    my $desc = '';
+    $desc = '(H) ' if $self->{config}{hidden};
+    $desc .= $rec->{desc};
+
     $self->send_output(
         {
             command => 'SERVER',
-            params  => [$rec->{name}, $rec->{hops} + 1, $rec->{desc}],
+            params  => [
+                $rec->{name},
+                $rec->{hops} + 1,
+                $desc,
+            ],
         },
         $conn_id,
     );
@@ -13109,10 +13127,13 @@ sub _state_server_burst {
     for my $server (keys %{ $self->{state}{sids}{$peer}{sids} }) {
         next if $server eq $targ;
         my $rec = $self->{state}{sids}{$server};
+        my $desc = '';
+        $desc = '(H) ' if $rec->{hidden};
+        $desc .= $rec->{desc};
         push @$ref, {
             prefix  => $peer,
             command => 'SID',
-            params  => [$rec->{name}, $rec->{hops} + 1, $server, $rec->{desc}],
+            params  => [$rec->{name}, $rec->{hops} + 1, $server, $desc],
         };
         push @$ref, $_ for $self->_state_server_burst($rec->{sid}, $targ);
     }
@@ -13430,7 +13451,8 @@ sub _state_register_peer {
                 $record->{name},
                 $record->{hops} + 1,
                 $psid,
-                $record->{desc},
+                ( $record->{hidden} ? '(H) ' : '' ) .
+                  $record->{desc},
             ],
         },
         grep { $_ ne $conn_id } $self->_state_connected_peers(),
@@ -14540,6 +14562,7 @@ sub configure {
         joinfloodcount              => 18,
         joinfloodtime               => 6,
         hidden_servers              => '',
+        hidden                      => '',
     );
     $self->{config}{$_} = $defaults{$_} for keys %defaults;
 
@@ -14559,7 +14582,7 @@ sub configure {
     }
 
     for my $opt (keys %$opts) {
-      next if $opt !~ m!^(knock_|pace_|max_watch|max_bans_|oper_umode|max_nick|anti_|flood|hidden_)!i;
+      next if $opt !~ m!^(knock_|pace_|max_watch|max_bans_|oper_umode|max_nick|anti_|flood|hidden)!i;
       $self->{config}{lc $opt} = delete $opts->{$opt}
         if defined $opts->{$opt};
     }
