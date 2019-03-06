@@ -14540,7 +14540,6 @@ sub configure {
         MAXBANLENGTH  => 1024,
         AUTH          => 1,
         ANTIFLOOD     => 1,
-        WHOISACTUALLY => 1,
         OPHACKS       => 0,
         JOIN_LEAVE_COUNT_EXPIRE     => 120,
         OPER_SPAM_COUNTDOWN         => 5,
