@@ -418,7 +418,7 @@ sub _client_register {
                 $nick,
                 $server,
                 $version,
-                'DFGHRSWabcdefgijklnopqrsuwy',
+                'DFGHRSWXabcdefgijklnopqrsuwy',
                 'biklmnopstveIh',
                 'bkloveIh',
             ],
@@ -7654,13 +7654,13 @@ sub _daemon_cmd_umode {
         my $modestring = join('', @$args);
         $modestring =~ s/\s+//g;
         my $cnt += $modestring =~ s/[^a-zA-Z+-]+//g;
-        $cnt += $modestring =~ s/[^DFGHRSWabcdefgijklnopqrsuwy+-]+//g;
+        $cnt += $modestring =~ s/[^DFGHRSWXabcdefgijklnopqrsuwy+-]+//g;
 
         # These can only be set by servers/services
         $modestring =~ s/[SWr]+//g;
 
         # These can only be set by an OPER
-        $cnt += $modestring =~ s/[FHabcdefjklnsuy]+//g if $record->{umode} !~ /o/;
+        $cnt += $modestring =~ s/[FHXabcdefjklnsuy]+//g if $record->{umode} !~ /o/;
 
         push @$ref, ['501'] if $cnt;
 
@@ -12451,7 +12451,7 @@ sub _state_del_drkx_line {
       my $locops = sprintf 'Temporary %s for [%s] expired', $fancy, $mask;
       $self->del_denial( $res->{mask} ) if $type eq 'dlines';
       $self->send_event( "daemon_expired", lc($fancy), $mask );
-      $self->_send_to_realops( $locops, 'Notice', 's' );
+      $self->_send_to_realops( $locops, 'Notice', 'X' );
       return;
   }
 
@@ -14586,7 +14586,7 @@ sub configure {
         if defined $opts->{$opt};
     }
 
-    $self->{config}{oper_umode} =~ s/[^DFGHRSWabcdefgijklnopqrsuwy]+//g;
+    $self->{config}{oper_umode} =~ s/[^DFGHRSWXabcdefgijklnopqrsuwy]+//g;
     $self->{config}{oper_umode} =~ s/[SWori]+//g;
 
     for my $opt (keys %$opts) {
@@ -14942,7 +14942,7 @@ sub add_operator {
     }
 
     if ( $ref->{umode} ) {
-        $ref->{umode} =~ s/[^DFGHRSWabcdefgijklnopqrsuwy]+//g;
+        $ref->{umode} =~ s/[^DFGHRSWXabcdefgijklnopqrsuwy]+//g;
         $ref->{umode} =~ s/[SWori]+//g;
     }
 
