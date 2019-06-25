@@ -4895,10 +4895,12 @@ sub _daemon_do_time {
 sub _daemon_do_users {
     my $self   = shift;
     my $uid    = shift || return;
+    my $hidden = shift;
     my $sid    = $self->server_sid();
     my $ref    = [ ];
     my $global = keys %{ $self->{state}{uids} };
-    my $local  = keys %{ $self->{state}{sids}{$sid}{uids} };
+    my $local  = $hidden ? $global : scalar keys %{ $self->{state}{sids}{$sid}{uids} };
+    my $maxloc = $hidden ? 'maxglobal' : 'maxlocal';
 
     push @$ref, {
         prefix  => $sid,
@@ -4906,7 +4908,7 @@ sub _daemon_do_users {
         params  => [
             $uid,
             "Current local users: $local  Max: "
-                . $self->{state}{stats}{maxlocal},
+                . $self->{state}{stats}{$maxloc},
         ],
     };
 
@@ -5006,12 +5008,13 @@ sub _daemon_do_lusers {
     my $uid        = shift || return;
     my $sid        = $self->server_sid();
     my $ref        = [ ];
+    my $hidden     = ( $self->{config}{'hidden_servers'} && $self->{state}{uids}{$uid}{umode} !~ /o/ );
     my $invisible  = $self->{state}{stats}{invisible};
     my $users      = keys(%{ $self->{state}{uids} }) - $invisible;
-    my $servers    = keys %{ $self->{state}{sids} };
+    my $servers    = $hidden ? 1 : scalar keys %{ $self->{state}{sids} };
     my $chans      = keys %{ $self->{state}{chans} };
-    my $local      = keys %{ $self->{state}{sids}{$sid}{uids} };
-    my $peers      = keys %{ $self->{state}{sids}{$sid}{sids} };
+    my $local      = $hidden ? ( $users + $invisible ) : scalar keys %{ $self->{state}{sids}{$sid}{uids} };
+    my $peers      = $hidden ? 0 : scalar keys %{ $self->{state}{sids}{$sid}{sids} };
     my $totalconns = $self->{state}{stats}{conns_cumlative};
     my $mlocal     = $self->{state}{stats}{maxlocal};
     my $conns      = $self->{state}{stats}{maxconns};
@@ -5050,7 +5053,7 @@ sub _daemon_do_lusers {
         params  => [$uid, "I have $local clients and $peers servers"],
     };
 
-    push @$ref, $_ for $self->_daemon_do_users($uid);
+    push @$ref, $_ for $self->_daemon_do_users($uid, $hidden);
 
     push @$ref, {
         prefix  => $sid,
@@ -5059,7 +5062,7 @@ sub _daemon_do_lusers {
             $uid, "Highest connection count: $conns ($mlocal clients) "
                 . "($totalconns connections received)",
         ],
-    };
+    } if !$hidden;
 
     return @$ref if wantarray;
     return $ref;
