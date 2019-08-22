@@ -291,7 +291,7 @@ sub groucho_input {
   if ( $cmd eq 'SQUIT' ) {
     pass($cmd);
     is( $params->[0], '9T9', 'Correct SID: 9T9' );
-    is( $params->[1], 'Remote host closed the connection', 'Remote host closed the connection' );
+    like( $params->[1], qr/^(Remote host closed the connection|Connection reset by peer)$/, 'Remote host closed the connection' );
     $poe_kernel->post( $sender, 'terminate' );
     return;
   }
