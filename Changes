@@ -1,6 +1,8 @@
 Revision history for POE-Component-Server-IRC
 
 {{$NEXT}}
+
+1.55  Thu Aug 22 10:54:19 BST 2019
     - Added Net::CIDR support for netmasks
     - Full IPv6 support for all connections/listeners
     - Only supports TS6 protocol for server connections
