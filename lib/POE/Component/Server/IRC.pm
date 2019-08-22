@@ -9029,7 +9029,7 @@ sub _daemon_peer_eob {
         my $crec = $self->{state}{conns}{$peer_id};
         $self->_send_to_realops(
             sprintf(
-                'End of burst from %s (%ju seconds)',
+                'End of burst from %s (%u seconds)',
                 $crec->{name}, ( time() - $crec->{conn_time} ),
             ),
             'Notice',
