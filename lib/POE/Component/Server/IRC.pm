@@ -12798,7 +12798,7 @@ sub _state_auth_peer_conn {
 
     if (ref $peer->{ipmask} eq 'ARRAY') {
         for my $block ( @{ $peer->{ipmask} }) {
-            if ( $block->isa('Net::Netmask') ) {
+            if ( eval { $block->isa('Net::Netmask') } ) {
               return -3 if $block->match($client_ip);
               next;
             }
@@ -14401,7 +14401,7 @@ sub _state_o_line {
 
     if (ref $ops->{$user}{ipmask} eq 'ARRAY') {
         for my $block (@{ $ops->{$user}{ipmask} }) {
-            if ( $block->isa('Net::Netmask') ) {
+            if ( eval { $block->isa('Net::Netmask') } ) {
               return 1 if $block->match($client_ip);
               next;
             }
@@ -14934,7 +14934,7 @@ sub add_operator {
     if ( $ref->{ipmask} && $ref->{ipmask} eq 'ARRAY' ) {
       my @validated;
       foreach my $mask ( @{ $ref->{ipmask} } ) {
-        if ( $mask->isa('Net::Netmask' ) ) {
+        if ( eval { $mask->isa('Net::Netmask' ) } ) {
           push @validated, $mask;
           next;
         }
@@ -15043,7 +15043,7 @@ sub add_peer {
     if ( $parms->{ipmask} && $parms->{ipmask} eq 'ARRAY' ) {
       my @validated;
       foreach my $mask ( @{ $parms->{ipmask} } ) {
-        if ( $mask->isa('Net::Netmask' ) ) {
+        if ( eval { $mask->isa('Net::Netmask' ) } ) {
           push @validated, $mask;
           next;
         }

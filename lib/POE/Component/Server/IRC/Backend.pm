@@ -851,7 +851,7 @@ sub add_denial {
     my $netmask = shift || return;
     my $reason = shift || 'Denied';
 
-    if ( !$netmask->isa('Net::Netmask') ) {
+    if ( ! eval { $netmask->isa('Net::Netmask') } ) {
       $netmask = Net::CIDR::cidrvalidate( $netmask );
     }
 
@@ -908,7 +908,7 @@ sub denied {
     return if $self->exempted($ipaddr);
 
     for my $mask (keys %{ $self->{denials} }) {
-        if ($self->{denials}{$mask}{blk}->isa('Net::Netmask') && $self->{denials}{$mask}{blk}->match($ipaddr)) {
+        if ( eval { $self->{denials}{$mask}{blk}->isa('Net::Netmask') } && $self->{denials}{$mask}{blk}->match($ipaddr)) {
             return $self->{denials}{$mask}{reason};
         }
         elsif ( Net::CIDR::cidrlookup( $ipaddr, $self->{denials}{$mask}{blk} ) ) {
