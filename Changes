@@ -1,6 +1,8 @@
 Revision history for POE-Component-Server-IRC
 
 {{$NEXT}}
+
+1.57  Thu Aug 29 11:45:24 BST 2019
     - Account for race conditions in two tests
 
 1.56  Thu Aug 29 10:47:56 BST 2019
