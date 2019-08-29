@@ -1129,13 +1129,13 @@ the C<HELP> command.
 
 =head1 CONSTRUCTOR
 
-=item new
+=head2 new
 
 Creates a C<new> object.
 
 =head1 METHODS
 
-=item topic
+=head2 topic
 
 Takes a help topic. Returns C<undef> if there was an error or the topic
 does not exist. Returns in list context the lines of topic text or in
