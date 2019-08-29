@@ -1,6 +1,8 @@
 Revision history for POE-Component-Server-IRC
 
 {{$NEXT}}
+
+1.56  Thu Aug 29 10:47:56 BST 2019
     - Fix sprintf warnings
     - Fix test failures due to OS differences
     - Resolve issues with perl v5.10.1 (possibly others)
