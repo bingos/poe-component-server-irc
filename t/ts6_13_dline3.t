@@ -260,6 +260,7 @@ sub groucho_input {
     }
     else {
       is( $params->[1], 'Added temporary 10 min. D-Line [127.0.0.1/32]', 'Added temporary 10 min. D-Line [127.0.0.1/32]' );
+      $heap->{undline}++;
     }
   }
   return;
@@ -301,7 +302,6 @@ sub client_disconnected {
   pass($state);
   $poe_kernel->state('client_disconnected','main','client_disconnected2');
   $poe_kernel->state('client_input','main','client_input2');
-  $heap->{undline}++;
   $poe_kernel->post( 'groucho', 'send_to_server', { prefix => '7UPAAAAAA', command => 'UNDLINE', params => [ '*', '127.0.0.1/32' ], colonify => 0 } );
   return;
 }

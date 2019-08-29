@@ -257,6 +257,7 @@ sub groucho_input {
     }
     else {
       is( $params->[1], 'Added temporary 10 min. RESV [bobbins]', 'Added temporary 10 min. RESV [bobbins]' );
+      $heap->{unresv}++;
     }
   }
   return;
@@ -298,7 +299,6 @@ sub client_disconnected {
   pass($state);
   $poe_kernel->state('client_disconnected','main','client_disconnected2');
   $poe_kernel->state('client_input','main','client_input2');
-  $heap->{unresv}++;
   $poe_kernel->post( 'groucho', 'send_to_server', { prefix => '7UPAAAAAA', command => 'UNRESV', params => [ '*', 'bobbins' ], colonify => 0 } );
   return;
 }
