@@ -32,7 +32,7 @@ POE::Session->create(
             testc_disconnected
         )],
     ],
-    heap => { ircd => $pocosi, registered => 0, end => 0, shutdown => 0, 315 => 0, mode => 0 },
+    heap => { ircd => $pocosi, registered => 0, end => {}, shutdown => 0, 315 => 0, mode => 0 },
 );
 
 $poe_kernel->run();
@@ -120,14 +120,14 @@ sub testc_input {
       if ( $in->{params}[1] eq 'ACK' ) {
         is( $in->{params}[2], 'multi-prefix', 'ACK for capability' );
         $poe_kernel->post( $sender, 'send_to_server', { command => 'CAP', params => [ 'END' ], colonify => 0 } );
-        $heap->{end}++;
+        $heap->{end}{$nick}++;
         last SWITCH;
       }
     }
   }
   if ( $in->{command} eq '001' ) {
     $heap->{registered} = $reg = 1;
-    is( $heap->{end}, 3, 'Got registered after sending CAP END');
+    is( $heap->{end}{$nick}, 1, 'Got registered after sending CAP END');
     if ( $nick eq 'teapot' ) {
       $poe_kernel->post( $sender, 'send_to_server', { command => 'JOIN', params => [ '#nursery' ], colonify => 0 } );
       return;
