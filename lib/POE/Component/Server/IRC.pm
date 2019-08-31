@@ -16208,7 +16208,7 @@ Takes several arguments:
 =item * B<'name'>, (mandatory) the service name, eg. NickServ, this is
 used in error messages reported to users.
 
-=item *B<'target'>, (mandatory) the target for the command in nick!user@host
+=item * B<'target'>, (mandatory) the target for the command in nick!user@host
 format.
 
 =item * B<'prepend'>, (optional) text that will prepended to the user's
@@ -16888,6 +16888,8 @@ the channel)
 =item * C<ARG1>, the spoofed nick targeted or channel spoofed nick is in;
 
 =item * C<ARG2>, the message;
+
+=back
 
 =back
 
