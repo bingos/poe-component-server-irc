@@ -1,6 +1,13 @@
 Revision history for POE-Component-Server-IRC
 
 {{$NEXT}}
+    - Pod fixes
+    - capability tests tweaked to avoid race
+      conditions
+    - Added SSL test where client doesn't provide
+      a certificate
+    - BMASK slight refactor so it doesn't announce
+      masks that are already applied
 
 1.57  Thu Aug 29 11:45:24 BST 2019
     - Account for race conditions in two tests
