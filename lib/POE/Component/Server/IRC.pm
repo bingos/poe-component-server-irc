@@ -10783,24 +10783,28 @@ sub _daemon_peer_bmask {
                            grep { !$mode_u_set || $chanrec->{users}{$_} =~ /[oh]/ }
                            grep { $_ =~ m!^$sid! } keys %{ $chanrec->{users} };
         my @mask_list = split m!\s+!, $masks;
+        my @marsk_list;
         foreach my $marsk ( @mask_list ) {
             my $mask = normalize_mask($marsk);
             my $umask = uc_irc($mask);
+            next if $chanrec->{ $map{ $trype } }{$umask};
             $chanrec->{ $map{ $trype } }{$umask} =
               [ $mask, $server, time() ];
+            push @marsk_list, $marsk;
         }
         # Only bother with the next bit if we have local users on the channel
-        if ( !@local_users ) {
+        # OR masks to announce
+        if ( !@local_users || !@marsk_list ) {
           last SWITCH;
         }
         my @types;
-        push @types, "+$trype" for @mask_list;
+        push @types, "+$trype" for @marsk_list;
         my @output_modes;
         my $length = length($server) + 4
                      + length($chan) + 4;
         my @buffer = ('', '');
         for my $type (@types) {
-            my $arg = shift @mask_list;
+            my $arg = shift @marsk_list;
             my $mode_line = unparse_mode_line($buffer[0].$type);
             if (length(join ' ', $mode_line, $buffer[1],
                        $arg) + $length > 510) {
