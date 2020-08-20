@@ -10537,7 +10537,7 @@ sub _daemon_peer_tmode {
         $chan = $record->{name};
         my $mode_u_set = ( $record->{mode} =~ /u/ );
         my $full;
-        $full = $self->state_uid_full($uid)
+        $full = $self->state_user_full($uid)
             if $self->state_uid_exists($uid);
         my $reply;
         my @reply_args; my %subs;
