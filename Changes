@@ -1,6 +1,8 @@
 Revision history for POE-Component-Server-IRC
 
 {{$NEXT}}
+
+1.59  Thu Aug 20 16:58:31 BST 2020
     - Fix a bug in peer TMODE handling
 
 1.58  Tue Nov 26 20:51:37 GMT 2019
