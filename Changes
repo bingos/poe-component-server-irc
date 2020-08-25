@@ -1,6 +1,8 @@
 Revision history for POE-Component-Server-IRC
 
 {{$NEXT}}
+
+1.60  Tue Aug 25 21:30:09 BST 2020
     - Fixed crypt() issues with OpenBSD
 
 1.59  Thu Aug 20 16:58:31 BST 2020
