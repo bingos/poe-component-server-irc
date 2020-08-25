@@ -19,7 +19,11 @@ sub mkpasswd {
     return unix_md5_crypt($plain) if $opts{md5};
     return apache_md5_crypt($plain) if $opts{apache};
     my $salt = join '', ('.','/', 0..9, 'A'..'Z', 'a'..'z')[rand 64, rand 64];
-    return crypt($plain, $salt);
+    my $alg = '';
+    $alg = '$5$' if !defined(crypt("ab", $alg."cd"));
+    $alg = '$2b$12$FPWWO2RJ3CK4FINTw0Hi' if !defined(crypt("ab", $alg."cd"));
+    $alg = '' if !defined(crypt("ab", $alg."cd"));
+    return crypt($plain, $alg.$salt);
 }
 
 sub chkpasswd {
@@ -57,9 +61,13 @@ sub _bcrypt {
   my $salt  = shift;
   if ( !defined $salt ) {
     my $cost = sprintf('%02d', 6);
+    my $alg = '';
+    $alg = '$5$' if !defined(crypt("ab", $alg."cd"));
+    $alg = '$2b$12$FPWWO2RJ3CK4FINTw0Hi' if !defined(crypt("ab", $alg."cd"));
+    $alg = '' if !defined(crypt("ab", $alg."cd"));
     my $salty = sub {
       my $num = 999999;
-      my $cr = crypt( rand($num), rand($num) ) . crypt( rand($num), rand($num) );
+      my $cr = crypt( rand($num), $alg.rand($num) ) . crypt( rand($num), $alg.rand($num) );
       Crypt::Eksblowfish::Bcrypt::en_base64(substr( $cr, 4, 16 ));
     };
     $salt = join( '$', '$2a', $cost, $salty->() );

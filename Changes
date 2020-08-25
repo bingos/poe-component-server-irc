@@ -1,6 +1,7 @@
 Revision history for POE-Component-Server-IRC
 
 {{$NEXT}}
+    - Fixed crypt() issues with OpenBSD
 
 1.59  Thu Aug 20 16:58:31 BST 2020
     - Fix a bug in peer TMODE handling
