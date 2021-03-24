@@ -1,6 +1,8 @@
 Revision history for POE-Component-Server-IRC
 
 {{$NEXT}}
+
+1.61  Wed Mar 24 21:38:15 GMT 2021
     - Defanged debug for bmask test
 
 1.60  Tue Aug 25 21:30:09 BST 2020
