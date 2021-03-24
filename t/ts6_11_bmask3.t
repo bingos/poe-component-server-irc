@@ -243,7 +243,7 @@ sub harpo_connected {
 
 sub client_input {
   my ($heap,$sender,$in) = @_[HEAP,SENDER,ARG0];
-  diag($in->{raw_line}, "\n");
+  #diag($in->{raw_line}, "\n");
   my $prefix = $in->{prefix};
   my $cmd    = $in->{command};
   my $params = $in->{params};
