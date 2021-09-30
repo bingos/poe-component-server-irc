@@ -299,6 +299,7 @@ sub _get_ssl_info {
        my $bits = Net::SSLeay::get_cipher_bits($ssl);
        my $version = Net::SSLeay::version($ssl);
        my $ver =
+        $version == 0x0304 ? 'TLSv1_3' :
         $version == 0x0303 ? 'TLSv1_2' :
         $version == 0x0302 ? 'TLSv1_1' :
         $version == 0x0301 ? 'TLSv1'   :
