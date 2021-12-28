@@ -1,6 +1,8 @@
 Revision history for POE-Component-Server-IRC
 
 {{$NEXT}}
+
+1.62  Tue Dec 28 18:56:15 GMT 2021
     - Add TLSv1_3 definition
 
 1.61  Wed Mar 24 21:38:15 GMT 2021
