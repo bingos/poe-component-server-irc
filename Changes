@@ -1,6 +1,8 @@
 Revision history for POE-Component-Server-IRC
 
 {{$NEXT}}
+
+1.63  Mon Nov 20 23:28:53 GMT 2023
     - MAP output should include server IDs, for OPERs
 
 1.62  Tue Dec 28 18:56:15 GMT 2021
