@@ -7836,9 +7836,10 @@ sub _daemon_cmd_map {
     my $server = $self->server_name();
     my $sid    = $self->server_sid();
     my $ref    = [ ];
+    my $isoper = $self->state_user_is_operator($nick);
 
     SWITCH: {
-        if (!$self->state_user_is_operator($nick)) {
+        if ( !$isoper ) {
             my $lastuse = $self->{state}{lastuse}{map};
             my $pacewait = $self->{config}{pace_wait};
             if ( $lastuse && $pacewait && ( $lastuse + $pacewait ) > time() ) {
@@ -7856,7 +7857,7 @@ sub _daemon_cmd_map {
         $self->_send_to_realops( $msg, 'Notice', 'y' );
 
         push @$ref, $_ for
-            $self->_state_do_map( $nick, $sid, 0 );
+            $self->_state_do_map( $nick, $sid, $isoper, 0 );
 
         push @$ref, {
             prefix  => $server,
@@ -13277,6 +13278,7 @@ sub _state_do_map {
     my $self   = shift;
     my $nick   = shift || return;
     my $psid   = shift || return;
+    my $isoper = shift;
     my $plen   = shift;
     my $ctn    = shift;
     my $ref    = [ ];
@@ -13291,7 +13293,7 @@ sub _state_do_map {
         my $prompt = ' ' x $plen;
         substr $prompt, -2, 2, '|-' if $plen;
         substr $prompt, -2, 2, '`-' if !$ctn && $plen;
-        my $buffer = $rec->{name} . ' ';
+        my $buffer = $rec->{name} . ( $isoper ? "[$psid]" : '' ) . ' ';
         $buffer .= '-' x ( 64 - length($buffer) - length($prompt) );
         $buffer .= $suffix;
 
@@ -13318,7 +13320,7 @@ sub _state_do_map {
         my $sids = $self->{state}{sids}{$psid}{sids};
         my $cnt = keys %$sids;
         foreach my $server (sort { keys %{ $sids->{$a}{sids} } <=> keys %{ $sids->{$b}{sids} } } keys %$sids) {
-          push @$ref, $_ for $self->_state_do_map( $nick, $server, $plen + 2, --$cnt );
+          push @$ref, $_ for $self->_state_do_map( $nick, $server, $isoper, $plen + 2, --$cnt );
         }
     }
 

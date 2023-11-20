@@ -1,6 +1,7 @@
 Revision history for POE-Component-Server-IRC
 
 {{$NEXT}}
+    - MAP output should include server IDs, for OPERs
 
 1.62  Tue Dec 28 18:56:15 GMT 2021
     - Add TLSv1_3 definition
