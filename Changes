@@ -2,6 +2,9 @@ Revision history for POE-Component-Server-IRC
 
 {{$NEXT}}
 
+1.66  Mon Jul 7 02:58:43 BST 2025
+    - Bump Net::CIDR version required
+
 1.65  Mon Jul 7 02:50:19 BST 2025
     - Fix possible precedence problem warnings
 
