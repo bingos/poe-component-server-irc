@@ -14152,7 +14152,7 @@ sub _state_sid_route {
 sub _state_connected_peers {
     my $self = shift;
     my $server = uc $self->server_name();
-    return if !keys %{ $self->{state}{peers} } > 1;
+    return if !(keys %{ $self->{state}{peers} } > 1);
     my $record = $self->{state}{peers}{$server};
     return map { $record->{peers}{$_}{route_id} }
         keys %{ $record->{peers} };
@@ -14634,7 +14634,7 @@ sub configure {
 
     if (!defined $self->{config}{INFO}
             || ref $self->{config}{INFO} ne 'ARRAY'
-            || !@{ $self->{config}{INFO} } == 1) {
+            || !(@{ $self->{config}{INFO} } == 1)) {
         $self->{config}{INFO} = [split /\n/, <<'EOF'];
 # POE::Component::Server::IRC
 #
